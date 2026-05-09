@@ -8,6 +8,12 @@
 *.so
 *.dylib
 
+# Archives and local build output
+*.zip
+*.tar.gz
+
+dist/
+
 # Test binary, built with `go test -c`
 *.test
 
@@ -24,9 +30,15 @@ profile.cov
 go.work
 go.work.sum
 
-# env file
+# Env and generated data
 .env
+data/
 
 # Editor/IDE
-# .idea/
-# .vscode/
+.idea/
+.vscode/
+
+# Python cache from old plugin versions
+__pycache__/
+*.pyc
+*.pyo
