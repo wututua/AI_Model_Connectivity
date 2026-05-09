@@ -1,0 +1,151 @@
+version: "1"
+
+pipelines:
+  - name: build-and-test
+    triggers:
+      - event: push
+        branches:
+          - "*"
+    jobs:
+      - name: test
+        image: golang:1.22
+        steps:
+          - name: Cache go mod
+            use: go-mod-cache
+          - name: Cache go build
+            use: go-build-cache
+          - name: Test
+            run: |
+              go test ./...
+
+      - name: build-linux-amd64
+        image: golang:1.22
+        depends: test
+        steps:
+          - name: Cache go mod
+            use: go-mod-cache
+          - name: Cache go build
+            use: go-build-cache
+          - name: Build
+            run: |
+              mkdir -p dist
+              go build -trimpath -ldflags="-s -w" -o "dist/model-connectivity-linux-amd64" ./cmd/cg
+
+  - name: release
+    triggers:
+      - event: tag_push
+        tags:
+          - "v*"
+    jobs:
+      - name: test
+        image: golang:1.22
+        steps:
+          - name: Cache go mod
+            use: go-mod-cache
+          - name: Cache go build
+            use: go-build-cache
+          - name: Test
+            run: |
+              go test ./...
+
+      - name: build
+        image: golang:1.22
+        depends: test
+        strategy:
+          matrix:
+            include:
+              - goos: linux
+                goarch: amd64
+                ext: ""
+              - goos: linux
+                goarch: arm64
+                ext: ""
+              - goos: windows
+                goarch: amd64
+                ext: ".exe"
+              - goos: windows
+                goarch: arm64
+                ext: ".exe"
+              - goos: darwin
+                goarch: amd64
+                ext: ""
+              - goos: darwin
+                goarch: arm64
+                ext: ""
+        steps:
+          - name: Cache go mod
+            use: go-mod-cache
+          - name: Cache go build
+            use: go-build-cache
+          - name: Build
+            env:
+              GOOS: ${{ matrix.goos }}
+              GOARCH: ${{ matrix.goarch }}
+              CGO_ENABLED: "0"
+            run: |
+              mkdir -p dist
+              binary="model-connectivity-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}"
+              go build -trimpath -ldflags="-s -w" -o "dist/${binary}" ./cmd/cg
+          - name: Package
+            run: |
+              cd dist
+              asset="model-connectivity-${{ matrix.goos }}-${{ matrix.goarch }}"
+              cp ../.env.example .env.example
+              cp ../README.md README.md
+              if [ "${{ matrix.goos }}" = "windows" ]; then
+                zip "${asset}.zip" "${asset}.exe" ".env.example" "README.md"
+              else
+                tar -czf "${asset}.tar.gz" "${asset}" ".env.example" "README.md"
+              fi
+          - name: Upload artifact
+            use: artifact-upload
+            with:
+              name: "model-connectivity-${{ matrix.goos }}-${{ matrix.goarch }}"
+              path: |
+                dist/*.zip
+                dist/*.tar.gz
+
+      - name: publish-release
+        depends: build
+        image: ubuntu:latest
+        steps:
+          - name: Download all artifacts
+            use: artifact-download
+            with:
+              path: dist
+          - name: List artifacts
+            run: |
+              ls -la dist/
+              find dist/ -name "*.tar.gz" -o -name "*.zip" | sort
+          - name: Create Release
+            use: git:release
+          - name: Upload Linux amd64
+            run: |
+              cnb releases upload-file \
+                --tag "${CNB_TAG_REF_NAME}" \
+                --file "dist/model-connectivity-linux-amd64.tar.gz"
+          - name: Upload Linux arm64
+            run: |
+              cnb releases upload-file \
+                --tag "${CNB_TAG_REF_NAME}" \
+                --file "dist/model-connectivity-linux-arm64.tar.gz"
+          - name: Upload Windows amd64
+            run: |
+              cnb releases upload-file \
+                --tag "${CNB_TAG_REF_NAME}" \
+                --file "dist/model-connectivity-windows-amd64.zip"
+          - name: Upload Windows arm64
+            run: |
+              cnb releases upload-file \
+                --tag "${CNB_TAG_REF_NAME}" \
+                --file "dist/model-connectivity-windows-arm64.zip"
+          - name: Upload Darwin amd64
+            run: |
+              cnb releases upload-file \
+                --tag "${CNB_TAG_REF_NAME}" \
+                --file "dist/model-connectivity-darwin-amd64.tar.gz"
+          - name: Upload Darwin arm64
+            run: |
+              cnb releases upload-file \
+                --tag "${CNB_TAG_REF_NAME}" \
+                --file "dist/model-connectivity-darwin-arm64.tar.gz"
