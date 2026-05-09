@@ -18,6 +18,7 @@ func New(dataDir, webDir string) JSONStore {
 
 func (s JSONStore) LatestReportPath() string { return filepath.Join(s.DataDir, "latest_report.json") }
 func (s JSONStore) HistoryPath() string      { return filepath.Join(s.DataDir, "probe_history.json") }
+func (s JSONStore) NotifyStatePath() string  { return filepath.Join(s.DataDir, "notify_state.txt") }
 
 func ReadJSON[T any](path string, fallback T) (T, error) {
 	file, err := os.Open(path)

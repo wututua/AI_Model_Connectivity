@@ -14,6 +14,7 @@ type Config struct {
 	AppPort                   int
 	WebDir                    string
 	DataDir                   string
+	DatabasePath              string
 	DashboardTitle            string
 	TimeoutSeconds            float64
 	ModelListTimeoutSeconds   float64
@@ -37,17 +38,25 @@ type Config struct {
 	AutoCheckIntervalMaxHours float64
 	AutoCheckRunOnStart       bool
 	AdminToken                string
+	NotifyPlatform            string
+	NotifyWebhookURL          string
+	NotifyTelegramBotToken    string
+	NotifyTelegramChatID      string
+	NotifyOnRecovery          bool
+	NotifyCooldownMinutes     int
+	NotifyProviders           []string
+	NotifyModels              []string
 	Providers                 []ProviderConfig
 }
 
 type ProviderConfig struct {
-	ID      string
-	Name    string
-	Type    string
-	BaseURL string
-	APIKey  string
-	Models  []string
-	Enabled bool
+	ID      string   `json:"id"`
+	Name    string   `json:"name"`
+	Type    string   `json:"type"`
+	BaseURL string   `json:"base_url"`
+	APIKey  string   `json:"api_key,omitempty"`
+	Models  []string `json:"models"`
+	Enabled bool     `json:"enabled"`
 }
 
 func Load(path string) (Config, error) {
@@ -70,6 +79,10 @@ func Load(path string) (Config, error) {
 	cfg.AppPort = getInt(values, "APP_PORT", cfg.AppPort)
 	cfg.WebDir = cleanPath(getString(values, "WEB_DIR", cfg.WebDir))
 	cfg.DataDir = cleanPath(getString(values, "DATA_DIR", cfg.DataDir))
+	cfg.DatabasePath = cleanPath(getString(values, "DATABASE_PATH", cfg.DatabasePath))
+	if cfg.DatabasePath == "" {
+		cfg.DatabasePath = filepath.Join(cfg.DataDir, "cg.sqlite")
+	}
 	cfg.DashboardTitle = getString(values, "DASHBOARD_TITLE", cfg.DashboardTitle)
 	cfg.TimeoutSeconds = getFloat(values, "TIMEOUT_SECONDS", cfg.TimeoutSeconds)
 	cfg.ModelListTimeoutSeconds = getFloat(values, "MODEL_LIST_TIMEOUT_SECONDS", cfg.ModelListTimeoutSeconds)
@@ -93,6 +106,14 @@ func Load(path string) (Config, error) {
 	cfg.AutoCheckIntervalMaxHours = getFloat(values, "AUTO_CHECK_INTERVAL_MAX_HOURS", cfg.AutoCheckIntervalMaxHours)
 	cfg.AutoCheckRunOnStart = getBool(values, "AUTO_CHECK_RUN_ON_START", cfg.AutoCheckRunOnStart)
 	cfg.AdminToken = getString(values, "ADMIN_TOKEN", cfg.AdminToken)
+	cfg.NotifyPlatform = strings.ToLower(getString(values, "NOTIFY_PLATFORM", cfg.NotifyPlatform))
+	cfg.NotifyWebhookURL = getString(values, "NOTIFY_WEBHOOK_URL", cfg.NotifyWebhookURL)
+	cfg.NotifyTelegramBotToken = getString(values, "NOTIFY_TELEGRAM_BOT_TOKEN", cfg.NotifyTelegramBotToken)
+	cfg.NotifyTelegramChatID = getString(values, "NOTIFY_TELEGRAM_CHAT_ID", cfg.NotifyTelegramChatID)
+	cfg.NotifyOnRecovery = getBool(values, "NOTIFY_ON_RECOVERY", cfg.NotifyOnRecovery)
+	cfg.NotifyCooldownMinutes = max(0, getInt(values, "NOTIFY_COOLDOWN_MINUTES", cfg.NotifyCooldownMinutes))
+	cfg.NotifyProviders = splitList(getString(values, "NOTIFY_PROVIDERS", ""))
+	cfg.NotifyModels = splitList(getString(values, "NOTIFY_MODELS", ""))
 	cfg.Providers = loadProviders(values)
 	return cfg, nil
 }
@@ -122,6 +143,8 @@ func defaults() Config {
 		DayModeEndHour:            18,
 		AutoCheckIntervalMinHours: 0,
 		AutoCheckIntervalMaxHours: 0,
+		NotifyPlatform:            "webhook",
+		NotifyOnRecovery:          true,
 	}
 }
 
