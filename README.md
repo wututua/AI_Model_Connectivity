@@ -11,13 +11,19 @@
 - 记录历史、24h 平均延迟、统计窗口可用率
 - 提供 Web 仪表盘、状态 API 和 SSE 实时更新
 
-## 快速开始
+## 部署方式
+
+### 二进制部署
+
+1. 从 Release 下载对应平台的压缩包。
+2. 解压后得到可执行文件、`README.md` 和 `.env.example`。
+3. 复制并编辑配置文件：
 
 ```bash
 cp .env.example .env
 ```
 
-编辑 `.env`，至少配置一个 Provider：
+4. 至少配置一个 Provider：
 
 ```env
 PROVIDER_1_ID=openai-main
@@ -29,10 +35,32 @@ PROVIDER_1_MODELS=gpt-4o-mini,gpt-4.1-mini
 PROVIDER_1_ENABLED=true
 ```
 
-启动服务：
+5. 启动服务：
+
+```bash
+./model-connectivity
+```
+
+Windows 下直接运行 `model-connectivity.exe`。
+
+### 手动部署
+
+如果不使用 Release 包，也可以直接从源码运行：
+
+```bash
+cp .env.example .env
+```
+
+编辑 `.env` 后执行：
 
 ```bash
 go run ./cmd/cg
+```
+
+只运行一次检测：
+
+```bash
+go run ./cmd/cg check
 ```
 
 打开：
@@ -45,12 +73,6 @@ http://127.0.0.1:8080/
 
 ```bash
 curl -X POST http://127.0.0.1:8080/api/check
-```
-
-只运行一次检测：
-
-```bash
-go run ./cmd/cg check
 ```
 
 ## 配置
