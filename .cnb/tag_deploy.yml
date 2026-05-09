@@ -1,0 +1,4 @@
+environments:
+  - name: release
+    env:
+      tag_name: $CNB_BRANCH
