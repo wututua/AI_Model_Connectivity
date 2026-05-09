@@ -133,6 +133,7 @@ curl -X POST http://127.0.0.1:8080/api/check
 - `PROVIDER_CONCURRENCY`：单 Provider 最大并发
 - `MAX_MODELS_PER_PROVIDER`：每个 Provider 最多检测模型数，`0` 表示不限制
 - `SKIP_MODELS`：跳过模型，支持 `model`、`provider/model`、`provider::model`
+- `PROBE_PROMPT` / `PROBE_SYSTEM_PROMPT`：探测提示词
 
 ### 历史和显示
 

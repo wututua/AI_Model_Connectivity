@@ -14,8 +14,6 @@ type RuntimeSettings struct {
 	ProviderConcurrency       int      `json:"provider_concurrency"`
 	MaxModelsPerProvider      int      `json:"max_models_per_provider"`
 	SkipModels                []string `json:"skip_models"`
-	ProbePrompt               string   `json:"probe_prompt"`
-	ProbeSystemPrompt         string   `json:"probe_system_prompt"`
 	EnableHistory             bool     `json:"enable_history"`
 	ShowCurveChart            bool     `json:"show_curve_chart"`
 	StatsWindowDays           int      `json:"stats_window_days"`
@@ -88,8 +86,6 @@ func SettingsFromConfig(cfg Config) RuntimeSettings {
 		ProviderConcurrency:       cfg.ProviderConcurrency,
 		MaxModelsPerProvider:      cfg.MaxModelsPerProvider,
 		SkipModels:                append([]string(nil), cfg.SkipModels...),
-		ProbePrompt:               cfg.ProbePrompt,
-		ProbeSystemPrompt:         cfg.ProbeSystemPrompt,
 		EnableHistory:             cfg.EnableHistory,
 		ShowCurveChart:            cfg.ShowCurveChart,
 		StatsWindowDays:           cfg.StatsWindowDays,
@@ -132,8 +128,6 @@ func ApplyRuntimeSettings(cfg Config, settings RuntimeSettings) Config {
 	cfg.ProviderConcurrency = max(1, settings.ProviderConcurrency)
 	cfg.MaxModelsPerProvider = max(0, settings.MaxModelsPerProvider)
 	cfg.SkipModels = append([]string(nil), settings.SkipModels...)
-	cfg.ProbePrompt = settings.ProbePrompt
-	cfg.ProbeSystemPrompt = settings.ProbeSystemPrompt
 	cfg.EnableHistory = settings.EnableHistory
 	cfg.ShowCurveChart = settings.ShowCurveChart
 	cfg.StatsWindowDays = max(1, settings.StatsWindowDays)

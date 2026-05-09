@@ -42,6 +42,9 @@ func main() {
 	cfg := baseCfg
 	if ok {
 		cfg = config.ApplyRuntimeConfig(baseCfg, runtimeCfg)
+		if len(baseCfg.Providers) > 0 {
+			cfg.Providers = append([]config.ProviderConfig(nil), baseCfg.Providers...)
+		}
 	} else {
 		runtimeCfg = config.RuntimeConfigFromConfig(baseCfg)
 		if err := store.SaveRuntimeConfig(context.Background(), runtimeCfg); err != nil {

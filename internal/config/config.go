@@ -91,6 +91,8 @@ func Load(path string) (Config, error) {
 	cfg.ProviderConcurrency = max(1, getInt(values, "PROVIDER_CONCURRENCY", cfg.ProviderConcurrency))
 	cfg.MaxModelsPerProvider = max(0, getInt(values, "MAX_MODELS_PER_PROVIDER", cfg.MaxModelsPerProvider))
 	cfg.SkipModels = splitList(getString(values, "SKIP_MODELS", ""))
+	cfg.ProbePrompt = getString(values, "PROBE_PROMPT", cfg.ProbePrompt)
+	cfg.ProbeSystemPrompt = getString(values, "PROBE_SYSTEM_PROMPT", cfg.ProbeSystemPrompt)
 	cfg.EnableHistory = getBool(values, "ENABLE_HISTORY", cfg.EnableHistory)
 	cfg.ShowCurveChart = getBool(values, "SHOW_CURVE_CHART", cfg.ShowCurveChart)
 	cfg.StatsWindowDays = max(1, getInt(values, "STATS_WINDOW_DAYS", cfg.StatsWindowDays))
