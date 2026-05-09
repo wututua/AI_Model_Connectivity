@@ -93,6 +93,17 @@ jobs:
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
+          body: |
+            ## Release 说明
+
+            - 下载对应平台的压缩包
+            - 解压后可直接使用，其中包含二进制、`.env.example` 和 `README.md`
+            - 复制 `.env.example` 为 `.env`，填写至少一个 Provider 后启动程序
+
+            ## 启动方式
+
+            - 二进制包：直接运行 `model-connectivity` 或 `model-connectivity.exe`
+            - 源码运行：`go run ./cmd/cg`
           files: |
             dist/*.zip
             dist/*.tar.gz
