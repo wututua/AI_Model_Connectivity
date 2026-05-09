@@ -21,7 +21,7 @@ body { margin: 0; min-height: 100vh; font-family: Inter, ui-sans-serif, system-u
 .eyebrow { margin: 0 0 8px; color: var(--muted); text-transform: uppercase; letter-spacing: .16em; font-size: 12px; }
 h1 { margin: 0; font-size: clamp(34px, 7vw, 62px); letter-spacing: -.05em; }
 #subtitle { margin: 12px 0 0; color: var(--muted); }
-.status-pill, .provider-status, .model-status { border-radius: 999px; padding: 8px 13px; font-weight: 800; font-size: 12px; background: var(--card-strong); border: 1px solid var(--border); }
+.status-pill, .provider-status, .model-status { border-radius: 999px; padding: 8px 13px; font-weight: 800; font-size: 12px; background: var(--card-strong); border: 1px solid var(--border); white-space: nowrap; }
 .status-pill { font-size: 16px; padding: 14px 20px; }
 .ok { color: var(--ok); } .slow { color: var(--slow); } .error { color: var(--error); }
 .summary { display: grid; grid-template-columns: repeat(6, 1fr); gap: 14px; margin: 20px 0; }

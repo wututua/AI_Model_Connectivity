@@ -235,7 +235,12 @@ func shortError(err error) string {
 func sanitizeErrorText(text string) string {
 	if pos := strings.Index(text, `/v1/`); pos >= 0 {
 		if end := strings.Index(text[pos:], `"`); end >= 0 {
-			return `Post "` + text[pos:pos+end] + `"` + text[pos+end+1:]
+			text = `Post "` + text[pos:pos+end] + `"` + text[pos+end+1:]
+		}
+	}
+	if idx := strings.Index(text, `lookup `); idx >= 0 {
+		if end := strings.Index(text[idx+len(`lookup `):], `: no such host`); end >= 0 {
+			text = text[:idx+len(`lookup `)] + text[idx+len(`lookup `)+end:]
 		}
 	}
 	return text
