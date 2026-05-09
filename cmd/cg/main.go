@@ -21,11 +21,7 @@ import (
 	"cg/internal/web"
 )
 
-// Version is set at build time via -ldflags "-X cg/cmd/cg.Version=v1.0.4"
-var Version = "dev"
-
 func main() {
-	log.Printf("AI_Model_Connectivity version: %s", Version)
 	baseCfg, err := config.Load(".env")
 	if err != nil {
 		log.Fatalf("load config: %v", err)

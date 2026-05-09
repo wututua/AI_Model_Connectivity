@@ -29,7 +29,7 @@ pipelines:
           - name: Build
             run: |
               mkdir -p dist
-              go build -trimpath -ldflags="-s -w -X cg/cmd/cg.Version=${CNB_TAG_REF_NAME:-dev}" -o "dist/model-connectivity-linux-amd64" ./cmd/cg
+              go build -trimpath -ldflags="-s -w" -o "dist/model-connectivity-linux-amd64" ./cmd/cg
 
   - name: release
     triggers:
@@ -85,7 +85,7 @@ pipelines:
             run: |
               mkdir -p dist
               binary="model-connectivity-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}"
-              go build -trimpath -ldflags="-s -w -X cg/cmd/cg.Version=${CNB_TAG_REF_NAME:-dev}" -o "dist/${binary}" ./cmd/cg
+              go build -trimpath -ldflags="-s -w" -o "dist/${binary}" ./cmd/cg
           - name: Package
             run: |
               cd dist
