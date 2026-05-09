@@ -228,8 +228,25 @@ func durationSeconds(value float64) time.Duration {
 }
 
 func shortError(err error) string {
-	text := strings.TrimSpace(err.Error())
+	text := sanitizeErrorText(strings.TrimSpace(err.Error()))
 	return truncate(text, 300)
+}
+
+func sanitizeErrorText(text string) string {
+	if idx := strings.Index(text, `://`); idx >= 0 {
+		start := strings.LastIndex(text[:idx], `"`)
+		if start >= 0 {
+			if slash := strings.Index(text[idx+3:], `/`); slash >= 0 {
+				text = text[start+1+3+slash:]
+			}
+		}
+	}
+	if strings.HasPrefix(text, `Post "`) {
+		if pos := strings.Index(text, `/v1/`); pos >= 0 {
+			text = text[pos:]
+		}
+	}
+	return text
 }
 
 func truncate(text string, limit int) string {
