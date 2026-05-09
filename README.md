@@ -1,4 +1,4 @@
-# Model Connectivity
+# AI_Model_Connectivity
 
 一个用于检测 OpenAI 兼容模型接口连通性的独立 Web 状态页。
 
