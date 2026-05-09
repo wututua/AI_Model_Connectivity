@@ -96,10 +96,14 @@ func main() {
 			log.Fatal(err)
 		}
 	case <-ctx.Done():
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		app.StopCheck()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 		defer cancel()
-		if err := server.Shutdown(shutdownCtx); err != nil {
+		if err := server.Shutdown(shutdownCtx); err != nil && !errors.Is(err, context.DeadlineExceeded) {
 			log.Fatalf("shutdown server: %v", err)
+		}
+		if err := server.Close(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Fatalf("close server: %v", err)
 		}
 		if err := <-serverErr; err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatal(err)
@@ -250,6 +254,30 @@ func (a *application) ImportConfig(ctx context.Context, value config.ConfigImpor
 		return config.AdminConfig{}, err
 	}
 	return config.AdminConfigFromConfig(a.currentConfig()), nil
+}
+
+func (a *application) ReloadConfig(ctx context.Context) (config.AdminConfig, error) {
+	loaded, err := config.Load(".env")
+	if err != nil {
+		return config.AdminConfig{}, err
+	}
+	runtimeCfg, ok, err := a.store.LoadRuntimeConfig(ctx)
+	if err != nil {
+		return config.AdminConfig{}, err
+	}
+	cfg := loaded
+	if ok {
+		cfg = config.ApplyRuntimeConfig(loaded, runtimeCfg)
+		if len(loaded.Providers) > 0 {
+			cfg.Providers = append([]config.ProviderConfig(nil), loaded.Providers...)
+		}
+	}
+	a.mu.Lock()
+	a.baseCfg = loaded
+	a.cfg = cfg
+	a.mu.Unlock()
+	a.wakeScheduler()
+	return config.AdminConfigFromConfig(cfg), nil
 }
 
 func (a *application) ListTasks(ctx context.Context, query storage.TaskQuery) ([]storage.CheckTask, error) {

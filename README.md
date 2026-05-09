@@ -45,7 +45,7 @@ http://127.0.0.1:8080/
 5. 如果页面为空，先手动执行一次检测：
 
 ```bash
-curl -X POST http://127.0.0.1:8080/api/check
+curl -X POST http://127.0.0.1:8080/api/admin/check
 ```
 
 #### 二进制部署
@@ -107,7 +107,7 @@ http://127.0.0.1:8080/
 手动检测：
 
 ```bash
-curl -X POST http://127.0.0.1:8080/api/check
+curl -X POST http://127.0.0.1:8080/api/admin/check
 ```
 
 ## 配置
@@ -122,7 +122,7 @@ curl -X POST http://127.0.0.1:8080/api/check
 - `DATA_DIR`：数据目录，默认 `data`
 - `DATABASE_PATH`：SQLite 数据库路径，留空时默认 `DATA_DIR/cg.sqlite`
 - `DASHBOARD_TITLE`：页面标题
-- `ADMIN_TOKEN`：保护 `POST /api/check`。公开监听 `0.0.0.0` / `::` 时必须设置
+- `ADMIN_TOKEN`：保护 `POST /api/admin/check`。公开监听 `0.0.0.0` / `::` 时必须设置
 
 ### 探测
 
@@ -204,11 +204,70 @@ PROVIDER_2_ENABLED=true
 
 `PROVIDER_N_MODELS` 为空时，会尝试请求 `{BASE_URL}/models` 获取模型列表。
 
+Provider 图标会根据 `PROVIDER_N_ID`、`PROVIDER_N_TYPE`、`PROVIDER_N_NAME` 自动匹配。`PROVIDER_1_TYPE` 可参考以下内置图标键填写：
+
+```env
+PROVIDER_1_TYPE=openai
+# 可用图标键：
+# openai, azure, xai, anthropic, ollama, google, deepseek, modelscope, zhipu, nvidia,
+# siliconflow, moonshot, kimi, kimi-code, longcat, ppio, dify, coze, dashscope,
+# deerflow, fastgpt, lm_studio, fishaudio, minimax, minimax-token-plan, mimo,
+# 302ai, microsoft, vllm, groq, aihubmix, openrouter, tokenpony, compshare,
+# xinference, bailian, volcengine
+```
+
+对应参考代码：
+
+```go
+// internal/provider/icons.go
+var providerIcons = map[string]string{
+	"openai":             "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/openai.svg",
+	"azure":              "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/azure.svg",
+	"xai":                "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/xai.svg",
+	"anthropic":          "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/anthropic.svg",
+	"ollama":             "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/ollama.svg",
+	"google":             "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/gemini-color.svg",
+	"deepseek":           "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/deepseek.svg",
+	"modelscope":         "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/modelscope.svg",
+	"zhipu":              "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/zhipu.svg",
+	"nvidia":             "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/nvidia-color.svg",
+	"siliconflow":        "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/siliconcloud.svg",
+	"moonshot":           "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/kimi.svg",
+	"kimi":               "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/kimi.svg",
+	"kimi-code":          "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/kimi.svg",
+	"longcat":            "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/longcat-color.svg",
+	"ppio":               "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/ppio.svg",
+	"dify":               "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/dify-color.svg",
+	"coze":               "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@1.66.0/icons/coze.svg",
+	"dashscope":          "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/alibabacloud-color.svg",
+	"deerflow":           "https://cdn.jsdelivr.net/gh/bytedance/deer-flow@main/frontend/public/images/deer.svg",
+	"fastgpt":            "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/fastgpt-color.svg",
+	"lm_studio":          "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/lmstudio.svg",
+	"fishaudio":          "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/fishaudio.svg",
+	"minimax":            "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/minimax.svg",
+	"minimax-token-plan": "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/minimax.svg",
+	"mimo":               "https://platform.xiaomimimo.com/favicon.874c9507.png",
+	"302ai":              "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@1.53.0/icons/ai302-color.svg",
+	"microsoft":          "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/microsoft.svg",
+	"vllm":               "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/vllm.svg",
+	"groq":               "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/groq.svg",
+	"aihubmix":           "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/aihubmix-color.svg",
+	"openrouter":         "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/openrouter.svg",
+	"tokenpony":          "https://tokenpony.cn/tokenpony-web/logo.png",
+	"compshare":          "https://compshare.cn/favicon.ico",
+	"xinference":         "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/xinference-color.svg",
+	"bailian":            "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/bailian-color.svg",
+	"volcengine":         "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/volcengine-color.svg",
+}
+```
+
+匹配优先级为 Provider ID、Type、Name；也支持前缀或按 `_`、`-`、空格拆分后的关键词匹配。例如 `PROVIDER_1_TYPE=openai` 会匹配 `openai` 图标。
+
 ## API
 
 - `GET /health`：健康检查
 - `GET /api/status`：最新状态
-- `POST /api/check`：触发检测
+- `POST /api/admin/check`：触发检测
 - `GET /api/events`：SSE 实时更新
 - `GET /`：Web 仪表盘
 
@@ -230,6 +289,7 @@ PROVIDER_2_ENABLED=true
 - `GET /api/admin/tasks/{id}`：查看任务详情
 - `GET /api/admin/config/export`：导出配置，不包含密钥
 - `POST /api/admin/config/import`：导入配置并保存到 SQLite
+- `POST /api/admin/config/reload`：重新读取 `.env` 并热加载到运行时配置
 
 `.env` 仍作为初始配置来源；后台修改会保存到 SQLite，重启后继续生效。
 

@@ -30,6 +30,7 @@ type AdminController interface {
 	DeleteProvider(context.Context, string) error
 	ExportConfig(context.Context) (config.ConfigExport, error)
 	ImportConfig(context.Context, config.ConfigImport) (config.AdminConfig, error)
+	ReloadConfig(context.Context) (config.AdminConfig, error)
 	ListTasks(context.Context, storage.TaskQuery) ([]storage.CheckTask, error)
 	GetTask(context.Context, int64) (storage.CheckTask, error)
 }
@@ -97,7 +98,7 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", s.health)
 	mux.HandleFunc("/api/status", s.status)
-	mux.HandleFunc("/api/check", s.checkNow)
+	mux.HandleFunc("/api/admin/check", s.checkNow)
 	mux.HandleFunc("/api/events", s.events)
 	mux.HandleFunc("/api/admin/detection", s.adminDetection)
 	mux.HandleFunc("/api/admin/detection/start", s.adminDetectionStart)
@@ -105,6 +106,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/admin/config", s.adminConfig)
 	mux.HandleFunc("/api/admin/config/export", s.adminConfigExport)
 	mux.HandleFunc("/api/admin/config/import", s.adminConfigImport)
+	mux.HandleFunc("/api/admin/config/reload", s.adminConfigReload)
 	mux.HandleFunc("/api/admin/settings", s.adminSettings)
 	mux.HandleFunc("/api/admin/providers", s.adminProviders)
 	mux.HandleFunc("/api/admin/providers/", s.adminProviderItem)
@@ -341,6 +343,29 @@ func (s *Server) adminConfigImport(w http.ResponseWriter, r *http.Request) {
 	}
 	result, err := s.admin.ImportConfig(r.Context(), value)
 	writeResult(w, result, err)
+}
+
+func (s *Server) adminConfigReload(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdmin(w, r) {
+		return
+	}
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w)
+		return
+	}
+	result, err := s.admin.ReloadConfig(r.Context())
+	if err == nil {
+		go s.checkAfterReload()
+	}
+	writeResult(w, result, err)
+}
+
+func (s *Server) checkAfterReload() {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	defer cancel()
+	if _, err := s.check(ctx); err != nil {
+		log.Printf("reload check failed: %v", err)
+	}
 }
 
 func (s *Server) adminTasks(w http.ResponseWriter, r *http.Request) {

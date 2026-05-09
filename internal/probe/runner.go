@@ -133,10 +133,20 @@ func (r *Runner) probeTargets(ctx context.Context, targets []Target) []Result {
 		wg.Add(1)
 		go func(index int, target Target) {
 			defer wg.Done()
-			globalLimit <- struct{}{}
-			defer func() { <-globalLimit }()
-			providerLimits[target.ProviderID] <- struct{}{}
-			defer func() { <-providerLimits[target.ProviderID] }()
+			select {
+			case globalLimit <- struct{}{}:
+				defer func() { <-globalLimit }()
+			case <-ctx.Done():
+				results[index] = resultPayload(target, "error", 0, "", shortError(ctx.Err()))
+				return
+			}
+			select {
+			case providerLimits[target.ProviderID] <- struct{}{}:
+				defer func() { <-providerLimits[target.ProviderID] }()
+			case <-ctx.Done():
+				results[index] = resultPayload(target, "error", 0, "", shortError(ctx.Err()))
+				return
+			}
 			results[index] = r.probeOne(ctx, target)
 		}(i, target)
 	}
