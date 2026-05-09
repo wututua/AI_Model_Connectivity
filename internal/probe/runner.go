@@ -233,17 +233,9 @@ func shortError(err error) string {
 }
 
 func sanitizeErrorText(text string) string {
-	if idx := strings.Index(text, `://`); idx >= 0 {
-		start := strings.LastIndex(text[:idx], `"`)
-		if start >= 0 {
-			if slash := strings.Index(text[idx+3:], `/`); slash >= 0 {
-				text = text[start+1+3+slash:]
-			}
-		}
-	}
-	if strings.HasPrefix(text, `Post "`) {
-		if pos := strings.Index(text, `/v1/`); pos >= 0 {
-			text = text[pos:]
+	if pos := strings.Index(text, `/v1/`); pos >= 0 {
+		if end := strings.Index(text[pos:], `"`); end >= 0 {
+			return `Post "` + text[pos:pos+end] + `"` + text[pos+end+1:]
 		}
 	}
 	return text
