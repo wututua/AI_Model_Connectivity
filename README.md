@@ -4,154 +4,95 @@
 
 ## 功能
 
-- 检测 `/v1/chat/completions` 和 `/v1/models`
-- 支持多个 Provider 和多个模型
-- 支持全局并发、单 Provider 并发、跳过指定模型
-- 展示正常、较慢、异常状态
-- 记录历史、24h 平均延迟、统计窗口可用率
-- 提供 Web 仪表盘、状态 API 和 SSE 实时更新
+- 检测 `/v1/chat/completions` 和 `/v1/models` 接口
+- 支持多个 Provider 和多个模型，双层并发控制（全局 + 单 Provider）
+- 三态展示：正常、较慢、异常；记录历史、24h 平均延迟和统计窗口可用率
+- SSE 实时推送，仪表盘自动刷新；无实时推送时自动降级为 30 秒轮询
 - 支持 Telegram、Discord、Bark、企业微信、钉钉和通用 Webhook 告警通知
-- 提供后台 API，可配置 Provider、修改阈值、启停检测、查看任务、导入导出配置
+- 后台管理 API：动态增删 Provider、修改检测参数、导入导出配置、热加载 `.env`
 
-## 部署方式
-
-### 首次启动
-
-1. 先从 Release 下载压缩包，或准备好源码目录。
-2. 复制配置文件：
+## 快速开始
 
 ```bash
 cp .env.example .env
-```
-
-3. 打开 `.env`，至少填一个 Provider：
-
-```env
-PROVIDER_1_ID=openai-main
-PROVIDER_1_NAME=OpenAI
-PROVIDER_1_TYPE=openai
-PROVIDER_1_BASE_URL=https://api.openai.com/v1
-PROVIDER_1_API_KEY=sk-xxx
-PROVIDER_1_MODELS=gpt-4o-mini,gpt-4.1-mini
-PROVIDER_1_ENABLED=true
-```
-
-4. 启动程序后打开：
-
-```text
-http://127.0.0.1:8080/
-```
-
-5. 如果页面为空，先手动执行一次检测：
-
-```bash
-curl -X POST http://127.0.0.1:8080/api/admin/check
-```
-
-#### 二进制部署
-
-1. 从 Release 下载对应平台的压缩包。
-2. 解压后得到可执行文件、`README.md` 和 `.env.example`。
-3. 复制并编辑配置文件：
-
-```bash
-cp .env.example .env
-```
-
-4. 至少配置一个 Provider：
-
-```env
-PROVIDER_1_ID=openai-main
-PROVIDER_1_NAME=OpenAI
-PROVIDER_1_TYPE=openai
-PROVIDER_1_BASE_URL=https://api.openai.com/v1
-PROVIDER_1_API_KEY=sk-xxx
-PROVIDER_1_MODELS=gpt-4o-mini,gpt-4.1-mini
-PROVIDER_1_ENABLED=true
-```
-
-5. 启动服务：
-
-```bash
-./model-connectivity
-```
-
-Windows 下直接运行 `model-connectivity.exe`。
-
-#### 手动部署
-
-如果不使用 Release 包，也可以直接从源码运行：
-
-```bash
-cp .env.example .env
-```
-
-编辑 `.env` 后执行：
-
-```bash
+# 编辑 .env，至少填写一个 Provider
 go run ./cmd/cg
 ```
 
-只运行一次检测：
-
-```bash
-go run ./cmd/cg check
-```
-
-打开：
-
-```text
-http://127.0.0.1:8080/
-```
-
-手动检测：
+打开 [http://127.0.0.1:8080](http://127.0.0.1:8080) 查看仪表盘。首次启动若页面为空，先手动触发一次检测：
 
 ```bash
 curl -X POST http://127.0.0.1:8080/api/admin/check
+```
+
+## 部署
+
+### 二进制部署
+
+1. 从 [Releases](../../releases) 下载对应平台的压缩包并解压
+2. 复制并编辑配置文件：`cp .env.example .env`
+3. 启动服务：`./model-connectivity`（Windows 运行 `model-connectivity.exe`）
+
+### 源码运行
+
+```bash
+go run ./cmd/cg          # 持续服务模式
+go run ./cmd/cg check    # 只运行一次检测后退出
 ```
 
 ## 配置
 
-主要配置见 `.env.example`。
+所有配置通过 `.env` 文件或环境变量设置。后台 API 修改的参数写入 SQLite，重启后继续生效；`.env` 仍作为初始配置来源。
 
 ### 服务
 
-- `APP_HOST`：监听地址，默认 `127.0.0.1`
-- `APP_PORT`：监听端口，默认 `8080`
-- `WEB_DIR`：Web 文件目录，默认 `web`
-- `DATA_DIR`：数据目录，默认 `data`
-- `DATABASE_PATH`：SQLite 数据库路径，留空时默认 `DATA_DIR/cg.sqlite`
-- `DASHBOARD_TITLE`：页面标题
-- `ADMIN_TOKEN`：保护 `POST /api/admin/check`。公开监听 `0.0.0.0` / `::` 时必须设置
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `APP_HOST` | `127.0.0.1` | 监听地址 |
+| `APP_PORT` | `8080` | 监听端口 |
+| `WEB_DIR` | `web` | Web 静态文件目录 |
+| `DATA_DIR` | `data` | 数据目录 |
+| `DATABASE_PATH` | `DATA_DIR/cg.sqlite` | SQLite 路径，留空取默认值 |
+| `DASHBOARD_TITLE` | `模型连通性` | 页面标题 |
+| `ADMIN_TOKEN` | — | 保护管理接口；公开监听时**必须设置** |
 
 ### 探测
 
-- `TIMEOUT_SECONDS`：单模型检测超时
-- `MODEL_LIST_TIMEOUT_SECONDS`：获取模型列表超时
-- `SLOW_THRESHOLD_MS`：超过该耗时标记为“较慢”
-- `CONCURRENCY`：全局最大并发
-- `PROVIDER_CONCURRENCY`：单 Provider 最大并发
-- `MAX_MODELS_PER_PROVIDER`：每个 Provider 最多检测模型数，`0` 表示不限制
-- `SKIP_MODELS`：跳过模型，支持 `model`、`provider/model`、`provider::model`
-- `PROBE_PROMPT` / `PROBE_SYSTEM_PROMPT`：探测提示词
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `TIMEOUT_SECONDS` | `30` | 单模型检测超时（秒） |
+| `MODEL_LIST_TIMEOUT_SECONDS` | `20` | 获取模型列表超时（秒） |
+| `SLOW_THRESHOLD_MS` | `8000` | 超过此延迟标记为"较慢"（毫秒） |
+| `CONCURRENCY` | `3` | 全局最大并发数 |
+| `PROVIDER_CONCURRENCY` | `1` | 单 Provider 最大并发数 |
+| `MAX_MODELS_PER_PROVIDER` | `0` | 每个 Provider 最多检测模型数，`0` 不限制 |
+| `SKIP_MODELS` | — | 跳过的模型，支持 `model`、`provider/model`、`provider::model`，逗号分隔 |
+| `PROBE_PROMPT` | `只回复 OK 两个字母。` | 探测用提示词 |
+| `PROBE_SYSTEM_PROMPT` | `你是一个模型连通性探针。请只回复 OK，不要解释。` | 探测用系统提示词 |
 
-### 历史和显示
+### 历史与展示
 
-- `ENABLE_HISTORY`：保存历史记录
-- `SHOW_CURVE_CHART`：显示延迟曲线
-- `STATS_WINDOW_DAYS`：统计窗口天数
-- `HISTORY_SIZE`：历史条长度
-- `MAX_HISTORY_RECORDS`：每个模型最多保留记录数
-- `SHOW_ERROR_DETAIL`：显示错误详情
-- `THEME_MODE`：`auto`、`dark`、`light`
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `ENABLE_HISTORY` | `true` | 启用历史记录 |
+| `SHOW_CURVE_CHART` | `true` | 显示延迟曲线 |
+| `STATS_WINDOW_DAYS` | `7` | 统计窗口天数 |
+| `HISTORY_SIZE` | `30` | 历史条长度（仪表盘展示） |
+| `MAX_HISTORY_RECORDS` | `500` | 每个模型在数据库中最多保留的记录数 |
+| `SHOW_ERROR_DETAIL` | `true` | 显示错误详情 |
+| `THEME_MODE` | `auto` | 主题模式：`auto`、`dark`、`light` |
+| `DAY_MODE_START_HOUR` | `8` | `auto` 主题下亮色模式起始小时（0–23） |
+| `DAY_MODE_END_HOUR` | `18` | `auto` 主题下亮色模式结束小时（0–23） |
 
 ### 定时检测
 
-- `AUTO_CHECK_INTERVAL_MIN_HOURS`：最小检测间隔，`0` 表示关闭
-- `AUTO_CHECK_INTERVAL_MAX_HOURS`：最大检测间隔
-- `AUTO_CHECK_RUN_ON_START`：启动后立即检测一次
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `AUTO_CHECK_INTERVAL_MIN_HOURS` | `0` | 最小检测间隔（小时），`0` 关闭定时检测 |
+| `AUTO_CHECK_INTERVAL_MAX_HOURS` | `0` | 最大检测间隔（小时） |
+| `AUTO_CHECK_RUN_ON_START` | `false` | 启动后立即执行一次检测 |
 
-建议把测试周期拉长一点，减少不必要的 token 消耗。示例：
+实际检测间隔在 min–max 之间随机取值，可以错开多实例同时检测。建议适当拉长周期，减少不必要的 token 消耗：
 
 ```env
 AUTO_CHECK_INTERVAL_MIN_HOURS=6
@@ -161,15 +102,18 @@ AUTO_CHECK_RUN_ON_START=true
 
 ### 告警通知
 
-- `NOTIFY_PLATFORM`：告警平台，支持 `webhook`、`discord`、`bark`、`wecom`、`wechat_work`、`dingtalk`、`telegram`
-- `NOTIFY_WEBHOOK_URL`：Webhook 地址，Discord、Bark、企业微信、钉钉和通用 Webhook 使用该配置
-- `NOTIFY_TELEGRAM_BOT_TOKEN` / `NOTIFY_TELEGRAM_CHAT_ID`：Telegram Bot 通知配置
-- `NOTIFY_ON_RECOVERY`：从异常/较慢恢复正常时是否发送恢复通知，默认 `true`
-- `NOTIFY_COOLDOWN_MINUTES`：告警冷却时间，避免状态抖动频繁通知，`0` 表示关闭
-- `NOTIFY_PROVIDERS`：只对指定 Provider 告警，支持 `provider_id` 或 `provider_name`，留空表示全部
-- `NOTIFY_MODELS`：只对指定模型告警，支持 `model`、`provider/model`、`provider::model`，留空表示全部
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `NOTIFY_PLATFORM` | `webhook` | 平台：`webhook`、`discord`、`bark`、`wecom`、`wechat_work`、`dingtalk`、`telegram` |
+| `NOTIFY_WEBHOOK_URL` | — | Webhook 地址（Discord、Bark、企业微信、钉钉及通用 Webhook 使用） |
+| `NOTIFY_TELEGRAM_BOT_TOKEN` | — | Telegram Bot Token |
+| `NOTIFY_TELEGRAM_CHAT_ID` | — | Telegram Chat ID |
+| `NOTIFY_ON_RECOVERY` | `true` | 从异常/较慢恢复正常时是否发送通知 |
+| `NOTIFY_COOLDOWN_MINUTES` | `0` | 告警冷却时间（分钟），`0` 关闭 |
+| `NOTIFY_PROVIDERS` | — | 只对指定 Provider 告警，支持 ID 或 Name，留空表示全部 |
+| `NOTIFY_MODELS` | — | 只对指定模型告警，支持 `model`、`provider/model`、`provider::model`，留空表示全部 |
 
-告警会在筛选后的整体状态发生变化时发送。首次启动且状态正常时不会发送通知。
+告警在筛选后的整体状态发生变化时触发；首次启动且状态正常时不发送通知。
 
 示例：
 
@@ -182,7 +126,7 @@ NOTIFY_PROVIDERS=openai-main,ollama-local
 NOTIFY_MODELS=openai-main/gpt-4o-mini,llama3.1
 ```
 
-## Provider
+## Provider 配置
 
 ```env
 PROVIDER_1_ID=openai-main
@@ -202,115 +146,72 @@ PROVIDER_2_MODELS=llama3.1
 PROVIDER_2_ENABLED=true
 ```
 
-`PROVIDER_N_MODELS` 为空时，会尝试请求 `{BASE_URL}/models` 获取模型列表。
+`PROVIDER_N_MODELS` 留空时，自动请求 `{BASE_URL}/models` 获取模型列表。
 
-Provider 图标会根据 `PROVIDER_N_ID`、`PROVIDER_N_TYPE`、`PROVIDER_N_NAME` 自动匹配。`PROVIDER_1_TYPE` 可参考以下内置图标键填写：
+Provider 图标根据 `PROVIDER_N_ID`、`PROVIDER_N_TYPE`、`PROVIDER_N_NAME` 自动匹配，优先级依次降低，支持前缀及按 `_`、`-`、空格拆分后的关键词匹配。`PROVIDER_N_TYPE` 支持以下内置图标键：
 
-```env
-PROVIDER_1_TYPE=openai
-# 可用图标键：
-# openai, azure, xai, anthropic, ollama, google, deepseek, modelscope, zhipu, nvidia,
-# siliconflow, moonshot, kimi, kimi-code, longcat, ppio, dify, coze, dashscope,
-# deerflow, fastgpt, lm_studio, fishaudio, minimax, minimax-token-plan, mimo,
-# 302ai, microsoft, vllm, groq, aihubmix, openrouter, tokenpony, compshare,
-# xinference, bailian, volcengine
 ```
-
-对应参考代码：
-
-```go
-// internal/provider/icons.go
-var providerIcons = map[string]string{
-	"openai":             "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/openai.svg",
-	"azure":              "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/azure.svg",
-	"xai":                "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/xai.svg",
-	"anthropic":          "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/anthropic.svg",
-	"ollama":             "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/ollama.svg",
-	"google":             "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/gemini-color.svg",
-	"deepseek":           "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/deepseek.svg",
-	"modelscope":         "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/modelscope.svg",
-	"zhipu":              "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/zhipu.svg",
-	"nvidia":             "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/nvidia-color.svg",
-	"siliconflow":        "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/siliconcloud.svg",
-	"moonshot":           "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/kimi.svg",
-	"kimi":               "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/kimi.svg",
-	"kimi-code":          "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/kimi.svg",
-	"longcat":            "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/longcat-color.svg",
-	"ppio":               "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/ppio.svg",
-	"dify":               "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/dify-color.svg",
-	"coze":               "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@1.66.0/icons/coze.svg",
-	"dashscope":          "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/alibabacloud-color.svg",
-	"deerflow":           "https://cdn.jsdelivr.net/gh/bytedance/deer-flow@main/frontend/public/images/deer.svg",
-	"fastgpt":            "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/fastgpt-color.svg",
-	"lm_studio":          "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/lmstudio.svg",
-	"fishaudio":          "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/fishaudio.svg",
-	"minimax":            "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/minimax.svg",
-	"minimax-token-plan": "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/minimax.svg",
-	"mimo":               "https://platform.xiaomimimo.com/favicon.874c9507.png",
-	"302ai":              "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@1.53.0/icons/ai302-color.svg",
-	"microsoft":          "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/microsoft.svg",
-	"vllm":               "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/vllm.svg",
-	"groq":               "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/groq.svg",
-	"aihubmix":           "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/aihubmix-color.svg",
-	"openrouter":         "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/openrouter.svg",
-	"tokenpony":          "https://tokenpony.cn/tokenpony-web/logo.png",
-	"compshare":          "https://compshare.cn/favicon.ico",
-	"xinference":         "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/xinference-color.svg",
-	"bailian":            "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/bailian-color.svg",
-	"volcengine":         "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/volcengine-color.svg",
-}
+openai  azure  xai  anthropic  ollama  google  deepseek  modelscope  zhipu  nvidia
+siliconflow  moonshot  kimi  kimi-code  longcat  ppio  dify  coze  dashscope
+deerflow  fastgpt  lm_studio  fishaudio  minimax  minimax-token-plan  mimo
+302ai  microsoft  vllm  groq  aihubmix  openrouter  tokenpony  compshare
+xinference  bailian  volcengine
 ```
-
-匹配优先级为 Provider ID、Type、Name；也支持前缀或按 `_`、`-`、空格拆分后的关键词匹配。例如 `PROVIDER_1_TYPE=openai` 会匹配 `openai` 图标。
 
 ## API
 
-- `GET /health`：健康检查
-- `GET /api/status`：最新状态
-- `POST /api/admin/check`：触发检测
-- `GET /api/events`：SSE 实时更新
-- `GET /`：Web 仪表盘
+### 公开接口
 
-### 后台 API
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| `GET` | `/health` | 健康检查 |
+| `GET` | `/api/status` | 获取最新状态报告 |
+| `GET` | `/api/events` | SSE 实时推送 |
+| `GET` | `/` | Web 仪表盘 |
 
-后台 API 复用 `ADMIN_TOKEN`，请求头格式：`Authorization: Bearer <ADMIN_TOKEN>`。本地监听 `127.0.0.1` 且未设置 `ADMIN_TOKEN` 时允许访问；公开监听时必须设置 token。
+### 管理接口
 
-- `GET /api/admin/detection`：查看检测运行状态和自动检测间隔
-- `POST /api/admin/detection/start`：立即开始一次完整检测
-- `POST /api/admin/detection/stop`：停止当前正在运行的检测
-- `GET /api/admin/config`：查看安全版当前配置
-- `PUT /api/admin/settings`：修改阈值、检测参数、自动检测间隔
-- `GET /api/admin/providers`：查看 Provider 列表，不返回 API key
-- `POST /api/admin/providers`：新增 Provider
-- `PUT /api/admin/providers/{id}`：修改 Provider；不传 `api_key` 时保留旧 key
-- `DELETE /api/admin/providers/{id}`：删除 Provider
-- `POST /api/admin/providers/{id}/rerun`：只重跑某个 Provider，不覆盖当前仪表盘最新报告
-- `GET /api/admin/tasks`：查看历史检测任务
-- `GET /api/admin/tasks/{id}`：查看任务详情
-- `GET /api/admin/config/export`：导出配置，不包含密钥
-- `POST /api/admin/config/import`：导入配置并保存到 SQLite
-- `POST /api/admin/config/reload`：重新读取 `.env` 并热加载到运行时配置
+请求时携带：`Authorization: Bearer <ADMIN_TOKEN>`
 
-`.env` 仍作为初始配置来源；后台修改会保存到 SQLite，重启后继续生效。
+> 本地监听 `127.0.0.1` 且未设置 `ADMIN_TOKEN` 时，允许无 token 访问。
 
-### 后台快速使用
-
-1. 设置 `ADMIN_TOKEN` 后启动服务。
-2. 请求后台接口时带上：`Authorization: Bearer <ADMIN_TOKEN>`。
-3. 先用 `GET /api/admin/config` 查看当前配置，再用 `PUT /api/admin/settings` 或 `POST /api/admin/providers` 修改。
-4. 导出配置默认不包含密钥；导入配置会写入 SQLite 并在重启后继续生效。
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| `POST` | `/api/admin/check` | 触发一次完整检测 |
+| `GET` | `/api/admin/detection` | 查看检测运行状态和自动检测配置 |
+| `POST` | `/api/admin/detection/start` | 开始检测 |
+| `POST` | `/api/admin/detection/stop` | 停止当前检测 |
+| `GET` | `/api/admin/config` | 查看当前配置（不含密钥） |
+| `PUT` | `/api/admin/settings` | 修改阈值、检测参数、自动检测间隔 |
+| `GET` | `/api/admin/providers` | 查看 Provider 列表（不含 API Key） |
+| `POST` | `/api/admin/providers` | 新增 Provider |
+| `PUT` | `/api/admin/providers/{id}` | 修改 Provider；不传 `api_key` 时保留旧值 |
+| `DELETE` | `/api/admin/providers/{id}` | 删除 Provider |
+| `POST` | `/api/admin/providers/{id}/rerun` | 单独重跑某个 Provider |
+| `GET` | `/api/admin/tasks` | 查看历史检测任务 |
+| `GET` | `/api/admin/tasks/{id}` | 查看任务详情 |
+| `GET` | `/api/admin/config/export` | 导出配置（不含密钥） |
+| `POST` | `/api/admin/config/import` | 导入配置并保存到 SQLite |
+| `POST` | `/api/admin/config/reload` | 重新读取 `.env` 并热加载 |
 
 ## 数据文件
 
-```text
+```
 web/index.html
 web/assets/app.js
 web/assets/style.css
 data/cg.sqlite
 ```
 
-历史检测结果、最新报告和告警状态会保存到 SQLite。首次启动时，如果存在旧的 `data/latest_report.json`、`data/probe_history.json` 或 `data/notify_state.txt`，会自动尝试导入到 SQLite，旧文件不会被删除。
+历史检测结果、最新报告和告警状态保存在 SQLite。首次启动时若存在旧版 JSON 文件（`data/latest_report.json`、`data/probe_history.json`、`data/notify_state.txt`），会自动迁移到 SQLite，旧文件不会被删除。
+
+Web 静态文件在首次启动时自动写出到 `WEB_DIR`（已存在则跳过），可以在此基础上自定义页面样式。
 
 ## 安全提示
 
-该项目会真实调用模型接口并消耗 token。测试周期建议调长一点，单次检测通常不会消耗很多，但频繁自动检测会累计消耗。公开部署时请设置 `ADMIN_TOKEN`。
+- 该项目会真实调用模型接口并消耗 token，建议适当拉长检测间隔。
+- **公开部署（监听 `0.0.0.0` / `::`）时必须设置 `ADMIN_TOKEN`**，否则任何人均可触发检测或修改配置。
+
+## License
+
+[MIT](LICENSE)
