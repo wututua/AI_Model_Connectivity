@@ -1,40 +1,65 @@
-# 公共构建配置
+# 公共Go环境配置
 .go-env: &go-env
   docker:
     image: golang:1.25
     volumes:
       - go-modules
+      - go-build # 新增Go构建缓存卷
+  env:
+    GOMODCACHE: /go/pkg/mod
+    GOCACHE: /go/pkg/build
+    CGO_ENABLED: "0"
 
-# 构建脚本模板
-.build-stages: &build-stages
+# 公共测试阶段（仅执行一次）
+.test-stages: &test-stages
   - name: test
-    script: go test ./...
+    script: go test -v ./...
     timeout: 10m
+
+# 公共构建阶段（已移除测试，避免跨平台执行）
+.build-stages: &build-stages
   - name: build
     script: |
       mkdir -p dist
-      go build -trimpath -ldflags="-s -w" -o "dist/$BINARY" ./cmd/cg
+      go build -trimpath -ldflags="-s -w -X main.version=$CNB_BRANCH -X main.commit=$CNB_COMMIT_SHA" -o "dist/$BINARY" ./cmd/cg
   - name: package
     script: |
       cd dist
       ASSET_NAME="${BINARY%.exe}"
       cp ../.env.example .env.example
       cp ../README.md README.md
-      if [ "$GOOS" = "windows" ]; then
-        zip "${ASSET_NAME}.zip" "$BINARY" ".env.example" "README.md"
-      else
-        tar -czf "${ASSET_NAME}.tar.gz" "$BINARY" ".env.example" "README.md"
-      fi
+      tar -czf "${ASSET_NAME}.tar.gz" "$BINARY" ".env.example" "README.md"
       echo "##[set-output ARTIFACT=${ASSET_NAME}]"
     exports:
       ARTIFACT: ARTIFACT
 
-# 发布 Release 脚本模板
+# Windows专属构建阶段（解决zip工具缺失问题）
+.windows-build-stages: &windows-build-stages
+  - name: install-deps
+    script: |
+      apt-get update && apt-get install -y --no-install-recommends zip
+  - name: build
+    script: |
+      mkdir -p dist
+      go build -trimpath -ldflags="-s -w -X main.version=$CNB_BRANCH -X main.commit=$CNB_COMMIT_SHA" -o "dist/$BINARY" ./cmd/cg
+  - name: package
+    script: |
+      cd dist
+      ASSET_NAME="${BINARY%.exe}"
+      cp ../.env.example .env.example
+      cp ../README.md README.md
+      zip "${ASSET_NAME}.zip" "$BINARY" ".env.example" "README.md"
+      echo "##[set-output ARTIFACT=${ASSET_NAME}]"
+    exports:
+      ARTIFACT: ARTIFACT
+
+# 发布Release脚本模板（已修正路径）
 .release-stages: &release-stages
   - name: collect-artifacts
     script: |
       mkdir -p release-assets
-      for dir in /workspace/build-*/dist; do
+      # 修正为CNB CI实际工作目录格式
+      for dir in /yyds/*/workspace/dist; do
         if [ -d "$dir" ]; then
           cp "$dir"/*.tar.gz "$dir"/*.zip release-assets/ 2>/dev/null || true
         fi
@@ -52,23 +77,33 @@
         - 复制 `.env.example` 为 `.env`，填写至少一个 Provider 后启动程序
         - 该项目会真实调用模型接口并消耗 token，建议把自动检测周期调长一点
 
+        ## 版本信息
+        - 版本号: $CNB_BRANCH
+        - 提交哈希: $CNB_COMMIT_SHA
+
         ## 启动方式
 
         - 二进制包：直接运行 `model-connectivity` 或 `model-connectivity.exe`
         - 源码运行：`go run ./cmd/cg`
 
-# tag_push / tag_deploy 触发编译发版
+# tag_push 触发编译发版
 $:
   tag_push:
+    # 单独的测试任务：只在Linux/AMD64上执行一次
+    test:
+      <<: *go-env
+      name: run-unit-tests
+      stages: *test-stages
+
     build-linux-amd64:
       <<: *go-env
       name: build-linux-amd64
       env:
         GOOS: linux
         GOARCH: amd64
-        CGO_ENABLED: "0"
         BINARY: model-connectivity-linux-amd64
       stages: *build-stages
+      needs: test # 依赖测试通过
 
     build-linux-arm64:
       <<: *go-env
@@ -76,9 +111,9 @@ $:
       env:
         GOOS: linux
         GOARCH: arm64
-        CGO_ENABLED: "0"
         BINARY: model-connectivity-linux-arm64
       stages: *build-stages
+      needs: test
 
     build-windows-amd64:
       <<: *go-env
@@ -86,9 +121,9 @@ $:
       env:
         GOOS: windows
         GOARCH: amd64
-        CGO_ENABLED: "0"
         BINARY: model-connectivity-windows-amd64.exe
-      stages: *build-stages
+      stages: *windows-build-stages
+      needs: test
 
     build-windows-arm64:
       <<: *go-env
@@ -96,9 +131,9 @@ $:
       env:
         GOOS: windows
         GOARCH: arm64
-        CGO_ENABLED: "0"
         BINARY: model-connectivity-windows-arm64.exe
-      stages: *build-stages
+      stages: *windows-build-stages
+      needs: test
 
     build-darwin-amd64:
       <<: *go-env
@@ -106,9 +141,9 @@ $:
       env:
         GOOS: darwin
         GOARCH: amd64
-        CGO_ENABLED: "0"
         BINARY: model-connectivity-darwin-amd64
       stages: *build-stages
+      needs: test
 
     build-darwin-arm64:
       <<: *go-env
@@ -116,25 +151,39 @@ $:
       env:
         GOOS: darwin
         GOARCH: arm64
-        CGO_ENABLED: "0"
         BINARY: model-connectivity-darwin-arm64
       stages: *build-stages
+      needs: test
 
     release:
       <<: *go-env
       name: release
       stages: *release-stages
+      # 依赖所有构建任务完成
+      needs:
+        - build-linux-amd64
+        - build-linux-arm64
+        - build-windows-amd64
+        - build-windows-arm64
+        - build-darwin-amd64
+        - build-darwin-arm64
 
+  # tag_deploy.release 触发编译发版（与tag_push完全一致）
   tag_deploy.release:
+    test:
+      <<: *go-env
+      name: run-unit-tests
+      stages: *test-stages
+
     build-linux-amd64:
       <<: *go-env
       name: build-linux-amd64
       env:
         GOOS: linux
         GOARCH: amd64
-        CGO_ENABLED: "0"
         BINARY: model-connectivity-linux-amd64
       stages: *build-stages
+      needs: test
 
     build-linux-arm64:
       <<: *go-env
@@ -142,9 +191,9 @@ $:
       env:
         GOOS: linux
         GOARCH: arm64
-        CGO_ENABLED: "0"
         BINARY: model-connectivity-linux-arm64
       stages: *build-stages
+      needs: test
 
     build-windows-amd64:
       <<: *go-env
@@ -152,9 +201,9 @@ $:
       env:
         GOOS: windows
         GOARCH: amd64
-        CGO_ENABLED: "0"
         BINARY: model-connectivity-windows-amd64.exe
-      stages: *build-stages
+      stages: *windows-build-stages
+      needs: test
 
     build-windows-arm64:
       <<: *go-env
@@ -162,9 +211,9 @@ $:
       env:
         GOOS: windows
         GOARCH: arm64
-        CGO_ENABLED: "0"
         BINARY: model-connectivity-windows-arm64.exe
-      stages: *build-stages
+      stages: *windows-build-stages
+      needs: test
 
     build-darwin-amd64:
       <<: *go-env
@@ -172,9 +221,9 @@ $:
       env:
         GOOS: darwin
         GOARCH: amd64
-        CGO_ENABLED: "0"
         BINARY: model-connectivity-darwin-amd64
       stages: *build-stages
+      needs: test
 
     build-darwin-arm64:
       <<: *go-env
@@ -182,11 +231,18 @@ $:
       env:
         GOOS: darwin
         GOARCH: arm64
-        CGO_ENABLED: "0"
         BINARY: model-connectivity-darwin-arm64
       stages: *build-stages
+      needs: test
 
     release:
       <<: *go-env
       name: release
       stages: *release-stages
+      needs:
+        - build-linux-amd64
+        - build-linux-arm64
+        - build-windows-amd64
+        - build-windows-arm64
+        - build-darwin-amd64
+        - build-darwin-arm64
