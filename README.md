@@ -148,11 +148,11 @@ curl -X POST http://127.0.0.1:8080/api/check
 - `AUTO_CHECK_INTERVAL_MAX_HOURS`：最大检测间隔
 - `AUTO_CHECK_RUN_ON_START`：启动后立即检测一次
 
-示例：
+建议把测试周期拉长一点，减少不必要的 token 消耗。示例：
 
 ```env
-AUTO_CHECK_INTERVAL_MIN_HOURS=2
-AUTO_CHECK_INTERVAL_MAX_HOURS=5
+AUTO_CHECK_INTERVAL_MIN_HOURS=6
+AUTO_CHECK_INTERVAL_MAX_HOURS=12
 AUTO_CHECK_RUN_ON_START=true
 ```
 
@@ -198,4 +198,4 @@ data/probe_history.json
 
 ## 安全提示
 
-检测会真实调用模型接口，可能产生额度消耗。公开部署时请设置 `ADMIN_TOKEN`。
+该项目会真实调用模型接口并消耗 token。测试周期建议调长一点，单次检测通常不会消耗很多，但频繁自动检测会累计消耗。公开部署时请设置 `ADMIN_TOKEN`。
