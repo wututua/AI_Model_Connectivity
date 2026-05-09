@@ -13,7 +13,40 @@
 
 ## 部署方式
 
-### 二进制部署
+### 首次启动
+
+1. 先从 Release 下载压缩包，或准备好源码目录。
+2. 复制配置文件：
+
+```bash
+cp .env.example .env
+```
+
+3. 打开 `.env`，至少填一个 Provider：
+
+```env
+PROVIDER_1_ID=openai-main
+PROVIDER_1_NAME=OpenAI
+PROVIDER_1_TYPE=openai
+PROVIDER_1_BASE_URL=https://api.openai.com/v1
+PROVIDER_1_API_KEY=sk-xxx
+PROVIDER_1_MODELS=gpt-4o-mini,gpt-4.1-mini
+PROVIDER_1_ENABLED=true
+```
+
+4. 启动程序后打开：
+
+```text
+http://127.0.0.1:8080/
+```
+
+5. 如果页面为空，先手动执行一次检测：
+
+```bash
+curl -X POST http://127.0.0.1:8080/api/check
+```
+
+#### 二进制部署
 
 1. 从 Release 下载对应平台的压缩包。
 2. 解压后得到可执行文件、`README.md` 和 `.env.example`。
@@ -43,7 +76,7 @@ PROVIDER_1_ENABLED=true
 
 Windows 下直接运行 `model-connectivity.exe`。
 
-### 手动部署
+#### 手动部署
 
 如果不使用 Release 包，也可以直接从源码运行：
 
