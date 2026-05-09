@@ -1,151 +1,192 @@
-version: "1"
+# 公共构建配置
+.go-env: &go-env
+  docker:
+    image: golang:1.25
+    volumes:
+      - go-modules
 
-pipelines:
-  - name: build-and-test
-    triggers:
-      - event: push
-        branches:
-          - "*"
-    jobs:
-      - name: test
-        image: golang:1.22
-        steps:
-          - name: Cache go mod
-            use: go-mod-cache
-          - name: Cache go build
-            use: go-build-cache
-          - name: Test
-            run: |
-              go test ./...
+# 构建脚本模板
+.build-stages: &build-stages
+  - name: test
+    script: go test ./...
+    timeout: 10m
+  - name: build
+    script: |
+      mkdir -p dist
+      go build -trimpath -ldflags="-s -w" -o "dist/$BINARY" ./cmd/cg
+  - name: package
+    script: |
+      cd dist
+      ASSET_NAME="${BINARY%.exe}"
+      cp ../.env.example .env.example
+      cp ../README.md README.md
+      if [ "$GOOS" = "windows" ]; then
+        zip "${ASSET_NAME}.zip" "$BINARY" ".env.example" "README.md"
+      else
+        tar -czf "${ASSET_NAME}.tar.gz" "$BINARY" ".env.example" "README.md"
+      fi
+      echo "##[set-output ARTIFACT=${ASSET_NAME}]"
+    exports:
+      ARTIFACT: ARTIFACT
 
-      - name: build-linux-amd64
-        image: golang:1.22
-        depends: test
-        steps:
-          - name: Cache go mod
-            use: go-mod-cache
-          - name: Cache go build
-            use: go-build-cache
-          - name: Build
-            run: |
-              mkdir -p dist
-              go build -trimpath -ldflags="-s -w" -o "dist/model-connectivity-linux-amd64" ./cmd/cg
+# 发布 Release 脚本模板
+.release-stages: &release-stages
+  - name: collect-artifacts
+    script: |
+      mkdir -p release-assets
+      for dir in /workspace/build-*/dist; do
+        if [ -d "$dir" ]; then
+          cp "$dir"/*.tar.gz "$dir"/*.zip release-assets/ 2>/dev/null || true
+        fi
+      done
+      ls -la release-assets/ || echo "No artifacts found in build dirs"
+  - name: publish-release
+    type: git:release
+    options:
+      tag: $CNB_BRANCH
+      description: |
+        ## Release 说明
 
-  - name: release
-    triggers:
-      - event: tag_push
-        tags:
-          - "v*"
-    jobs:
-      - name: test
-        image: golang:1.22
-        steps:
-          - name: Cache go mod
-            use: go-mod-cache
-          - name: Cache go build
-            use: go-build-cache
-          - name: Test
-            run: |
-              go test ./...
+        - 下载对应平台的压缩包
+        - 解压后可直接使用，其中包含二进制、`.env.example` 和 `README.md`
+        - 复制 `.env.example` 为 `.env`，填写至少一个 Provider 后启动程序
+        - 该项目会真实调用模型接口并消耗 token，建议把自动检测周期调长一点
 
-      - name: build
-        image: golang:1.22
-        depends: test
-        strategy:
-          matrix:
-            include:
-              - goos: linux
-                goarch: amd64
-                ext: ""
-              - goos: linux
-                goarch: arm64
-                ext: ""
-              - goos: windows
-                goarch: amd64
-                ext: ".exe"
-              - goos: windows
-                goarch: arm64
-                ext: ".exe"
-              - goos: darwin
-                goarch: amd64
-                ext: ""
-              - goos: darwin
-                goarch: arm64
-                ext: ""
-        steps:
-          - name: Cache go mod
-            use: go-mod-cache
-          - name: Cache go build
-            use: go-build-cache
-          - name: Build
-            env:
-              GOOS: ${{ matrix.goos }}
-              GOARCH: ${{ matrix.goarch }}
-              CGO_ENABLED: "0"
-            run: |
-              mkdir -p dist
-              binary="model-connectivity-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}"
-              go build -trimpath -ldflags="-s -w" -o "dist/${binary}" ./cmd/cg
-          - name: Package
-            run: |
-              cd dist
-              asset="model-connectivity-${{ matrix.goos }}-${{ matrix.goarch }}"
-              cp ../.env.example .env.example
-              cp ../README.md README.md
-              if [ "${{ matrix.goos }}" = "windows" ]; then
-                zip "${asset}.zip" "${asset}.exe" ".env.example" "README.md"
-              else
-                tar -czf "${asset}.tar.gz" "${asset}" ".env.example" "README.md"
-              fi
-          - name: Upload artifact
-            use: artifact-upload
-            with:
-              name: "model-connectivity-${{ matrix.goos }}-${{ matrix.goarch }}"
-              path: |
-                dist/*.zip
-                dist/*.tar.gz
+        ## 启动方式
 
-      - name: publish-release
-        depends: build
-        image: ubuntu:latest
-        steps:
-          - name: Download all artifacts
-            use: artifact-download
-            with:
-              path: dist
-          - name: List artifacts
-            run: |
-              ls -la dist/
-              find dist/ -name "*.tar.gz" -o -name "*.zip" | sort
-          - name: Create Release
-            use: git:release
-          - name: Upload Linux amd64
-            run: |
-              cnb releases upload-file \
-                --tag "${CNB_TAG_REF_NAME}" \
-                --file "dist/model-connectivity-linux-amd64.tar.gz"
-          - name: Upload Linux arm64
-            run: |
-              cnb releases upload-file \
-                --tag "${CNB_TAG_REF_NAME}" \
-                --file "dist/model-connectivity-linux-arm64.tar.gz"
-          - name: Upload Windows amd64
-            run: |
-              cnb releases upload-file \
-                --tag "${CNB_TAG_REF_NAME}" \
-                --file "dist/model-connectivity-windows-amd64.zip"
-          - name: Upload Windows arm64
-            run: |
-              cnb releases upload-file \
-                --tag "${CNB_TAG_REF_NAME}" \
-                --file "dist/model-connectivity-windows-arm64.zip"
-          - name: Upload Darwin amd64
-            run: |
-              cnb releases upload-file \
-                --tag "${CNB_TAG_REF_NAME}" \
-                --file "dist/model-connectivity-darwin-amd64.tar.gz"
-          - name: Upload Darwin arm64
-            run: |
-              cnb releases upload-file \
-                --tag "${CNB_TAG_REF_NAME}" \
-                --file "dist/model-connectivity-darwin-arm64.tar.gz"
+        - 二进制包：直接运行 `model-connectivity` 或 `model-connectivity.exe`
+        - 源码运行：`go run ./cmd/cg`
+
+# tag_push / tag_deploy 触发编译发版
+$:
+  tag_push:
+    build-linux-amd64:
+      <<: *go-env
+      name: build-linux-amd64
+      env:
+        GOOS: linux
+        GOARCH: amd64
+        CGO_ENABLED: "0"
+        BINARY: model-connectivity-linux-amd64
+      stages: *build-stages
+
+    build-linux-arm64:
+      <<: *go-env
+      name: build-linux-arm64
+      env:
+        GOOS: linux
+        GOARCH: arm64
+        CGO_ENABLED: "0"
+        BINARY: model-connectivity-linux-arm64
+      stages: *build-stages
+
+    build-windows-amd64:
+      <<: *go-env
+      name: build-windows-amd64
+      env:
+        GOOS: windows
+        GOARCH: amd64
+        CGO_ENABLED: "0"
+        BINARY: model-connectivity-windows-amd64.exe
+      stages: *build-stages
+
+    build-windows-arm64:
+      <<: *go-env
+      name: build-windows-arm64
+      env:
+        GOOS: windows
+        GOARCH: arm64
+        CGO_ENABLED: "0"
+        BINARY: model-connectivity-windows-arm64.exe
+      stages: *build-stages
+
+    build-darwin-amd64:
+      <<: *go-env
+      name: build-darwin-amd64
+      env:
+        GOOS: darwin
+        GOARCH: amd64
+        CGO_ENABLED: "0"
+        BINARY: model-connectivity-darwin-amd64
+      stages: *build-stages
+
+    build-darwin-arm64:
+      <<: *go-env
+      name: build-darwin-arm64
+      env:
+        GOOS: darwin
+        GOARCH: arm64
+        CGO_ENABLED: "0"
+        BINARY: model-connectivity-darwin-arm64
+      stages: *build-stages
+
+    release:
+      <<: *go-env
+      name: release
+      stages: *release-stages
+
+  tag_deploy.release:
+    build-linux-amd64:
+      <<: *go-env
+      name: build-linux-amd64
+      env:
+        GOOS: linux
+        GOARCH: amd64
+        CGO_ENABLED: "0"
+        BINARY: model-connectivity-linux-amd64
+      stages: *build-stages
+
+    build-linux-arm64:
+      <<: *go-env
+      name: build-linux-arm64
+      env:
+        GOOS: linux
+        GOARCH: arm64
+        CGO_ENABLED: "0"
+        BINARY: model-connectivity-linux-arm64
+      stages: *build-stages
+
+    build-windows-amd64:
+      <<: *go-env
+      name: build-windows-amd64
+      env:
+        GOOS: windows
+        GOARCH: amd64
+        CGO_ENABLED: "0"
+        BINARY: model-connectivity-windows-amd64.exe
+      stages: *build-stages
+
+    build-windows-arm64:
+      <<: *go-env
+      name: build-windows-arm64
+      env:
+        GOOS: windows
+        GOARCH: arm64
+        CGO_ENABLED: "0"
+        BINARY: model-connectivity-windows-arm64.exe
+      stages: *build-stages
+
+    build-darwin-amd64:
+      <<: *go-env
+      name: build-darwin-amd64
+      env:
+        GOOS: darwin
+        GOARCH: amd64
+        CGO_ENABLED: "0"
+        BINARY: model-connectivity-darwin-amd64
+      stages: *build-stages
+
+    build-darwin-arm64:
+      <<: *go-env
+      name: build-darwin-arm64
+      env:
+        GOOS: darwin
+        GOARCH: arm64
+        CGO_ENABLED: "0"
+        BINARY: model-connectivity-darwin-arm64
+      stages: *build-stages
+
+    release:
+      <<: *go-env
+      name: release
+      stages: *release-stages
