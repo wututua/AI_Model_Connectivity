@@ -62,10 +62,11 @@ jobs:
         run: |
           cd dist
           asset="model-connectivity-${{ matrix.goos }}-${{ matrix.goarch }}"
+          cp ../.env.example .env.example
           if [ "${{ matrix.goos }}" = "windows" ]; then
-            zip "${asset}.zip" "${asset}.exe"
+            zip "${asset}.zip" "${asset}.exe" ".env.example"
           else
-            tar -czf "${asset}.tar.gz" "${asset}"
+            tar -czf "${asset}.tar.gz" "${asset}" ".env.example"
           fi
 
       - name: Upload artifact
