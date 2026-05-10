@@ -63,7 +63,7 @@ function CurveChart({ pathLine, pathArea, status }: { pathLine: string; pathArea
       aria-hidden="true"
     >
       <path d={pathArea} fill={color} opacity=".18" />
-      <path d={pathLine} fill="none" stroke={color} strokeWidth="1.2" />
+      <path d={pathLine} fill="none" stroke={color} strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
     </svg>
   )
 }
