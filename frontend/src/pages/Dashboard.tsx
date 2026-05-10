@@ -418,7 +418,24 @@ export default function Dashboard() {
 
       <footer className="max-w-[1180px] mx-auto px-4 py-6 flex items-center justify-center">
         <p className="text-[11px] font-mono" style={{ color: 'var(--muted)', opacity: .5 }}>
-          © {new Date().getFullYear()} AI Model Connectivity · MIT License
+          © {new Date().getFullYear()}&nbsp;
+          <a
+            href="https://github.com/wututua/AI_Model_Connectivity"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="transition-opacity hover:opacity-100"
+          >
+            AI Model Connectivity
+          </a>
+          &nbsp;by&nbsp;
+          <a
+            href="https://github.com/wututua"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="transition-opacity hover:opacity-100"
+          >
+            wututu
+          </a>
         </p>
       </footer>
     </div>
