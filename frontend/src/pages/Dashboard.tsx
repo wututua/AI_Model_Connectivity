@@ -96,16 +96,19 @@ function ModelRow({ result, showError }: { result: ModelResult; showError: boole
     ? '0 0 6px rgba(246,196,83,.9)'
     : '0 0 6px rgba(255,107,122,.9)'
   const [hovered, setHovered] = useState(false)
+  const [expanded, setExpanded] = useState(false)
+  const hasDetail = !!(result.error || result.response_preview)
 
   return (
     <div
-      className="relative overflow-hidden rounded-[20px] p-4 border transition-all duration-200"
+      className={`relative overflow-hidden rounded-[20px] p-4 border transition-all duration-200 ${hasDetail ? 'cursor-pointer' : ''}`}
       style={{
         background: hovered ? 'var(--row-hover)' : 'var(--row-bg)',
         borderColor: hovered ? `rgba(${sc === 'ok' ? '56,217,150' : sc === 'slow' ? '246,196,83' : '255,107,122'},.3)` : 'var(--border)',
       }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
+      onClick={() => hasDetail && setExpanded(e => !e)}
     >
       {result.show_curve_chart && result.svg_path_line && (
         <CurveChart pathLine={result.svg_path_line} pathArea={result.svg_path_area} status={result.status} />
@@ -132,16 +135,19 @@ function ModelRow({ result, showError }: { result: ModelResult; showError: boole
           </div>
         </div>
 
-        {/* Error / preview */}
+        {/* Error / preview — collapsed: truncated; expanded: full text */}
         {showError && result.error && (
-          <p className="mt-1.5 text-xs font-mono truncate" style={{ color: 'var(--error)', opacity: .8 }}>
+          <p className={`mt-1.5 text-xs font-mono ${expanded ? 'whitespace-pre-wrap break-all' : 'truncate'}`} style={{ color: 'var(--error)', opacity: .8 }}>
             {result.error}
           </p>
         )}
         {result.response_preview && !result.error && (
-          <p className="mt-1.5 text-xs font-mono truncate" style={{ color: 'var(--muted)' }}>
+          <p className={`mt-1.5 text-xs font-mono ${expanded ? 'whitespace-pre-wrap break-all' : 'truncate'}`} style={{ color: 'var(--muted)' }}>
             {result.response_preview}
           </p>
+        )}
+        {hasDetail && !expanded && (
+          <p className="text-[10px] mt-1" style={{ color: 'var(--muted)', opacity: .5 }}>点击展开详情</p>
         )}
 
         {/* Stats */}
