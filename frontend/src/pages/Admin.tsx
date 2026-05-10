@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import {
   Activity, ArrowLeft, Play, Square, RefreshCw, Plus, Edit2, Trash2,
   Save, Download, Upload, RotateCcw, CheckCircle, XCircle, AlertTriangle,
-  Clock, Loader2, LogOut, Eye, EyeOff, Sun, Moon,
+  Clock, Loader2, LogOut, Eye, EyeOff, Sun, Moon, Settings, FileJson, Database,
 } from 'lucide-react'
 import { api, getToken, setToken } from '../api'
 import { useTheme } from '../hooks/useTheme'
@@ -1043,10 +1043,10 @@ type Tab = 'overview' | 'providers' | 'settings' | 'tasks' | 'config'
 
 const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: 'overview',  label: '检测控制', icon: <Activity className="w-4 h-4" /> },
-  { id: 'providers', label: 'Provider',  icon: <Play className="w-4 h-4" /> },
-  { id: 'settings',  label: '设置',      icon: <AlertTriangle className="w-4 h-4" /> },
+  { id: 'providers', label: 'Provider',  icon: <Database className="w-4 h-4" /> },
+  { id: 'settings',  label: '设置',      icon: <Settings className="w-4 h-4" /> },
   { id: 'tasks',     label: '任务历史',  icon: <Clock className="w-4 h-4" /> },
-  { id: 'config',    label: '配置管理',  icon: <RefreshCw className="w-4 h-4" /> },
+  { id: 'config',    label: '配置管理',  icon: <FileJson className="w-4 h-4" /> },
 ]
 
 export default function Admin() {
