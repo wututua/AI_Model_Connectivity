@@ -1,6 +1,6 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useMemo } from 'react'
 import { Link } from 'react-router-dom'
-import { Activity, Settings, RefreshCw, Zap, CheckCircle, AlertTriangle, XCircle, Clock, Sun, Moon } from 'lucide-react'
+import { Activity, Settings, RefreshCw, Zap, CheckCircle, AlertTriangle, XCircle, Clock, Sun, Moon, Search, X } from 'lucide-react'
 import type { Report, ProviderReport, ModelResult } from '../types'
 import { api } from '../api'
 import { useTheme } from '../hooks/useTheme'
@@ -243,6 +243,8 @@ export default function Dashboard() {
   const [error, setError] = useState<string | null>(null)
   const [live, setLive] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
+  const [search, setSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState<'all' | 'ok' | 'slow' | 'error'>('all')
   const { theme, toggle: toggleTheme } = useTheme()
   const navVisible = useScrollNav()
 
@@ -276,6 +278,24 @@ export default function Dashboard() {
   }, [fetchReport])
 
   const sc = report ? statusClass(report.overall_class) : null
+
+  const filteredProviders = useMemo(() => {
+    if (!report?.providers) return []
+    const q = search.trim().toLowerCase()
+    return report.providers
+      .map(p => ({
+        ...p,
+        results: p.results.filter(r =>
+          (statusFilter === 'all' || r.status === statusFilter) &&
+          (!q || r.model.toLowerCase().includes(q) || p.provider_name.toLowerCase().includes(q))
+        ),
+      }))
+      .filter(p => p.results.length > 0 || (!q && statusFilter === 'all'))
+      .sort((a, b) => {
+        const order = { error: 0, slow: 1, ok: 2 }
+        return (order[a.status as keyof typeof order] ?? 3) - (order[b.status as keyof typeof order] ?? 3)
+      })
+  }, [report, search, statusFilter])
 
   const navBtnStyle: React.CSSProperties = { color: 'var(--muted)' }
   const navBtnHover = (e: React.MouseEvent<HTMLElement>) => (e.currentTarget.style.color = 'var(--text)')
@@ -397,6 +417,39 @@ export default function Dashboard() {
           </div>
         )}
 
+        {/* Search & filter bar */}
+        {report?.providers && report.providers.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative flex-1 min-w-[160px] max-w-xs">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 pointer-events-none" style={{ color: 'var(--muted)' }} />
+              <input
+                className="input-glass w-full rounded-xl pl-8 pr-8 py-2 text-sm"
+                placeholder="搜索模型或 Provider…"
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+              />
+              {search && (
+                <button onClick={() => setSearch('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 cursor-pointer" style={{ color: 'var(--muted)' }}>
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+            {(['all', 'ok', 'slow', 'error'] as const).map(s => (
+              <button
+                key={s}
+                onClick={() => setStatusFilter(s)}
+                className="px-3 py-1.5 rounded-xl text-xs font-medium transition-colors cursor-pointer"
+                style={statusFilter === s
+                  ? { background: s === 'all' ? 'var(--card-strong)' : `rgba(${s === 'ok' ? '56,217,150' : s === 'slow' ? '246,196,83' : '255,107,122'},.2)`, color: s === 'all' ? 'var(--text)' : `var(--${s})`, border: `1px solid ${s === 'all' ? 'var(--border)' : `rgba(${s === 'ok' ? '56,217,150' : s === 'slow' ? '246,196,83' : '255,107,122'},.4)`}` }
+                  : { background: 'transparent', color: 'var(--muted)', border: '1px solid transparent' }
+                }
+              >
+                {{ all: '全部', ok: '正常', slow: '较慢', error: '异常' }[s]}
+              </button>
+            ))}
+          </div>
+        )}
+
         {/* Provider errors */}
         {report?.provider_errors && report.provider_errors.length > 0 && (
           <div className="glass rounded-[24px] p-5" style={{ borderColor: 'rgba(255,107,122,.3)' }}>
@@ -417,12 +470,12 @@ export default function Dashboard() {
         {/* Provider grid */}
         {report?.providers && report.providers.length > 0 ? (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-[18px]">
-            {[...report.providers]
-              .sort((a, b) => {
-                const order = { error: 0, slow: 1, ok: 2 }
-                return (order[a.status as keyof typeof order] ?? 3) - (order[b.status as keyof typeof order] ?? 3)
-              })
-              .map(provider => (
+            {filteredProviders.length === 0 ? (
+              <div className="col-span-2 py-16 text-center" style={{ color: 'var(--muted)' }}>
+                <Search className="w-8 h-8 mx-auto mb-3 opacity-40" />
+                <p className="text-sm">未找到匹配的模型或 Provider</p>
+              </div>
+            ) : filteredProviders.map(provider => (
               <ProviderCard key={provider.provider_id} provider={provider} showError={true} />
             ))}
           </div>
