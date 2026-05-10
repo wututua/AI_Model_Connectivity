@@ -35,11 +35,11 @@ function Spinner() {
 }
 
 function Btn({
-  onClick, disabled, loading, variant = 'default', children, className = '',
+  onClick, disabled, loading, variant = 'default', children, className = '', title,
 }: {
   onClick?: () => void; disabled?: boolean; loading?: boolean
   variant?: 'default' | 'primary' | 'danger' | 'ghost'
-  children: React.ReactNode; className?: string
+  children: React.ReactNode; className?: string; title?: string
 }) {
   const base = 'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-medium transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed'
   const variantStyle: Record<string, React.CSSProperties> = {
@@ -54,6 +54,7 @@ function Btn({
       disabled={disabled || loading}
       className={`${base} ${className}`}
       style={variantStyle[variant]}
+      title={title}
     >
       {loading ? <Spinner /> : null}
       {children}
@@ -281,16 +282,18 @@ function TokenEstimateCard({ providers, settings }: {
 function OverviewTab() {
   const [state, setState] = useState<RunningState | null>(null)
   const [cfg, setCfg] = useState<{ providers: SafeProviderConfig[]; settings: RuntimeSettings } | null>(null)
+  const [summary, setSummary] = useState<import('../types').Report | null>(null)
   const [loading, setLoading] = useState(false)
   const [actionLoading, setActionLoading] = useState(false)
   const [msg, setMsg] = useAutoMsg()
 
   const load = useCallback(() => {
     setLoading(true)
-    Promise.all([api.detection(), api.config()])
-      .then(([s, c]) => {
+    Promise.all([api.detection(), api.config(), api.status().catch(() => null)])
+      .then(([s, c, rep]) => {
         setState(s)
         setCfg({ providers: c.providers, settings: normalizeSettings(c.settings) })
+        setSummary(rep)
       })
       .catch(() => {})
       .finally(() => setLoading(false))
@@ -371,6 +374,19 @@ function OverviewTab() {
         <p className="text-sm font-mono" style={{ color: msg.startsWith('错误') ? 'var(--error)' : 'var(--ok)' }}>
           {msg}
         </p>
+      )}
+
+      {summary && summary.total > 0 && (
+        <div className="glass rounded-[22px] p-4">
+          <p className="text-xs mb-3 uppercase tracking-widest" style={{ color: 'var(--muted)', letterSpacing: '.12em' }}>上次检测摘要</p>
+          <div className="flex flex-wrap gap-4 text-sm font-mono mb-2">
+            <span style={{ color: 'var(--ok)' }}>✓ {summary.ok_count} 正常</span>
+            {summary.slow_count > 0 && <span style={{ color: 'var(--slow)' }}>~ {summary.slow_count} 较慢</span>}
+            {summary.error_count > 0 && <span style={{ color: 'var(--error)' }}>✕ {summary.error_count} 异常</span>}
+            <span style={{ color: 'var(--muted)' }}>共 {summary.total} 个模型 · {summary.elapsed_ms} ms</span>
+          </div>
+          <p className="text-xs" style={{ color: 'var(--muted)', opacity: .6 }}>{summary.generated_at}</p>
+        </div>
       )}
 
       {cfg && <TokenEstimateCard providers={cfg.providers} settings={cfg.settings} />}
@@ -889,13 +905,7 @@ function TasksTab() {
     manual: '手动', scheduled: '定时', startup: '启动', provider: 'Provider',
   }
 
-  const statusIcon = (s: string) =>
-    s === 'success' ? <CheckCircle className="w-3.5 h-3.5 text-green-400 shrink-0" /> :
-    s === 'running' ? <Loader2 className="w-3.5 h-3.5 text-blue-400 shrink-0 animate-spin" /> :
-    s === 'canceled' ? <XCircle className="w-3.5 h-3.5 text-slate-400 shrink-0" /> :
-    <XCircle className="w-3.5 h-3.5 text-red-400 shrink-0" />
-
-  return (
+return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="text-base font-semibold" style={{ color: 'var(--text)' }}>检测历史</h2>
