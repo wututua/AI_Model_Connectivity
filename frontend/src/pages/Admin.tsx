@@ -942,10 +942,7 @@ function TasksTab() {
                   {t.provider_id && <span className="font-mono ml-1" style={{ color: 'var(--muted)', opacity: .7 }}>{t.provider_id}</span>}
                 </td>
                 <td className="py-2.5 pr-3">
-                  <div className="flex items-center gap-1.5">
-                    {statusIcon(t.status)}
-                    <Badge status={t.status} />
-                  </div>
+                  <Badge status={t.status} />
                   {t.error_message && (
                     <p className="text-[11px] font-mono mt-0.5 max-w-[200px] truncate" style={{ color: 'var(--error)', opacity: .7 }}>{t.error_message}</p>
                   )}
@@ -982,7 +979,7 @@ function TasksTab() {
           上一页
         </Btn>
         <span className="text-xs font-mono" style={{ color: 'var(--muted)' }}>
-          第 {Math.floor(offset / LIMIT) + 1} 页
+          {offset + 1}–{offset + tasks.length} 条
         </span>
         <Btn onClick={() => setOffset(o => o + LIMIT)} disabled={tasks.length < LIMIT} variant="ghost">
           下一页
