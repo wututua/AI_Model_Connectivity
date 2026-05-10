@@ -7,10 +7,17 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"strings"
 
 	"cg/internal/config"
 )
+
+var thinkingTagRE = regexp.MustCompile(`(?is)<think(?:ing)?>\s*.*?\s*</think(?:ing)?>`)
+
+func stripThinkingTags(s string) string {
+	return strings.TrimSpace(thinkingTagRE.ReplaceAllString(s, ""))
+}
 
 type OpenAICompatible struct {
 	cfg    config.ProviderConfig
@@ -148,7 +155,7 @@ func (p *OpenAICompatible) Chat(ctx context.Context, model, systemPrompt, prompt
 	if len(parsed.Choices) == 0 {
 		return "", fmt.Errorf("empty choices")
 	}
-	return strings.TrimSpace(parsed.Choices[0].Message.Content), nil
+	return stripThinkingTags(parsed.Choices[0].Message.Content), nil
 }
 
 func (p *OpenAICompatible) authorize(req *http.Request) {

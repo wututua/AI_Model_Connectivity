@@ -31,10 +31,6 @@ func main() {
 		log.Fatalf("open database: %v", err)
 	}
 	defer store.Close()
-	if err := web.EnsureAssets(baseCfg.WebDir); err != nil {
-		log.Fatalf("write web assets: %v", err)
-	}
-
 	runtimeCfg, ok, err := store.LoadRuntimeConfig(context.Background())
 	if err != nil {
 		log.Fatalf("load runtime config: %v", err)

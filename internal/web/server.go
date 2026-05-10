@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -112,7 +113,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/admin/providers/", s.adminProviderItem)
 	mux.HandleFunc("/api/admin/tasks", s.adminTasks)
 	mux.HandleFunc("/api/admin/tasks/", s.adminTaskItem)
-	mux.Handle("/", http.FileServer(http.Dir(s.cfg.WebDir)))
+	mux.Handle("/", spaHandler(s.cfg.WebDir))
 	return mux
 }
 
@@ -281,8 +282,7 @@ func (s *Server) adminProviderItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	path := strings.TrimPrefix(r.URL.Path, "/api/admin/providers/")
-	if strings.HasSuffix(path, "/rerun") {
-		id := strings.TrimSuffix(path, "/rerun")
+	if id, ok := strings.CutSuffix(path, "/rerun"); ok {
 		if r.Method != http.MethodPost {
 			methodNotAllowed(w)
 			return
@@ -429,6 +429,27 @@ func (s *Server) HTTPServer() *http.Server {
 		ReadTimeout:       15 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
+}
+
+// spaHandler serves static files from webDir; falls back to index.html for
+// any path that has no file extension and doesn't start with /api/, so that
+// the React SPA handles client-side routing (e.g. /admin).
+func spaHandler(webDir string) http.Handler {
+	fs := http.FileServer(http.Dir(webDir))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/api/") {
+			http.NotFound(w, r)
+			return
+		}
+		// If the file exists on disk, serve it directly (assets, index.html, etc.).
+		fpath := filepath.Join(webDir, filepath.Clean(r.URL.Path))
+		if _, err := os.Stat(fpath); err == nil {
+			fs.ServeHTTP(w, r)
+			return
+		}
+		// SPA fallback: let the React router handle the path.
+		http.ServeFile(w, r, filepath.Join(webDir, "index.html"))
+	})
 }
 
 func isPublicBindHost(host string) bool {

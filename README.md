@@ -1,6 +1,6 @@
 # AI_Model_Connectivity
 
-一个用于检测 OpenAI 兼容模型接口连通性的独立 Web 状态页。
+一个用于检测 OpenAI 兼容模型接口连通性的独立 Web 状态页，配套可视化管理面板。
 
 ## 功能
 
@@ -8,8 +8,10 @@
 - 支持多个 Provider 和多个模型，双层并发控制（全局 + 单 Provider）
 - 三态展示：正常、较慢、异常；记录历史、24h 平均延迟和统计窗口可用率
 - SSE 实时推送，仪表盘自动刷新；无实时推送时自动降级为 30 秒轮询
+- 自动剥离响应中的 `<think>` / `<thinking>` 思考标签，兼容 DeepSeek-R1、QwQ 等推理模型
+- 仪表盘展示每次历史检测的圆形 LED 状态灯及每个模型的当前检测状态指示灯
+- Web 管理面板：在浏览器中动态增删 Provider、调整检测参数、查看任务历史、导入导出配置；内置 Token 消耗估算
 - 支持 Telegram、Discord、Bark、企业微信、钉钉和通用 Webhook 告警通知
-- 后台管理 API：动态增删 Provider、修改检测参数、导入导出配置、热加载 `.env`
 
 ## 快速开始
 
@@ -19,26 +21,59 @@ cp .env.example .env
 go run ./cmd/cg
 ```
 
-打开 [http://127.0.0.1:8080](http://127.0.0.1:8080) 查看仪表盘。首次启动若页面为空，先手动触发一次检测：
+打开 [http://127.0.0.1:8080](http://127.0.0.1:8080) 查看仪表盘，点击右上角 **管理** 进入管理面板。
+
+首次启动若仪表盘为空，先手动触发一次检测：
 
 ```bash
 curl -X POST http://127.0.0.1:8080/api/admin/check
 ```
 
+## 管理面板
+
+访问 [http://127.0.0.1:8080/admin](http://127.0.0.1:8080/admin) 打开管理面板。
+
+若已设置 `ADMIN_TOKEN`，进入时需要输入 Token；本地监听（`127.0.0.1`）且未设置 Token 时，可直接进入。
+
+| 标签页 | 功能 |
+|--------|------|
+| 检测控制 | 查看运行状态、手动触发检测、停止检测；Token 消耗估算 |
+| Provider | 新增、编辑、删除、单独重跑 Provider |
+| 设置 | 修改检测参数、历史配置、告警通知 |
+| 任务历史 | 分页查看历史检测任务及结果 |
+| 配置管理 | 导出/导入 JSON 配置、热加载 `.env` |
+
 ## 部署
 
 ### 二进制部署
 
-1. 从 [Releases](../../releases) 下载对应平台的压缩包并解压
+1. 从 [Releases](../../releases) 下载对应平台的压缩包并解压（内含预构建的 `web/` 目录）
 2. 复制并编辑配置文件：`cp .env.example .env`
 3. 启动服务：`./model-connectivity`（Windows 运行 `model-connectivity.exe`）
 
 ### 源码运行
 
 ```bash
+# 首次运行前需要构建前端
+cd frontend && npm install && npm run build && cd ..
+
 go run ./cmd/cg          # 持续服务模式
 go run ./cmd/cg check    # 只运行一次检测后退出
 ```
+
+### 前端开发模式
+
+```bash
+# 终端 1：启动后端
+go run ./cmd/cg
+
+# 终端 2：启动前端开发服务器（热更新，代理到 :8080）
+cd frontend && npm run dev
+```
+
+访问 [http://127.0.0.1:5173](http://127.0.0.1:5173) 即可。修改 `frontend/src/` 下的文件后浏览器自动刷新。
+
+开发完成后执行 `npm run build` 将产物写入 `web/`，Go 服务端直接提供。
 
 ## 配置
 
@@ -62,13 +97,15 @@ go run ./cmd/cg check    # 只运行一次检测后退出
 |------|--------|------|
 | `TIMEOUT_SECONDS` | `30` | 单模型检测超时（秒） |
 | `MODEL_LIST_TIMEOUT_SECONDS` | `20` | 获取模型列表超时（秒） |
-| `SLOW_THRESHOLD_MS` | `8000` | 超过此延迟标记为"较慢"（毫秒） |
-| `CONCURRENCY` | `3` | 全局最大并发数 |
+| `SLOW_THRESHOLD_MS` | `300` | 超过此延迟标记为"较慢"（毫秒） |
+| `CONCURRENCY` | `1` | 全局最大并发数；默认 `1` 表示所有模型严格逐个检测 |
 | `PROVIDER_CONCURRENCY` | `1` | 单 Provider 最大并发数 |
 | `MAX_MODELS_PER_PROVIDER` | `0` | 每个 Provider 最多检测模型数，`0` 不限制 |
 | `SKIP_MODELS` | — | 跳过的模型，支持 `model`、`provider/model`、`provider::model`，逗号分隔 |
 | `PROBE_PROMPT` | `只回复 OK 两个字母。` | 探测用提示词 |
 | `PROBE_SYSTEM_PROMPT` | `你是一个模型连通性探针。请只回复 OK，不要解释。` | 探测用系统提示词 |
+
+> **推理模型兼容**：对于 DeepSeek-R1、QwQ 等会在响应中输出 `<think>…</think>` 或 `<thinking>…</thinking>` 思考过程的模型，后端会在解析时自动剥离这些标签，仅保留实际回复内容用于状态判断和预览展示。
 
 ### 历史与展示
 
@@ -148,6 +185,8 @@ PROVIDER_2_ENABLED=true
 
 `PROVIDER_N_MODELS` 留空时，自动请求 `{BASE_URL}/models` 获取模型列表。
 
+Provider 也可以在管理面板的 **Provider** 标签页中通过界面增删，无需重启服务。
+
 Provider 图标根据 `PROVIDER_N_ID`、`PROVIDER_N_TYPE`、`PROVIDER_N_NAME` 自动匹配，优先级依次降低，支持前缀及按 `_`、`-`、空格拆分后的关键词匹配。`PROVIDER_N_TYPE` 支持以下内置图标键：
 
 ```
@@ -168,6 +207,7 @@ xinference  bailian  volcengine
 | `GET` | `/api/status` | 获取最新状态报告 |
 | `GET` | `/api/events` | SSE 实时推送 |
 | `GET` | `/` | Web 仪表盘 |
+| `GET` | `/admin` | Web 管理面板 |
 
 ### 管理接口
 
@@ -199,13 +239,13 @@ xinference  bailian  volcengine
 ```
 web/index.html
 web/assets/app.js
-web/assets/style.css
+web/assets/index.css
 data/cg.sqlite
 ```
 
-历史检测结果、最新报告和告警状态保存在 SQLite。首次启动时若存在旧版 JSON 文件（`data/latest_report.json`、`data/probe_history.json`、`data/notify_state.txt`），会自动迁移到 SQLite，旧文件不会被删除。
+`web/` 目录由 Vite 构建生成，发布包内已包含预构建产物，无需手动构建即可运行。
 
-Web 静态文件在首次启动时自动写出到 `WEB_DIR`（已存在则跳过），可以在此基础上自定义页面样式。
+历史检测结果、最新报告和告警状态保存在 SQLite。首次启动时若存在旧版 JSON 文件（`data/latest_report.json`、`data/probe_history.json`、`data/notify_state.txt`），会自动迁移到 SQLite，旧文件不会被删除。
 
 ## 安全提示
 

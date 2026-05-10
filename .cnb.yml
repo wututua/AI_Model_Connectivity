@@ -4,11 +4,23 @@
     image: golang:1.25
     volumes:
       - go-modules
-      - go-build # 新增Go构建缓存卷
+      - go-build
   env:
     GOMODCACHE: /go/pkg/mod
     GOCACHE: /go/pkg/build
     CGO_ENABLED: "0"
+
+# 前端构建任务配置
+.frontend-job: &frontend-job
+  docker:
+    image: node:20-slim
+  name: build-frontend
+  stages:
+    - name: build
+      script: |
+        cd frontend
+        npm ci
+        npm run build
 
 # 公共测试阶段（仅执行一次）
 .test-stages: &test-stages
@@ -28,7 +40,9 @@
       ASSET_NAME="${BINARY%.exe}"
       cp ../.env.example .env.example
       cp ../README.md README.md
-      tar -czf "${ASSET_NAME}.tar.gz" "$BINARY" ".env.example" "README.md"
+      WEB_SRC="/yyds/build-frontend/workspace/web"
+      [ -d "$WEB_SRC" ] && cp -r "$WEB_SRC" ./web || cp -r ../web ./web
+      tar -czf "${ASSET_NAME}.tar.gz" "$BINARY" ".env.example" "README.md" "web/"
       echo "##[set-output ARTIFACT=${ASSET_NAME}]"
     exports:
       ARTIFACT: ARTIFACT
@@ -48,7 +62,9 @@
       ASSET_NAME="${BINARY%.exe}"
       cp ../.env.example .env.example
       cp ../README.md README.md
-      zip "${ASSET_NAME}.zip" "$BINARY" ".env.example" "README.md"
+      WEB_SRC="/yyds/build-frontend/workspace/web"
+      [ -d "$WEB_SRC" ] && cp -r "$WEB_SRC" ./web || cp -r ../web ./web
+      zip -r "${ASSET_NAME}.zip" "$BINARY" ".env.example" "README.md" "web/"
       echo "##[set-output ARTIFACT=${ASSET_NAME}]"
     exports:
       ARTIFACT: ARTIFACT
@@ -58,7 +74,6 @@
   - name: collect-artifacts
     script: |
       mkdir -p release-assets
-      # 修正为CNB CI实际工作目录格式
       for dir in /yyds/*/workspace/dist; do
         if [ -d "$dir" ]; then
           cp "$dir"/*.tar.gz "$dir"/*.zip release-assets/ 2>/dev/null || true
@@ -73,7 +88,7 @@
         ## Release 说明
 
         - 下载对应平台的压缩包
-        - 解压后可直接使用，其中包含二进制、`.env.example` 和 `README.md`
+        - 解压后可直接使用，其中包含二进制、`.env.example`、`README.md` 和预构建的 `web/` 目录
         - 复制 `.env.example` 为 `.env`，填写至少一个 Provider 后启动程序
         - 该项目会真实调用模型接口并消耗 token，建议把自动检测周期调长一点
 
@@ -89,11 +104,13 @@
 # tag_push 触发编译发版
 $:
   tag_push:
-    # 单独的测试任务：只在Linux/AMD64上执行一次
     test:
       <<: *go-env
       name: run-unit-tests
       stages: *test-stages
+
+    build-frontend:
+      <<: *frontend-job
 
     build-linux-amd64:
       <<: *go-env
@@ -103,7 +120,9 @@ $:
         GOARCH: amd64
         BINARY: model-connectivity-linux-amd64
       stages: *build-stages
-      needs: test # 依赖测试通过
+      needs:
+        - test
+        - build-frontend
 
     build-linux-arm64:
       <<: *go-env
@@ -113,7 +132,9 @@ $:
         GOARCH: arm64
         BINARY: model-connectivity-linux-arm64
       stages: *build-stages
-      needs: test
+      needs:
+        - test
+        - build-frontend
 
     build-windows-amd64:
       <<: *go-env
@@ -123,7 +144,9 @@ $:
         GOARCH: amd64
         BINARY: model-connectivity-windows-amd64.exe
       stages: *windows-build-stages
-      needs: test
+      needs:
+        - test
+        - build-frontend
 
     build-windows-arm64:
       <<: *go-env
@@ -133,7 +156,9 @@ $:
         GOARCH: arm64
         BINARY: model-connectivity-windows-arm64.exe
       stages: *windows-build-stages
-      needs: test
+      needs:
+        - test
+        - build-frontend
 
     build-darwin-amd64:
       <<: *go-env
@@ -143,7 +168,9 @@ $:
         GOARCH: amd64
         BINARY: model-connectivity-darwin-amd64
       stages: *build-stages
-      needs: test
+      needs:
+        - test
+        - build-frontend
 
     build-darwin-arm64:
       <<: *go-env
@@ -153,13 +180,14 @@ $:
         GOARCH: arm64
         BINARY: model-connectivity-darwin-arm64
       stages: *build-stages
-      needs: test
+      needs:
+        - test
+        - build-frontend
 
     release:
       <<: *go-env
       name: release
       stages: *release-stages
-      # 依赖所有构建任务完成
       needs:
         - build-linux-amd64
         - build-linux-arm64
@@ -175,6 +203,9 @@ $:
       name: run-unit-tests
       stages: *test-stages
 
+    build-frontend:
+      <<: *frontend-job
+
     build-linux-amd64:
       <<: *go-env
       name: build-linux-amd64
@@ -183,7 +214,9 @@ $:
         GOARCH: amd64
         BINARY: model-connectivity-linux-amd64
       stages: *build-stages
-      needs: test
+      needs:
+        - test
+        - build-frontend
 
     build-linux-arm64:
       <<: *go-env
@@ -193,7 +226,9 @@ $:
         GOARCH: arm64
         BINARY: model-connectivity-linux-arm64
       stages: *build-stages
-      needs: test
+      needs:
+        - test
+        - build-frontend
 
     build-windows-amd64:
       <<: *go-env
@@ -203,7 +238,9 @@ $:
         GOARCH: amd64
         BINARY: model-connectivity-windows-amd64.exe
       stages: *windows-build-stages
-      needs: test
+      needs:
+        - test
+        - build-frontend
 
     build-windows-arm64:
       <<: *go-env
@@ -213,7 +250,9 @@ $:
         GOARCH: arm64
         BINARY: model-connectivity-windows-arm64.exe
       stages: *windows-build-stages
-      needs: test
+      needs:
+        - test
+        - build-frontend
 
     build-darwin-amd64:
       <<: *go-env
@@ -223,7 +262,9 @@ $:
         GOARCH: amd64
         BINARY: model-connectivity-darwin-amd64
       stages: *build-stages
-      needs: test
+      needs:
+        - test
+        - build-frontend
 
     build-darwin-arm64:
       <<: *go-env
@@ -233,7 +274,9 @@ $:
         GOARCH: arm64
         BINARY: model-connectivity-darwin-arm64
       stages: *build-stages
-      needs: test
+      needs:
+        - test
+        - build-frontend
 
     release:
       <<: *go-env
