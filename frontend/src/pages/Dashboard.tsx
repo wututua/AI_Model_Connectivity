@@ -415,6 +415,12 @@ export default function Dashboard() {
           </div>
         )}
       </main>
+
+      <footer className="max-w-[1180px] mx-auto px-4 py-6 flex items-center justify-center">
+        <p className="text-[11px] font-mono" style={{ color: 'var(--muted)', opacity: .5 }}>
+          © {new Date().getFullYear()} AI Model Connectivity · MIT License
+        </p>
+      </footer>
     </div>
   )
 }
