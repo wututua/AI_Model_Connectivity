@@ -523,6 +523,7 @@ function ProvidersTab() {
   const [deleting, setDeleting] = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
   const [rerunning, setRerunning] = useState<string | null>(null)
+  const [search, setSearch] = useState('')
 
   const load = useCallback(() => {
     setLoading(true)
@@ -575,9 +576,15 @@ function ProvidersTab() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-base font-semibold" style={{ color: 'var(--text)' }}>Provider 管理</h2>
-        <div className="flex gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <input
+            className="input-glass rounded-xl px-3 py-1.5 text-xs w-44"
+            placeholder="搜索 ID / 名称 / URL…"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+          />
           <Btn onClick={load} loading={loading} variant="ghost"><RefreshCw className="w-3.5 h-3.5" /></Btn>
           <Btn onClick={() => setEditing('new')} variant="primary"><Plus className="w-3.5 h-3.5" />新增</Btn>
         </div>
@@ -602,8 +609,12 @@ function ProvidersTab() {
               <th className="pb-2 font-medium">操作</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-800/60">
-            {providers.map(p => (
+          <tbody>
+            {providers.filter(p => {
+              if (!search.trim()) return true
+              const q = search.toLowerCase()
+              return p.id.toLowerCase().includes(q) || p.name.toLowerCase().includes(q) || p.base_url.toLowerCase().includes(q)
+            }).map(p => (
               <tr key={p.id} className="transition-colors" style={{ borderBottom: '1px solid var(--border)' }}>
                 <td className="py-3 pr-4">
                   <div className="font-mono text-xs" style={{ color: 'var(--muted)' }}>{p.id}</div>
