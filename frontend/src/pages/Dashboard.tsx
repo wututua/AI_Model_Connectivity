@@ -280,7 +280,7 @@ export default function Dashboard() {
   const [refreshing, setRefreshing] = useState(false)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<'all' | 'ok' | 'slow' | 'error'>('all')
-  const [sortBy, setSortBy] = useState<'status' | 'name' | 'latency' | 'models'>('status')
+  const [sortBy, setSortBy] = useState<'default' | 'status' | 'name' | 'latency' | 'models'>('default')
   const [viewMode, setViewMode] = useState<'detailed' | 'compact'>('detailed')
   const { theme, toggle: toggleTheme } = useTheme()
   const navVisible = useScrollNav()
@@ -340,8 +340,9 @@ export default function Dashboard() {
           case 'name':    return a.provider_name.localeCompare(b.provider_name)
           case 'latency': return avgLatency(a) - avgLatency(b)
           case 'models':  return b.model_count - a.model_count
-          default:        return (STATUS_ORDER[a.status as keyof typeof STATUS_ORDER] ?? 3)
+          case 'status':  return (STATUS_ORDER[a.status as keyof typeof STATUS_ORDER] ?? 3)
                                - (STATUS_ORDER[b.status as keyof typeof STATUS_ORDER] ?? 3)
+          default:        return 0  // 保持 API 返回的原始顺序
         }
       })
   }, [report, search, statusFilter, sortBy])
@@ -516,6 +517,7 @@ export default function Dashboard() {
                 onChange={e => setSortBy(e.target.value as typeof sortBy)}
                 className="input-glass rounded-xl px-2 py-1.5 text-xs cursor-pointer focus:outline-none"
               >
+                <option value="default">默认顺序</option>
                 <option value="status">按状态</option>
                 <option value="name">按名称</option>
                 <option value="latency">按延迟</option>
