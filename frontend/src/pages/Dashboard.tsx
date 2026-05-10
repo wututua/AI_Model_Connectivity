@@ -21,16 +21,34 @@ function StatusPill({ status, label, large }: { status: string; label: string; l
   )
 }
 
-function BarChart({ history }: { history: string[] }) {
+function barCls(s: string) {
+  if (s === 'ok') return 'bar-ok'
+  if (s === 'slow') return 'bar-slow'
+  if (s === 'error') return 'bar-error'
+  return 'bar-empty'
+}
+
+function StatusLights({ history }: { history: string[] }) {
   return (
-    <div className="flex gap-[3px] mt-2.5">
-      {history.map((s, i) => (
-        <div
-          key={i}
-          className={`h-3.5 flex-1 min-w-[4px] rounded-full transition-all bar-${statusClass(s) === 'ok' ? 'ok' : statusClass(s) === 'slow' ? 'slow' : s === 'error' ? 'error' : 'empty'}`}
-          title={s}
-        />
-      ))}
+    <div className="flex flex-wrap gap-1 mt-2.5">
+      {history.map((s, i) => {
+        const colored = s === 'ok' || s === 'slow' || s === 'error'
+        const glow = s === 'ok'
+          ? '0 0 5px rgba(56,217,150,.8)'
+          : s === 'slow'
+          ? '0 0 5px rgba(246,196,83,.8)'
+          : s === 'error'
+          ? '0 0 5px rgba(255,107,122,.8)'
+          : undefined
+        return (
+          <div
+            key={i}
+            className={`w-2.5 h-2.5 rounded-full shrink-0 transition-all ${barCls(s)}`}
+            style={colored ? { boxShadow: glow } : undefined}
+            title={s}
+          />
+        )
+      })}
     </div>
   )
 }
@@ -51,6 +69,14 @@ function CurveChart({ pathLine, pathArea, status }: { pathLine: string; pathArea
 }
 
 function ModelRow({ result, showError }: { result: ModelResult; showError: boolean }) {
+  const sc = statusClass(result.status)
+  const ledColor = sc === 'ok' ? 'var(--ok)' : sc === 'slow' ? 'var(--slow)' : 'var(--error)'
+  const ledGlow = sc === 'ok'
+    ? '0 0 6px rgba(56,217,150,.9)'
+    : sc === 'slow'
+    ? '0 0 6px rgba(246,196,83,.9)'
+    : '0 0 6px rgba(255,107,122,.9)'
+
   return (
     <div
       className="relative overflow-hidden rounded-[20px] p-4 border transition-all"
@@ -63,7 +89,12 @@ function ModelRow({ result, showError }: { result: ModelResult; showError: boole
       <div className="relative" style={{ zIndex: 1 }}>
         {/* Model name + status */}
         <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
+          <div className="min-w-0 flex items-center gap-2">
+            {/* Current-detection LED */}
+            <div
+              className={`w-2 h-2 rounded-full shrink-0${sc === 'ok' ? ' animate-pulse' : ''}`}
+              style={{ background: ledColor, boxShadow: ledGlow }}
+            />
             <h3 className="font-mono text-sm font-medium truncate" style={{ color: 'var(--text)' }}>
               {result.model}
               {result.is_current && (
@@ -100,7 +131,7 @@ function ModelRow({ result, showError }: { result: ModelResult; showError: boole
 
         {/* History bars */}
         {result.history && result.history.length > 0 && (
-          <BarChart history={result.history} />
+          <StatusLights history={result.history} />
         )}
       </div>
     </div>
@@ -123,7 +154,7 @@ function ProviderCard({ provider, showError }: { provider: ProviderReport; showE
             <img
               src={provider.provider_logo}
               alt={provider.provider_name}
-              className="w-9 h-9 rounded-xl object-contain p-1"
+              className="w-9 h-9 rounded-xl object-contain"
               style={{ background: 'var(--card-strong)' }}
             />
           ) : (
