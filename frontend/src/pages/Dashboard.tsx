@@ -401,12 +401,23 @@ export default function Dashboard() {
                 )
               })()}
             </div>
-            <div className="text-right shrink-0">
-              <p className="text-xs uppercase tracking-widest mb-1" style={{ color: 'var(--muted)', letterSpacing: '.12em' }}>检测耗时</p>
-              <p className="text-3xl font-mono font-bold" style={{ color: 'var(--text)' }}>
-                {report.elapsed_ms}
-                <span className="text-base font-normal ml-1" style={{ color: 'var(--muted)' }}>ms</span>
-              </p>
+            <div className="text-right shrink-0 flex flex-col gap-3 sm:gap-4">
+              <div>
+                <p className="text-xs uppercase tracking-widest mb-1" style={{ color: 'var(--muted)', letterSpacing: '.12em' }}>检测耗时</p>
+                <p className="text-3xl font-mono font-bold" style={{ color: 'var(--text)' }}>
+                  {report.elapsed_ms}
+                  <span className="text-base font-normal ml-1" style={{ color: 'var(--muted)' }}>ms</span>
+                </p>
+              </div>
+              {report.total > 0 && (
+                <div>
+                  <p className="text-xs uppercase tracking-widest mb-1" style={{ color: 'var(--muted)', letterSpacing: '.12em' }}>可用率</p>
+                  <p className="text-3xl font-mono font-bold" style={{ color: report.ok_count === report.total ? 'var(--ok)' : report.error_count > 0 ? 'var(--error)' : 'var(--slow)' }}>
+                    {Math.round((report.ok_count / report.total) * 100)}
+                    <span className="text-base font-normal ml-0.5">%</span>
+                  </p>
+                </div>
+              )}
             </div>
           </div>
         )}
