@@ -105,9 +105,6 @@ function ModelRow({ result, showError }: { result: ModelResult; showError: boole
             />
             <h3 className="font-mono text-sm font-medium truncate" style={{ color: 'var(--text)' }}>
               {result.model}
-              {result.is_current && (
-                <em className="ml-2 text-[11px] not-italic" style={{ color: 'var(--muted)' }}>[默认]</em>
-              )}
             </h3>
           </div>
           <div className="flex items-center gap-2 shrink-0">
