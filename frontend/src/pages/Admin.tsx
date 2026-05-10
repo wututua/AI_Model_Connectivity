@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import {
   Activity, ArrowLeft, Play, Square, RefreshCw, Plus, Edit2, Trash2,
@@ -12,6 +12,21 @@ import type {
   RunningState, SafeProviderConfig, ProviderUpdate,
   CheckTask, RuntimeSettings, ConfigExport,
 } from '../types'
+
+// ── Helpers ─────────────────────────────────────────────────────────────────
+
+function useAutoMsg(delay = 3000) {
+  const [msg, setMsgState] = useState('')
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const setMsg = (m: string) => {
+    setMsgState(m)
+    if (timerRef.current) clearTimeout(timerRef.current)
+    if (m && !m.startsWith('错误')) {
+      timerRef.current = setTimeout(() => setMsgState(''), delay)
+    }
+  }
+  return [msg, setMsg] as const
+}
 
 // ── Shared UI ───────────────────────────────────────────────────────────────
 
@@ -268,7 +283,7 @@ function OverviewTab() {
   const [cfg, setCfg] = useState<{ providers: SafeProviderConfig[]; settings: RuntimeSettings } | null>(null)
   const [loading, setLoading] = useState(false)
   const [actionLoading, setActionLoading] = useState(false)
-  const [msg, setMsg] = useState('')
+  const [msg, setMsg] = useAutoMsg()
 
   const load = useCallback(() => {
     setLoading(true)
@@ -504,7 +519,7 @@ function ProvidersTab() {
   const [providers, setProviders] = useState<SafeProviderConfig[]>([])
   const [loading, setLoading] = useState(false)
   const [editing, setEditing] = useState<SafeProviderConfig | null | 'new'>(null)
-  const [msg, setMsg] = useState('')
+  const [msg, setMsg] = useAutoMsg()
   const [deleting, setDeleting] = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
   const [rerunning, setRerunning] = useState<string | null>(null)
@@ -672,7 +687,7 @@ function SettingsTab() {
   const [form, setForm] = useState<RuntimeSettings | null>(null)
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
-  const [msg, setMsg] = useState('')
+  const [msg, setMsg] = useAutoMsg()
 
   useEffect(() => {
     setLoading(true)
@@ -966,7 +981,7 @@ function ConfigTab() {
   const [exportData, setExportData] = useState('')
   const [importText, setImportText] = useState('')
   const [loading, setLoading] = useState<string | null>(null)
-  const [msg, setMsg] = useState('')
+  const [msg, setMsg] = useAutoMsg()
 
   const withLoad = async (key: string, fn: () => Promise<unknown>, successMsg: string) => {
     setLoading(key)
