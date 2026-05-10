@@ -24,18 +24,19 @@ function Btn({
   variant?: 'default' | 'primary' | 'danger' | 'ghost'
   children: React.ReactNode; className?: string
 }) {
-  const base = 'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed'
-  const variants = {
-    default: 'bg-slate-800 hover:bg-slate-700 text-slate-200',
-    primary: 'bg-blue-600 hover:bg-blue-500 text-white',
-    danger:  'bg-red-600/20 hover:bg-red-600/40 text-red-400 border border-red-500/30',
-    ghost:   'hover:bg-slate-800 text-slate-400 hover:text-white',
+  const base = 'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-medium transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed'
+  const variantStyle: Record<string, React.CSSProperties> = {
+    default: { background: 'var(--card-strong)', color: 'var(--text)', border: '1px solid var(--border)' },
+    primary: { background: 'rgba(56,217,150,.18)', color: 'var(--ok)', border: '1px solid rgba(56,217,150,.35)' },
+    danger:  { background: 'rgba(255,107,122,.12)', color: 'var(--error)', border: '1px solid rgba(255,107,122,.3)' },
+    ghost:   { background: 'transparent', color: 'var(--muted)', border: '1px solid transparent' },
   }
   return (
     <button
       onClick={onClick}
       disabled={disabled || loading}
-      className={`${base} ${variants[variant]} ${className}`}
+      className={`${base} ${className}`}
+      style={variantStyle[variant]}
     >
       {loading ? <Spinner /> : null}
       {children}
@@ -48,7 +49,7 @@ function Badge({ status }: { status: string }) {
     ok: 'badge-ok', success: 'badge-ok',
     slow: 'badge-slow',
     error: 'badge-error', canceled: 'badge-error',
-    running: 'bg-blue-500/15 text-blue-400 border border-blue-500/30',
+    running: 'badge-ok',
   }
   const cls = map[status] ?? 'badge-unknown'
   const labels: Record<string, string> = {
@@ -65,14 +66,14 @@ function Badge({ status }: { status: string }) {
 function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
     <div>
-      <label className="block text-xs text-slate-400 mb-1">{label}</label>
+      <label className="block text-xs mb-1" style={{ color: 'var(--muted)' }}>{label}</label>
       {children}
-      {hint && <p className="text-[11px] text-slate-600 mt-1">{hint}</p>}
+      {hint && <p className="text-[11px] mt-1" style={{ color: 'var(--muted)', opacity: .6 }}>{hint}</p>}
     </div>
   )
 }
 
-const inputCls = 'w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-sm text-white font-mono focus:outline-none focus:border-blue-500 transition-colors'
+const inputCls = 'w-full rounded-xl px-3 py-1.5 text-sm font-mono transition-colors input-glass'
 
 // ── Token Gate ──────────────────────────────────────────────────────────────
 
@@ -112,16 +113,16 @@ function TokenGate({ onEnter }: { onEnter: () => void }) {
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4">
+    <div className="min-h-screen flex items-center justify-center p-4">
       <div className="w-full max-w-sm">
-        <div className="bg-slate-900 border border-slate-700 rounded-2xl p-8">
+        <div className="glass rounded-[28px] p-8">
           <div className="flex items-center gap-2 mb-6">
-            <Activity className="w-5 h-5 text-blue-400" />
-            <span className="font-semibold text-white">管理员认证</span>
+            <Activity className="w-5 h-5" style={{ color: 'var(--ok)' }} />
+            <span className="font-semibold" style={{ color: 'var(--text)' }}>管理员认证</span>
           </div>
-          <p className="text-sm text-slate-400 mb-5">
-            输入 <code className="font-mono bg-slate-800 px-1 rounded">ADMIN_TOKEN</code> 访问管理面板。
-            {!tokenRequired && <span className="block mt-1 text-slate-500 text-xs">若服务运行在 localhost 且未设置 Token，可直接留空进入。</span>}
+          <p className="text-sm mb-5" style={{ color: 'var(--muted)' }}>
+            输入 <code className="font-mono px-1 rounded" style={{ background: 'var(--card-strong)' }}>ADMIN_TOKEN</code> 访问管理面板。
+            {!tokenRequired && <span className="block mt-1 text-xs" style={{ color: 'var(--muted)', opacity: .65 }}>若服务运行在 localhost 且未设置 Token，可直接留空进入。</span>}
           </p>
           <div className="relative mb-3">
             <input
@@ -130,24 +131,28 @@ function TokenGate({ onEnter }: { onEnter: () => void }) {
               onChange={e => { setValue(e.target.value); setErr('') }}
               onKeyDown={e => e.key === 'Enter' && !loading && submit()}
               placeholder={tokenRequired ? 'Admin Token（必填）' : 'Admin Token（可为空）'}
-              className={`${inputCls} pr-9 ${tokenRequired && !value.trim() ? 'border-amber-500/50' : ''}`}
+              className={`${inputCls} pr-9`}
+              style={tokenRequired && !value.trim() ? { borderColor: 'rgba(246,196,83,.5)' } : undefined}
               autoFocus
             />
             <button
               onClick={() => setShow(!show)}
-              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 cursor-pointer"
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 cursor-pointer transition-colors"
+              style={{ color: 'var(--muted)' }}
+              onMouseEnter={e => (e.currentTarget.style.color = 'var(--text)')}
+              onMouseLeave={e => (e.currentTarget.style.color = 'var(--muted)')}
               aria-label={show ? '隐藏 Token' : '显示 Token'}
             >
               {show ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
             </button>
           </div>
-          {err && <p className="text-red-400 text-xs mb-3">{err}</p>}
+          {err && <p className="text-xs mb-3" style={{ color: 'var(--error)' }}>{err}</p>}
           <Btn variant="primary" onClick={submit} loading={loading} className="w-full justify-center">
             进入管理面板
           </Btn>
         </div>
         <div className="text-center mt-4">
-          <Link to="/" className="text-xs text-slate-600 hover:text-slate-400 transition-colors cursor-pointer">
+          <Link to="/" className="text-xs transition-colors cursor-pointer" style={{ color: 'var(--muted)', opacity: .6 }}>
             返回仪表盘
           </Link>
         </div>
@@ -198,17 +203,17 @@ function TokenEstimateCard({ providers, settings }: {
   const monthlyTokens = dailyTokens !== null ? dailyTokens * 30 : null
 
   const row = (label: string, value: React.ReactNode, sub?: string) => (
-    <div className="flex items-center justify-between py-2 border-b border-slate-800 last:border-0">
-      <span className="text-xs text-slate-500">{label}</span>
-      <span className="text-sm font-mono text-white text-right">
+    <div className="flex items-center justify-between py-2 last:border-0" style={{ borderBottom: '1px solid var(--border)' }}>
+      <span className="text-xs" style={{ color: 'var(--muted)' }}>{label}</span>
+      <span className="text-sm font-mono text-right" style={{ color: 'var(--text)' }}>
         {value}
-        {sub && <span className="text-xs text-slate-500 ml-1.5">{sub}</span>}
+        {sub && <span className="text-xs ml-1.5" style={{ color: 'var(--muted)' }}>{sub}</span>}
       </span>
     </div>
   )
 
   return (
-    <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
+    <div className="glass rounded-[22px] p-4">
       <div className="flex items-center gap-1.5 mb-3">
         <Activity className="w-3.5 h-3.5 text-amber-400" />
         <p className="text-xs font-medium text-amber-400">Token 消耗估算</p>
@@ -246,7 +251,7 @@ function TokenEstimateCard({ providers, settings }: {
         monthlyTokens !== null ? fmtNum(monthlyTokens) : '—',
         'tokens'
       )}
-      <p className="text-[10px] text-slate-600 mt-2">
+      <p className="text-[10px] mt-2" style={{ color: 'var(--muted)', opacity: .55 }}>
         基于每模型约 {TOKENS_PER_MODEL} token（系统提示词 + 探测提示词 + 响应），实际消耗因模型而异。
         不含手动触发的检测。
       </p>
@@ -293,30 +298,30 @@ function OverviewTab() {
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between">
-        <h2 className="text-base font-semibold text-white">检测控制</h2>
+        <h2 className="text-base font-semibold" style={{ color: 'var(--text)' }}>检测控制</h2>
         <Btn onClick={load} loading={loading} variant="ghost"><RefreshCw className="w-3.5 h-3.5" />刷新</Btn>
       </div>
 
       {state && (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
-            <p className="text-xs text-slate-500 mb-2">当前状态</p>
+          <div className="glass rounded-[22px] p-4">
+            <p className="text-xs mb-2" style={{ color: 'var(--muted)' }}>当前状态</p>
             <div className="flex items-center gap-2">
               {state.running
-                ? <><Loader2 className="w-4 h-4 text-blue-400 animate-spin" /><span className="text-blue-400 font-medium">运行中</span></>
-                : <><CheckCircle className="w-4 h-4 text-green-400" /><span className="text-green-400 font-medium">空闲</span></>
+                ? <><Loader2 className="w-4 h-4 animate-spin" style={{ color: 'var(--ok)' }} /><span className="font-medium" style={{ color: 'var(--ok)' }}>运行中</span></>
+                : <><CheckCircle className="w-4 h-4" style={{ color: 'var(--ok)' }} /><span className="font-medium" style={{ color: 'var(--ok)' }}>空闲</span></>
               }
             </div>
             {state.running && (
-              <p className="text-xs text-slate-500 font-mono mt-2">
+              <p className="text-xs font-mono mt-2" style={{ color: 'var(--muted)' }}>
                 类型: {state.kind}{state.provider_id && ` · ${state.provider_id}`}
               </p>
             )}
           </div>
 
-          <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
-            <p className="text-xs text-slate-500 mb-2">自动检测</p>
-            <p className="font-mono text-sm text-white">
+          <div className="glass rounded-[22px] p-4">
+            <p className="text-xs mb-2" style={{ color: 'var(--muted)' }}>自动检测</p>
+            <p className="font-mono text-sm" style={{ color: 'var(--text)' }}>
               {state.auto_check_interval_min_hours <= 0 && state.auto_check_interval_max_hours <= 0
                 ? '已关闭'
                 : `${state.auto_check_interval_min_hours}h – ${state.auto_check_interval_max_hours}h`
@@ -346,7 +351,7 @@ function OverviewTab() {
       </div>
 
       {msg && (
-        <p className={`text-sm font-mono ${msg.startsWith('错误') ? 'text-red-400' : 'text-green-400'}`}>
+        <p className="text-sm font-mono" style={{ color: msg.startsWith('错误') ? 'var(--error)' : 'var(--ok)' }}>
           {msg}
         </p>
       )}
@@ -411,13 +416,13 @@ function ProviderModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
-      <div className="w-full max-w-lg bg-slate-900 border border-slate-700 rounded-2xl overflow-hidden">
-        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-800">
-          <h3 className="font-semibold text-white">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 backdrop-blur-sm" style={{ background: 'rgba(11,16,32,.75)' }}>
+      <div className="w-full max-w-lg glass rounded-[24px] overflow-hidden">
+        <div className="flex items-center justify-between px-5 py-4" style={{ borderBottom: '1px solid var(--border)' }}>
+          <h3 className="font-semibold" style={{ color: 'var(--text)' }}>
             {initial ? '编辑 Provider' : '新增 Provider'}
           </h3>
-          <button onClick={onClose} className="text-slate-500 hover:text-white cursor-pointer transition-colors">
+          <button onClick={onClose} className="cursor-pointer transition-colors" style={{ color: 'var(--muted)' }} onMouseEnter={e=>(e.currentTarget.style.color='var(--text)')} onMouseLeave={e=>(e.currentTarget.style.color='var(--muted)')}>
             <XCircle className="w-5 h-5" />
           </button>
         </div>
@@ -463,7 +468,7 @@ function ProviderModal({
                   onChange={e => set('clear_api_key', e.target.checked)}
                   className="rounded"
                 />
-                <span className="text-xs text-red-400">清除已有 Key</span>
+                <span className="text-xs" style={{ color: 'var(--error)' }}>清除已有 Key</span>
               </label>
             )}
           </Field>
@@ -474,13 +479,13 @@ function ProviderModal({
 
           <label className="flex items-center gap-2 cursor-pointer">
             <input type="checkbox" checked={form.enabled} onChange={e => set('enabled', e.target.checked)} className="rounded" />
-            <span className="text-sm text-slate-300">启用此 Provider</span>
+            <span className="text-sm" style={{ color: 'var(--text)' }}>启用此 Provider</span>
           </label>
 
           {err && <p className="text-red-400 text-xs">{err}</p>}
         </div>
 
-        <div className="flex justify-end gap-2 px-5 py-4 border-t border-slate-800">
+        <div className="flex justify-end gap-2 px-5 py-4" style={{ borderTop: '1px solid var(--border)' }}>
           <Btn onClick={onClose} variant="ghost">取消</Btn>
           <Btn onClick={submit} loading={saving} variant="primary">
             <Save className="w-3.5 h-3.5" />保存
@@ -548,7 +553,7 @@ function ProvidersTab() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-base font-semibold text-white">Provider 管理</h2>
+        <h2 className="text-base font-semibold" style={{ color: 'var(--text)' }}>Provider 管理</h2>
         <div className="flex gap-2">
           <Btn onClick={load} loading={loading} variant="ghost"><RefreshCw className="w-3.5 h-3.5" /></Btn>
           <Btn onClick={() => setEditing('new')} variant="primary"><Plus className="w-3.5 h-3.5" />新增</Btn>
@@ -556,7 +561,7 @@ function ProvidersTab() {
       </div>
 
       {msg && (
-        <p className={`text-sm font-mono ${msg.startsWith('错误') ? 'text-red-400' : 'text-green-400'}`}>
+        <p className="text-sm font-mono" style={{ color: msg.startsWith('错误') ? 'var(--error)' : 'var(--ok)' }}>
           {msg}
         </p>
       )}
@@ -564,7 +569,7 @@ function ProvidersTab() {
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
-            <tr className="border-b border-slate-800 text-xs text-slate-500 text-left">
+            <tr className="text-xs text-left" style={{ borderBottom: '1px solid var(--border)', color: 'var(--muted)' }}>
               <th className="pb-2 pr-4 font-medium">ID / 名称</th>
               <th className="pb-2 pr-4 font-medium">类型</th>
               <th className="pb-2 pr-4 font-medium">Base URL</th>
@@ -576,24 +581,24 @@ function ProvidersTab() {
           </thead>
           <tbody className="divide-y divide-slate-800/60">
             {providers.map(p => (
-              <tr key={p.id} className="hover:bg-slate-800/30 transition-colors">
+              <tr key={p.id} className="transition-colors" style={{ borderBottom: '1px solid var(--border)' }}>
                 <td className="py-3 pr-4">
-                  <div className="font-mono text-xs text-slate-400">{p.id}</div>
-                  <div className="text-white">{p.name}</div>
+                  <div className="font-mono text-xs" style={{ color: 'var(--muted)' }}>{p.id}</div>
+                  <div style={{ color: 'var(--text)' }}>{p.name}</div>
                 </td>
-                <td className="py-3 pr-4 font-mono text-xs text-slate-400">{p.type}</td>
+                <td className="py-3 pr-4 font-mono text-xs" style={{ color: 'var(--muted)' }}>{p.type}</td>
                 <td className="py-3 pr-4 max-w-[180px]">
-                  <span className="font-mono text-xs text-slate-400 truncate block" title={p.base_url}>
+                  <span className="font-mono text-xs truncate block" style={{ color: 'var(--muted)' }} title={p.base_url}>
                     {p.base_url}
                   </span>
                 </td>
-                <td className="py-3 pr-4 text-xs text-slate-500">
+                <td className="py-3 pr-4 text-xs" style={{ color: 'var(--muted)' }}>
                   {p.models.length === 0 ? <span className="italic">自动</span> : p.models.length}
                 </td>
                 <td className="py-3 pr-4">
                   {p.api_key_set
-                    ? <span className="text-green-400 text-xs">●</span>
-                    : <span className="text-slate-600 text-xs">—</span>}
+                    ? <span className="text-xs" style={{ color: 'var(--ok)' }}>●</span>
+                    : <span className="text-xs" style={{ color: 'var(--muted)', opacity: .4 }}>—</span>}
                 </td>
                 <td className="py-3 pr-4">
                   <Badge status={p.enabled ? 'ok' : 'error'} />
@@ -615,7 +620,7 @@ function ProvidersTab() {
             ))}
             {!loading && providers.length === 0 && (
               <tr>
-                <td colSpan={7} className="py-12 text-center text-slate-600">暂无 Provider</td>
+                <td colSpan={7} className="py-12 text-center" style={{ color: 'var(--muted)', opacity: .5 }}>暂无 Provider</td>
               </tr>
             )}
           </tbody>
@@ -682,7 +687,7 @@ function SettingsTab() {
   if (!form) {
     return (
       <div className="py-12 text-center">
-        <p className="text-red-400 text-sm">{msg || '加载失败，请刷新重试'}</p>
+        <p className="text-sm" style={{ color: 'var(--error)' }}>{msg || '加载失败，请刷新重试'}</p>
       </div>
     )
   }
@@ -716,14 +721,14 @@ function SettingsTab() {
         onChange={e => set(key, e.target.checked as RuntimeSettings[typeof key])}
         className="rounded"
       />
-      <span className="text-sm text-slate-300">{label}</span>
+      <span className="text-sm" style={{ color: 'var(--text)' }}>{label}</span>
     </label>
   )
 
   return (
     <div className="space-y-6 max-w-2xl">
       <div className="flex items-center justify-between">
-        <h2 className="text-base font-semibold text-white">运行时设置</h2>
+        <h2 className="text-base font-semibold" style={{ color: 'var(--text)' }}>运行时设置</h2>
         <Btn onClick={save} loading={saving} variant="primary">
           <Save className="w-3.5 h-3.5" />保存
         </Btn>
@@ -732,7 +737,7 @@ function SettingsTab() {
       {msg && <p className={`text-sm font-mono ${msg.startsWith('错误') ? 'text-red-400' : 'text-green-400'}`}>{msg}</p>}
 
       <section>
-        <h3 className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-3">基础</h3>
+        <h3 className="text-xs font-medium uppercase tracking-widest mb-3" style={{ color: 'var(--muted)', letterSpacing: '.12em' }}>基础</h3>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {textInput('dashboard_title', '仪表盘标题')}
           {textInput('theme_mode', '主题模式', 'auto / dark / light')}
@@ -742,7 +747,7 @@ function SettingsTab() {
       </section>
 
       <section>
-        <h3 className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-3">检测</h3>
+        <h3 className="text-xs font-medium uppercase tracking-widest mb-3" style={{ color: 'var(--muted)', letterSpacing: '.12em' }}>检测</h3>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {numInput('timeout_seconds', '单模型超时（秒）')}
           {numInput('model_list_timeout_seconds', '模型列表超时（秒）')}
@@ -765,7 +770,7 @@ function SettingsTab() {
       </section>
 
       <section>
-        <h3 className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-3">历史</h3>
+        <h3 className="text-xs font-medium uppercase tracking-widest mb-3" style={{ color: 'var(--muted)', letterSpacing: '.12em' }}>历史</h3>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           {numInput('stats_window_days', '统计窗口（天）')}
           {numInput('history_size', '历史条数')}
@@ -779,7 +784,7 @@ function SettingsTab() {
       </section>
 
       <section>
-        <h3 className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-3">告警通知</h3>
+        <h3 className="text-xs font-medium uppercase tracking-widest mb-3" style={{ color: 'var(--muted)', letterSpacing: '.12em' }}>告警通知</h3>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {textInput('notify_platform', '平台', 'webhook / discord / bark / wecom / dingtalk / telegram')}
           {textInput('notify_webhook_url', 'Webhook URL')}
@@ -789,6 +794,7 @@ function SettingsTab() {
         </div>
         <div className="flex flex-wrap gap-4 mt-3">
           {toggle('notify_on_recovery', '恢复时通知')}
+
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
           <Field label="只对这些 Provider 告警" hint="逗号分隔 ID 或名称，空表示全部">
@@ -841,7 +847,7 @@ function TasksTab() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-base font-semibold text-white">检测历史</h2>
+        <h2 className="text-base font-semibold" style={{ color: 'var(--text)' }}>检测历史</h2>
         <div className="flex items-center gap-2">
           <select
             value={filter}
@@ -861,7 +867,7 @@ function TasksTab() {
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
-            <tr className="border-b border-slate-800 text-xs text-slate-500 text-left">
+            <tr className="text-xs text-left" style={{ borderBottom: '1px solid var(--border)', color: 'var(--muted)' }}>
               <th className="pb-2 pr-3 font-medium">ID</th>
               <th className="pb-2 pr-3 font-medium">类型</th>
               <th className="pb-2 pr-3 font-medium">状态</th>
@@ -983,9 +989,9 @@ function ConfigTab() {
 
       {msg && <p className={`text-sm font-mono ${msg.startsWith('错误') ? 'text-red-400' : 'text-green-400'}`}>{msg}</p>}
 
-      <section className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-3">
-        <h3 className="text-sm font-medium text-white">导出配置</h3>
-        <p className="text-xs text-slate-500">下载当前设置和 Provider 列表（不含 API Key）为 JSON 文件</p>
+      <section className="glass rounded-[22px] p-5 space-y-3">
+        <h3 className="text-sm font-medium" style={{ color: 'var(--text)' }}>导出配置</h3>
+        <p className="text-xs" style={{ color: 'var(--muted)' }}>下载当前设置和 Provider 列表（不含 API Key）为 JSON 文件</p>
         <Btn onClick={doExport} loading={loading === 'export'} variant="default">
           <Download className="w-3.5 h-3.5" />导出 JSON
         </Btn>
@@ -998,9 +1004,9 @@ function ConfigTab() {
         )}
       </section>
 
-      <section className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-3">
-        <h3 className="text-sm font-medium text-white">导入配置</h3>
-        <p className="text-xs text-slate-500">粘贴 JSON 配置并导入；已有 API Key 将自动保留</p>
+      <section className="glass rounded-[22px] p-5 space-y-3">
+        <h3 className="text-sm font-medium" style={{ color: 'var(--text)' }}>导入配置</h3>
+        <p className="text-xs" style={{ color: 'var(--muted)' }}>粘贴 JSON 配置并导入；已有 API Key 将自动保留</p>
         <textarea
           value={importText}
           onChange={e => setImportText(e.target.value)}
@@ -1012,9 +1018,9 @@ function ConfigTab() {
         </Btn>
       </section>
 
-      <section className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-3">
-        <h3 className="text-sm font-medium text-white">热加载 .env</h3>
-        <p className="text-xs text-slate-500">重新读取 .env 文件并热加载配置，不重启服务</p>
+      <section className="glass rounded-[22px] p-5 space-y-3">
+        <h3 className="text-sm font-medium" style={{ color: 'var(--text)' }}>热加载 .env</h3>
+        <p className="text-xs" style={{ color: 'var(--muted)' }}>重新读取 .env 文件并热加载配置，不重启服务</p>
         <Btn onClick={doReload} loading={loading === 'reload'} variant="default">
           <RotateCcw className="w-3.5 h-3.5" />重载 .env
         </Btn>
@@ -1050,8 +1056,8 @@ export default function Admin() {
 
   if (verifying) {
     return (
-      <div className="min-h-screen bg-slate-950 flex items-center justify-center">
-        <Loader2 className="w-6 h-6 text-blue-400 animate-spin" />
+      <div className="min-h-screen flex items-center justify-center">
+        <Loader2 className="w-6 h-6 animate-spin" style={{ color: 'var(--ok)' }} />
       </div>
     )
   }
@@ -1061,21 +1067,33 @@ export default function Admin() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 flex flex-col">
+    <div className="min-h-screen flex flex-col">
       {/* Navbar */}
-      <nav className="sticky top-0 z-30 border-b border-slate-800 bg-slate-950/90 backdrop-blur-sm">
-        <div className="max-w-7xl mx-auto px-4 h-14 flex items-center justify-between">
+      <nav
+        className="sticky top-0 z-30 backdrop-blur-glass border-b"
+        style={{ background: 'rgba(11,16,32,.85)', borderColor: 'var(--border)' }}
+      >
+        <div className="max-w-[1180px] mx-auto px-4 h-14 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
-            <Activity className="w-5 h-5 text-blue-400" />
-            <span className="font-semibold text-white">管理面板</span>
+            <Activity className="w-5 h-5" style={{ color: 'var(--ok)' }} />
+            <span className="font-semibold" style={{ color: 'var(--text)' }}>管理面板</span>
           </div>
           <div className="flex items-center gap-2">
-            <Link to="/" className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white text-sm transition-colors cursor-pointer">
+            <Link
+              to="/"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm transition-colors cursor-pointer"
+              style={{ color: 'var(--muted)' }}
+              onMouseEnter={e => (e.currentTarget.style.color = 'var(--text)')}
+              onMouseLeave={e => (e.currentTarget.style.color = 'var(--muted)')}
+            >
               <ArrowLeft className="w-3.5 h-3.5" />仪表盘
             </Link>
             <button
               onClick={() => { setToken(''); setAuthed(false) }}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-red-400 text-sm transition-colors cursor-pointer"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm transition-colors cursor-pointer"
+              style={{ color: 'var(--muted)' }}
+              onMouseEnter={e => (e.currentTarget.style.color = 'var(--error)')}
+              onMouseLeave={e => (e.currentTarget.style.color = 'var(--muted)')}
               title="退出登录"
             >
               <LogOut className="w-3.5 h-3.5" />
@@ -1084,7 +1102,7 @@ export default function Admin() {
         </div>
       </nav>
 
-      <div className="flex flex-1 max-w-7xl mx-auto w-full px-4 py-6 gap-6">
+      <div className="flex flex-1 max-w-[1180px] mx-auto w-full px-4 py-6 gap-6">
         {/* Sidebar */}
         <aside className="w-44 shrink-0 hidden sm:block">
           <nav className="space-y-0.5">
@@ -1092,11 +1110,13 @@ export default function Admin() {
               <button
                 key={t.id}
                 onClick={() => setTab(t.id)}
-                className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors cursor-pointer ${
-                  tab === t.id
-                    ? 'bg-blue-600/20 text-blue-400 font-medium'
-                    : 'text-slate-400 hover:text-white hover:bg-slate-800'
-                }`}
+                className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-sm transition-colors cursor-pointer"
+                style={tab === t.id
+                  ? { background: 'rgba(56,217,150,.12)', color: 'var(--ok)', fontWeight: 600 }
+                  : { color: 'var(--muted)' }
+                }
+                onMouseEnter={e => { if (tab !== t.id) (e.currentTarget as HTMLElement).style.color = 'var(--text)' }}
+                onMouseLeave={e => { if (tab !== t.id) (e.currentTarget as HTMLElement).style.color = 'var(--muted)' }}
               >
                 {t.icon}{t.label}
               </button>
@@ -1106,16 +1126,16 @@ export default function Admin() {
 
         {/* Mobile tab bar */}
         <div className="sm:hidden w-full">
-          <div className="flex overflow-x-auto gap-1 pb-3 border-b border-slate-800 mb-4">
+          <div className="flex overflow-x-auto gap-1 pb-3 mb-4" style={{ borderBottom: '1px solid var(--border)' }}>
             {TABS.map(t => (
               <button
                 key={t.id}
                 onClick={() => setTab(t.id)}
-                className={`flex-none flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs whitespace-nowrap transition-colors cursor-pointer ${
-                  tab === t.id
-                    ? 'bg-blue-600/20 text-blue-400 font-medium'
-                    : 'text-slate-400 hover:text-white bg-slate-800'
-                }`}
+                className="flex-none flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs whitespace-nowrap transition-colors cursor-pointer"
+                style={tab === t.id
+                  ? { background: 'rgba(56,217,150,.12)', color: 'var(--ok)', fontWeight: 600 }
+                  : { background: 'var(--card)', color: 'var(--muted)' }
+                }
               >
                 {t.label}
               </button>
