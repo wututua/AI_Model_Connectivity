@@ -1,6 +1,15 @@
 import { useState, useEffect } from 'react'
 
-export type Theme = 'dark' | 'light'
+export type Theme = 'dark' | 'light' | 'auto'
+
+function getSystemTheme(): 'dark' | 'light' {
+  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+}
+
+function applyTheme(theme: Theme) {
+  const resolved = theme === 'auto' ? getSystemTheme() : theme
+  document.body.setAttribute('data-theme', resolved)
+}
 
 export function useTheme() {
   const [theme, setTheme] = useState<Theme>(() =>
@@ -8,12 +17,21 @@ export function useTheme() {
   )
 
   useEffect(() => {
-    document.body.setAttribute('data-theme', theme)
+    applyTheme(theme)
     localStorage.setItem('theme', theme)
+
+    if (theme === 'auto') {
+      const mq = window.matchMedia('(prefers-color-scheme: dark)')
+      const onChange = () => applyTheme('auto')
+      mq.addEventListener('change', onChange)
+      return () => mq.removeEventListener('change', onChange)
+    }
   }, [theme])
 
-  return {
-    theme,
-    toggle: () => setTheme(t => t === 'dark' ? 'light' : 'dark'),
-  }
+  // 循环：dark → light → auto → dark
+  const cycle = () => setTheme(t =>
+    t === 'dark' ? 'light' : t === 'light' ? 'auto' : 'dark'
+  )
+
+  return { theme, toggle: cycle }
 }

@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import {
   Activity, ArrowLeft, Play, Square, RefreshCw, Plus, Edit2, Trash2,
   Save, Download, Upload, RotateCcw, CheckCircle, XCircle,
-  Clock, Loader2, LogOut, Eye, EyeOff, Sun, Moon, Settings, FileJson, Database,
+  Clock, Loader2, LogOut, Eye, EyeOff, Sun, Moon, Monitor, Settings, FileJson, Database,
 } from 'lucide-react'
 import { api, getToken, setToken } from '../api'
 import { useTheme } from '../hooks/useTheme'
@@ -1160,10 +1160,10 @@ export default function Admin() {
               style={{ color: 'var(--muted)' }}
               onMouseEnter={e => (e.currentTarget.style.color = 'var(--text)')}
               onMouseLeave={e => (e.currentTarget.style.color = 'var(--muted)')}
-              title={theme === 'dark' ? '切换亮色模式' : '切换暗色模式'}
+              title={theme === 'dark' ? '深色 → 浅色' : theme === 'light' ? '浅色 → 跟随系统' : '跟随系统 → 深色'}
               aria-label="切换主题"
             >
-              {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+              {theme === 'dark' ? <Moon className="w-4 h-4" /> : theme === 'light' ? <Sun className="w-4 h-4" /> : <Monitor className="w-4 h-4" />}
             </button>
             <button
               onClick={() => { setToken(''); setAuthed(false) }}

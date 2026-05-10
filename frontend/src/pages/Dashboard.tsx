@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useMemo } from 'react'
 import { Link } from 'react-router-dom'
-import { Activity, Settings, RefreshCw, Zap, CheckCircle, AlertTriangle, XCircle, Clock, Sun, Moon, Search, X, ArrowUpDown, LayoutDashboard, List } from 'lucide-react'
+import { Activity, Settings, RefreshCw, Zap, CheckCircle, AlertTriangle, XCircle, Clock, Sun, Moon, Monitor, Search, X, ArrowUpDown, LayoutDashboard, List } from 'lucide-react'
 import type { Report, ProviderReport, ModelResult } from '../types'
 import { api } from '../api'
 import { useTheme } from '../hooks/useTheme'
@@ -396,10 +396,10 @@ export default function Dashboard() {
               style={navBtnStyle}
               onMouseEnter={navBtnHover}
               onMouseLeave={navBtnLeave}
-              title={theme === 'dark' ? '切换亮色模式' : '切换暗色模式'}
+              title={theme === 'dark' ? '深色 → 浅色' : theme === 'light' ? '浅色 → 跟随系统' : '跟随系统 → 深色'}
               aria-label="切换主题"
             >
-              {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+              {theme === 'dark' ? <Moon className="w-4 h-4" /> : theme === 'light' ? <Sun className="w-4 h-4" /> : <Monitor className="w-4 h-4" />}
             </button>
             <Link
               to="/admin"

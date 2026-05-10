@@ -15,6 +15,9 @@
     <script>
       (function(){
         var t = localStorage.getItem('theme') || 'dark';
+        if (t === 'auto') {
+          t = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+        }
         document.body.setAttribute('data-theme', t);
       })();
     </script>
