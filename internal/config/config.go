@@ -127,7 +127,7 @@ func defaults() Config {
 		DashboardTitle:            "模型连通性",
 		TimeoutSeconds:            30,
 		ModelListTimeoutSeconds:   20,
-		SlowThresholdMS:           300,
+		SlowThresholdMS:           800,
 		Concurrency:               1,
 		ProviderConcurrency:       1,
 		ProbePrompt:               "只回复 OK 两个字母。",
