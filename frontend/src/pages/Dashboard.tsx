@@ -417,7 +417,12 @@ export default function Dashboard() {
         {/* Provider grid */}
         {report?.providers && report.providers.length > 0 ? (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-[18px]">
-            {report.providers.map(provider => (
+            {[...report.providers]
+              .sort((a, b) => {
+                const order = { error: 0, slow: 1, ok: 2 }
+                return (order[a.status as keyof typeof order] ?? 3) - (order[b.status as keyof typeof order] ?? 3)
+              })
+              .map(provider => (
               <ProviderCard key={provider.provider_id} provider={provider} showError={true} />
             ))}
           </div>
