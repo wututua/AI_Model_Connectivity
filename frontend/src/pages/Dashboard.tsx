@@ -8,6 +8,18 @@ import { useScrollNav } from '../hooks/useScrollNav'
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
+function relativeTime(dateStr: string): { text: string; stale: boolean } {
+  const d = new Date(dateStr)
+  if (isNaN(d.getTime())) return { text: dateStr, stale: false }
+  const diffSec = (Date.now() - d.getTime()) / 1000
+  let text: string
+  if (diffSec < 60) text = '刚刚'
+  else if (diffSec < 3600) text = `${Math.floor(diffSec / 60)} 分钟前`
+  else if (diffSec < 86400) text = `${Math.floor(diffSec / 3600)} 小时前`
+  else text = `${Math.floor(diffSec / 86400)} 天前`
+  return { text, stale: diffSec > 600 }
+}
+
 function statusClass(status: string) {
   return status === 'ok' ? 'ok' : status === 'slow' ? 'slow' : 'error'
 }
@@ -347,9 +359,16 @@ export default function Dashboard() {
                 </span>
                 <StatusPill status={report.overall_class} label={report.overall_class.toUpperCase()} large />
               </div>
-              <p className="text-sm mt-3" style={{ color: 'var(--muted)' }}>
-                更新于 {report.generated_at} · 并发 {report.global_concurrency}/{report.provider_concurrency}
-              </p>
+              {(() => {
+                const { text: timeText, stale } = relativeTime(report.generated_at)
+                return (
+                  <p className="text-sm mt-3" style={{ color: stale ? 'var(--slow)' : 'var(--muted)' }}>
+                    更新于 <span title={report.generated_at}>{timeText}</span>
+                    {stale && ' ⚠'}
+                    {' · '}并发 {report.global_concurrency}/{report.provider_concurrency}
+                  </p>
+                )
+              })()}
             </div>
             <div className="text-right shrink-0">
               <p className="text-xs uppercase tracking-widest mb-1" style={{ color: 'var(--muted)', letterSpacing: '.12em' }}>检测耗时</p>
