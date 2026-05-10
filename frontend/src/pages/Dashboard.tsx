@@ -433,6 +433,15 @@ export default function Dashboard() {
           >
             wututu
           </a>
+          &nbsp;&amp;&nbsp;
+          <a
+            href="https://github.com/Meow-Calculations"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="transition-opacity hover:opacity-100"
+          >
+            Meow-Calculations
+          </a>
         </p>
       </footer>
     </div>
