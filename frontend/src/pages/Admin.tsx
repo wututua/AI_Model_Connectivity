@@ -816,17 +816,17 @@ function SettingsTab() {
       <section>
         <h3 className="text-xs font-medium uppercase tracking-widest mb-3" style={{ color: 'var(--muted)', letterSpacing: '.12em' }}>检测</h3>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          {numInput('timeout_seconds', '单模型超时（秒）')}
-          {numInput('model_list_timeout_seconds', '模型列表超时（秒）')}
-          {numInput('slow_threshold_ms', '较慢阈值（毫秒）')}
-          {numInput('concurrency', '全局并发数')}
-          {numInput('provider_concurrency', 'Provider 并发数')}
-          {numInput('max_models_per_provider', '每 Provider 最大模型数', '0 = 不限')}
-          {numInput('auto_check_interval_min_hours', '自动检测最小间隔（小时）', '0 = 关闭')}
-          {numInput('auto_check_interval_max_hours', '自动检测最大间隔（小时）')}
+          {numInput('timeout_seconds', '单模型超时（秒）', '每个模型等待响应的最大时间，超时计为错误')}
+          {numInput('model_list_timeout_seconds', '模型列表超时（秒）', '从 /v1/models 拉取模型列表的超时时间')}
+          {numInput('slow_threshold_ms', '较慢阈值（毫秒）', '响应时间超过此值视为「较慢」状态')}
+          {numInput('concurrency', '全局并发数', '同时检测的最大模型数，1 = 完全串行')}
+          {numInput('provider_concurrency', 'Provider 并发数', '单个 Provider 内同时检测的模型数')}
+          {numInput('max_models_per_provider', '每 Provider 最大模型数', '0 = 不限；限制可减少 Token 消耗')}
+          {numInput('auto_check_interval_min_hours', '自动检测最小间隔（小时）', '0 = 关闭定时检测；实际间隔在 min~max 之间随机')}
+          {numInput('auto_check_interval_max_hours', '自动检测最大间隔（小时）', '与最小间隔相同则为固定间隔')}
         </div>
         <div className="mt-3">
-          <Field label="跳过模型" hint="逗号分隔，支持 model / provider/model / provider::model">
+          <Field label="跳过模型" hint="逗号分隔，格式：model-name 或 provider-id/model 或 provider-id::model">
             <input
               className={inputCls}
               value={form.skip_models.join(', ')}
@@ -839,25 +839,25 @@ function SettingsTab() {
       <section>
         <h3 className="text-xs font-medium uppercase tracking-widest mb-3" style={{ color: 'var(--muted)', letterSpacing: '.12em' }}>历史</h3>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          {numInput('stats_window_days', '统计窗口（天）')}
-          {numInput('history_size', '历史条数')}
-          {numInput('max_history_records', '最大保留记录')}
+          {numInput('stats_window_days', '统计窗口（天）', '可用率和均值的计算时间窗口')}
+          {numInput('history_size', '历史条数', '仪表盘 LED 点显示的最近检测次数')}
+          {numInput('max_history_records', '最大保留记录', '数据库保留的历史记录上限，超出自动清理')}
         </div>
         <div className="flex flex-wrap gap-4 mt-3">
           {toggle('enable_history', '启用历史')}
-          {toggle('show_curve_chart', '显示延迟曲线')}
-          {toggle('show_error_detail', '显示错误详情')}
+          {toggle('show_curve_chart', '显示延迟曲线图')}
+          {toggle('show_error_detail', '在仪表盘显示错误详情')}
         </div>
       </section>
 
       <section>
         <h3 className="text-xs font-medium uppercase tracking-widest mb-3" style={{ color: 'var(--muted)', letterSpacing: '.12em' }}>告警通知</h3>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          {textInput('notify_platform', '平台', 'webhook / discord / bark / wecom / dingtalk / telegram')}
-          {textInput('notify_webhook_url', 'Webhook URL')}
-          {textInput('notify_telegram_bot_token', 'Telegram Bot Token')}
-          {textInput('notify_telegram_chat_id', 'Telegram Chat ID')}
-          {numInput('notify_cooldown_minutes', '冷却时间（分钟）', '0 = 不限')}
+          {textInput('notify_platform', '平台', '支持：webhook / discord / bark / wecom / dingtalk / telegram')}
+          {textInput('notify_webhook_url', 'Webhook URL', '适用于 webhook / discord / wecom / dingtalk')}
+          {textInput('notify_telegram_bot_token', 'Telegram Bot Token', '通过 @BotFather 创建')}
+          {textInput('notify_telegram_chat_id', 'Telegram Chat ID', '用户或频道的数字 ID')}
+          {numInput('notify_cooldown_minutes', '冷却时间（分钟）', '同一模型两次告警的最短间隔，0 = 不限')}
         </div>
         <div className="flex flex-wrap gap-4 mt-3">
           {toggle('notify_on_recovery', '恢复时通知')}
