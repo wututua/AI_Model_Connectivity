@@ -1,8 +1,9 @@
 import { useEffect, useState, useCallback } from 'react'
 import { Link } from 'react-router-dom'
-import { Activity, Settings, RefreshCw, Zap, CheckCircle, AlertTriangle, XCircle, Clock } from 'lucide-react'
+import { Activity, Settings, RefreshCw, Zap, CheckCircle, AlertTriangle, XCircle, Clock, Sun, Moon } from 'lucide-react'
 import type { Report, ProviderReport, ModelResult } from '../types'
 import { api } from '../api'
+import { useTheme } from '../hooks/useTheme'
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -76,11 +77,17 @@ function ModelRow({ result, showError }: { result: ModelResult; showError: boole
     : sc === 'slow'
     ? '0 0 6px rgba(246,196,83,.9)'
     : '0 0 6px rgba(255,107,122,.9)'
+  const [hovered, setHovered] = useState(false)
 
   return (
     <div
-      className="relative overflow-hidden rounded-[20px] p-4 border transition-all"
-      style={{ background: 'rgba(255,255,255,.04)', borderColor: 'var(--border)' }}
+      className="relative overflow-hidden rounded-[20px] p-4 border transition-all duration-200"
+      style={{
+        background: hovered ? 'var(--row-hover)' : 'var(--row-bg)',
+        borderColor: hovered ? `rgba(${sc === 'ok' ? '56,217,150' : sc === 'slow' ? '246,196,83' : '255,107,122'},.3)` : 'var(--border)',
+      }}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
     >
       {result.show_curve_chart && result.svg_path_line && (
         <CurveChart pathLine={result.svg_path_line} pathArea={result.svg_path_area} status={result.status} />
@@ -129,7 +136,7 @@ function ModelRow({ result, showError }: { result: ModelResult; showError: boole
           <span>可用率 {result.availability}</span>
         </div>
 
-        {/* History bars */}
+        {/* History LED lights */}
         {result.history && result.history.length > 0 && (
           <StatusLights history={result.history} />
         )}
@@ -141,13 +148,17 @@ function ModelRow({ result, showError }: { result: ModelResult; showError: boole
 function ProviderCard({ provider, showError }: { provider: ProviderReport; showError: boolean }) {
   const sc = statusClass(provider.status)
   const accentColor = sc === 'ok' ? 'var(--ok)' : sc === 'slow' ? 'var(--slow)' : 'var(--error)'
+  const accentRgb = sc === 'ok' ? '56,217,150' : sc === 'slow' ? '246,196,83' : '255,107,122'
 
   return (
-    <div className={`glass rounded-[28px] overflow-hidden border-${sc}`}>
+    <div className={`glass rounded-[28px] overflow-hidden border-${sc} transition-all duration-300`}>
       {/* Header */}
       <div
         className="flex items-center justify-between px-5 py-4"
-        style={{ borderBottom: '1px solid var(--border)', background: `linear-gradient(90deg, rgba(${sc === 'ok' ? '56,217,150' : sc === 'slow' ? '246,196,83' : '255,107,122'},.06), transparent)` }}
+        style={{
+          borderBottom: '1px solid var(--border)',
+          background: `linear-gradient(90deg, rgba(${accentRgb},.06), transparent)`,
+        }}
       >
         <div className="flex items-center gap-3">
           {provider.provider_logo ? (
@@ -198,7 +209,7 @@ function SummaryCard({ icon, label, value, status }: {
 }) {
   const valueColor = status ? (status === 'ok' ? 'var(--ok)' : status === 'slow' ? 'var(--slow)' : 'var(--error)') : 'var(--text)'
   return (
-    <div className="glass rounded-[22px] px-4 py-4">
+    <div className="glass summary-card rounded-[22px] px-4 py-4">
       <div className="flex items-center gap-1.5 mb-2" style={{ color: 'var(--muted)' }}>
         {icon}
         <span className="text-xs uppercase tracking-widest" style={{ letterSpacing: '.16em' }}>{label}</span>
@@ -216,19 +227,13 @@ export default function Dashboard() {
   const [report, setReport] = useState<Report | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [live, setLive] = useState(false)
+  const { theme, toggle: toggleTheme } = useTheme()
 
   const fetchReport = useCallback(() =>
     api.status()
       .then(r => { setReport(r); setError(null) })
       .catch(e => setError((e as Error).message)),
   [])
-
-  useEffect(() => {
-    // apply light/dark theme from report
-    const root = document.body
-    const theme = report?.theme ?? 'dark'
-    root.setAttribute('data-theme', theme === 'light' ? 'light' : 'dark')
-  }, [report])
 
   useEffect(() => {
     fetchReport()
@@ -250,12 +255,16 @@ export default function Dashboard() {
 
   const sc = report ? statusClass(report.overall_class) : null
 
+  const navBtnStyle: React.CSSProperties = { color: 'var(--muted)' }
+  const navBtnHover = (e: React.MouseEvent<HTMLElement>) => (e.currentTarget.style.color = 'var(--text)')
+  const navBtnLeave = (e: React.MouseEvent<HTMLElement>) => (e.currentTarget.style.color = 'var(--muted)')
+
   return (
     <div className="min-h-screen">
       {/* ── Navbar ─────────────────────────────────────────────── */}
       <nav
-        className="sticky top-0 z-30 backdrop-blur-glass border-b"
-        style={{ background: 'rgba(11,16,32,.85)', borderColor: 'var(--border)' }}
+        className="sticky top-0 z-30 backdrop-blur-glass border-b nav-glass"
+        style={{ borderColor: 'var(--border)' }}
       >
         <div className="max-w-[1180px] mx-auto px-4 h-14 flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -271,29 +280,40 @@ export default function Dashboard() {
             )}
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-1">
             {report && sc && (
-              <span className={`hidden sm:inline text-xs font-mono text-${sc}`}>
+              <span className={`hidden sm:inline text-xs font-mono mr-2 text-${sc}`}>
                 {report.overall_status}
               </span>
             )}
             <button
               onClick={fetchReport}
               className="p-1.5 rounded-lg transition-colors cursor-pointer"
-              style={{ color: 'var(--muted)' }}
-              onMouseEnter={e => (e.currentTarget.style.color = 'var(--text)')}
-              onMouseLeave={e => (e.currentTarget.style.color = 'var(--muted)')}
+              style={navBtnStyle}
+              onMouseEnter={navBtnHover}
+              onMouseLeave={navBtnLeave}
               title="手动刷新"
               aria-label="手动刷新"
             >
               <RefreshCw className="w-4 h-4" />
             </button>
+            <button
+              onClick={toggleTheme}
+              className="p-1.5 rounded-lg transition-colors cursor-pointer"
+              style={navBtnStyle}
+              onMouseEnter={navBtnHover}
+              onMouseLeave={navBtnLeave}
+              title={theme === 'dark' ? '切换亮色模式' : '切换暗色模式'}
+              aria-label="切换主题"
+            >
+              {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+            </button>
             <Link
               to="/admin"
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm transition-colors cursor-pointer glass"
-              style={{ color: 'var(--muted)' }}
-              onMouseEnter={e => (e.currentTarget.style.color = 'var(--text)')}
-              onMouseLeave={e => (e.currentTarget.style.color = 'var(--muted)')}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm transition-colors cursor-pointer glass ml-1"
+              style={navBtnStyle}
+              onMouseEnter={navBtnHover}
+              onMouseLeave={navBtnLeave}
             >
               <Settings className="w-3.5 h-3.5" />
               管理
@@ -322,12 +342,15 @@ export default function Dashboard() {
                 <StatusPill status={report.overall_class} label={report.overall_class.toUpperCase()} large />
               </div>
               <p className="text-sm mt-3" style={{ color: 'var(--muted)' }}>
-                更新于 {report.generated_at} · {report.theme_label} · 并发 {report.global_concurrency}/{report.provider_concurrency}
+                更新于 {report.generated_at} · 并发 {report.global_concurrency}/{report.provider_concurrency}
               </p>
             </div>
             <div className="text-right shrink-0">
               <p className="text-xs uppercase tracking-widest mb-1" style={{ color: 'var(--muted)', letterSpacing: '.12em' }}>检测耗时</p>
-              <p className="text-3xl font-mono font-bold" style={{ color: 'var(--text)' }}>{report.elapsed_ms}<span className="text-base font-normal ml-1" style={{ color: 'var(--muted)' }}>ms</span></p>
+              <p className="text-3xl font-mono font-bold" style={{ color: 'var(--text)' }}>
+                {report.elapsed_ms}
+                <span className="text-base font-normal ml-1" style={{ color: 'var(--muted)' }}>ms</span>
+              </p>
             </div>
           </div>
         )}

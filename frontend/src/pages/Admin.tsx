@@ -3,9 +3,10 @@ import { Link } from 'react-router-dom'
 import {
   Activity, ArrowLeft, Play, Square, RefreshCw, Plus, Edit2, Trash2,
   Save, Download, Upload, RotateCcw, CheckCircle, XCircle, AlertTriangle,
-  Clock, Loader2, LogOut, Eye, EyeOff,
+  Clock, Loader2, LogOut, Eye, EyeOff, Sun, Moon,
 } from 'lucide-react'
 import { api, getToken, setToken } from '../api'
+import { useTheme } from '../hooks/useTheme'
 import type {
   RunningState, SafeProviderConfig, ProviderUpdate,
   CheckTask, RuntimeSettings, ConfigExport,
@@ -1042,6 +1043,7 @@ const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
 ]
 
 export default function Admin() {
+  const { theme, toggle: toggleTheme } = useTheme()
   const [authed, setAuthed] = useState(false)
   const [verifying, setVerifying] = useState(!!getToken())
   const [tab, setTab] = useState<Tab>('overview')
@@ -1070,15 +1072,15 @@ export default function Admin() {
     <div className="min-h-screen flex flex-col">
       {/* Navbar */}
       <nav
-        className="sticky top-0 z-30 backdrop-blur-glass border-b"
-        style={{ background: 'rgba(11,16,32,.85)', borderColor: 'var(--border)' }}
+        className="sticky top-0 z-30 backdrop-blur-glass border-b nav-glass"
+        style={{ borderColor: 'var(--border)' }}
       >
         <div className="max-w-[1180px] mx-auto px-4 h-14 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
             <Activity className="w-5 h-5" style={{ color: 'var(--ok)' }} />
             <span className="font-semibold" style={{ color: 'var(--text)' }}>管理面板</span>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1">
             <Link
               to="/"
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm transition-colors cursor-pointer"
@@ -1089,8 +1091,19 @@ export default function Admin() {
               <ArrowLeft className="w-3.5 h-3.5" />仪表盘
             </Link>
             <button
+              onClick={toggleTheme}
+              className="p-1.5 rounded-lg transition-colors cursor-pointer"
+              style={{ color: 'var(--muted)' }}
+              onMouseEnter={e => (e.currentTarget.style.color = 'var(--text)')}
+              onMouseLeave={e => (e.currentTarget.style.color = 'var(--muted)')}
+              title={theme === 'dark' ? '切换亮色模式' : '切换暗色模式'}
+              aria-label="切换主题"
+            >
+              {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+            </button>
+            <button
               onClick={() => { setToken(''); setAuthed(false) }}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm transition-colors cursor-pointer"
+              className="p-1.5 rounded-lg transition-colors cursor-pointer"
               style={{ color: 'var(--muted)' }}
               onMouseEnter={e => (e.currentTarget.style.color = 'var(--error)')}
               onMouseLeave={e => (e.currentTarget.style.color = 'var(--muted)')}

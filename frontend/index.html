@@ -12,6 +12,12 @@
     />
   </head>
   <body>
+    <script>
+      (function(){
+        var t = localStorage.getItem('theme') || 'dark';
+        document.body.setAttribute('data-theme', t);
+      })();
+    </script>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
