@@ -87,7 +87,7 @@ function CurveChart({ pathLine, pathArea, status }: { pathLine: string; pathArea
   )
 }
 
-function ModelRow({ result, showError }: { result: ModelResult; showError: boolean }) {
+function ModelRow({ result, showError, compact }: { result: ModelResult; showError: boolean; compact?: boolean }) {
   const sc = statusClass(result.status)
   const ledColor = sc === 'ok' ? 'var(--ok)' : sc === 'slow' ? 'var(--slow)' : 'var(--error)'
   const ledGlow = sc === 'ok'
@@ -98,6 +98,35 @@ function ModelRow({ result, showError }: { result: ModelResult; showError: boole
   const [hovered, setHovered] = useState(false)
   const [expanded, setExpanded] = useState(false)
   const hasDetail = !!(result.error || result.response_preview)
+
+  // ── 简洁模式 ────────────────────────────────────────────────
+  if (compact) {
+    return (
+      <div
+        className="flex items-center justify-between gap-3 px-3 py-2 rounded-[14px] border transition-all duration-150"
+        style={{
+          background: hovered ? 'var(--row-hover)' : 'var(--row-bg)',
+          borderColor: hovered ? `rgba(${sc === 'ok' ? '56,217,150' : sc === 'slow' ? '246,196,83' : '255,107,122'},.3)` : 'var(--border)',
+        }}
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
+      >
+        <div className="flex items-center gap-2 min-w-0">
+          <div
+            className={`w-2 h-2 rounded-full shrink-0${sc === 'ok' ? ' animate-pulse' : ''}`}
+            style={{ background: ledColor, boxShadow: ledGlow }}
+          />
+          <span className="font-mono text-xs truncate" style={{ color: 'var(--text)' }}>{result.model}</span>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <StatusPill status={result.status} label={result.status_label} />
+          <span className="text-[11px] font-mono w-14 text-right" style={{ color: 'var(--muted)' }}>
+            {result.latency_ms > 0 ? `${result.latency_ms} ms` : '—'}
+          </span>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div
@@ -166,7 +195,7 @@ function ModelRow({ result, showError }: { result: ModelResult; showError: boole
   )
 }
 
-function ProviderCard({ provider, showError }: { provider: ProviderReport; showError: boolean }) {
+function ProviderCard({ provider, showError, compact }: { provider: ProviderReport; showError: boolean; compact?: boolean }) {
   const sc = statusClass(provider.status)
   const accentColor = sc === 'ok' ? 'var(--ok)' : sc === 'slow' ? 'var(--slow)' : 'var(--error)'
   const accentRgb = sc === 'ok' ? '56,217,150' : sc === 'slow' ? '246,196,83' : '255,107,122'
@@ -216,9 +245,9 @@ function ProviderCard({ provider, showError }: { provider: ProviderReport; showE
       </div>
 
       {/* Model rows */}
-      <div className="p-4 space-y-3">
+      <div className={`p-4 ${compact ? 'space-y-1.5' : 'space-y-3'}`}>
         {provider.results.map(result => (
-          <ModelRow key={result.model} result={result} showError={showError} />
+          <ModelRow key={result.model} result={result} showError={showError} compact={compact} />
         ))}
       </div>
     </div>
@@ -252,6 +281,7 @@ export default function Dashboard() {
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<'all' | 'ok' | 'slow' | 'error'>('all')
   const [sortBy, setSortBy] = useState<'status' | 'name' | 'latency' | 'models'>('status')
+  const [viewMode, setViewMode] = useState<'detailed' | 'compact'>('detailed')
   const { theme, toggle: toggleTheme } = useTheme()
   const navVisible = useScrollNav()
 
@@ -492,6 +522,26 @@ export default function Dashboard() {
                 <option value="models">按模型数</option>
               </select>
             </div>
+
+            {/* View toggle */}
+            <div className="flex items-center rounded-xl overflow-hidden border" style={{ borderColor: 'var(--border)' }}>
+              <button
+                onClick={() => setViewMode('detailed')}
+                className="p-1.5 transition-colors cursor-pointer"
+                style={viewMode === 'detailed' ? { background: 'var(--card-strong)', color: 'var(--text)' } : { color: 'var(--muted)' }}
+                title="详细视图"
+              >
+                <LayoutDashboard className="w-4 h-4" />
+              </button>
+              <button
+                onClick={() => setViewMode('compact')}
+                className="p-1.5 transition-colors cursor-pointer"
+                style={viewMode === 'compact' ? { background: 'var(--card-strong)', color: 'var(--text)' } : { color: 'var(--muted)' }}
+                title="简洁视图"
+              >
+                <List className="w-4 h-4" />
+              </button>
+            </div>
           </div>
         )}
 
@@ -521,7 +571,7 @@ export default function Dashboard() {
                 <p className="text-sm">未找到匹配的模型或 Provider</p>
               </div>
             ) : filteredProviders.map(provider => (
-              <ProviderCard key={provider.provider_id} provider={provider} showError={true} />
+              <ProviderCard key={provider.provider_id} provider={provider} showError={true} compact={viewMode === 'compact'} />
             ))}
           </div>
         ) : !error && !report ? (
