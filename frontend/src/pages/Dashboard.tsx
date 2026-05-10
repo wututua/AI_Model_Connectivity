@@ -195,13 +195,13 @@ function ModelRow({ result, showError, compact }: { result: ModelResult; showErr
   )
 }
 
-function ProviderCard({ provider, showError, compact }: { provider: ProviderReport; showError: boolean; compact?: boolean }) {
+function ProviderCard({ provider, showError, compact, animDelay = 0 }: { provider: ProviderReport; showError: boolean; compact?: boolean; animDelay?: number }) {
   const sc = statusClass(provider.status)
   const accentColor = sc === 'ok' ? 'var(--ok)' : sc === 'slow' ? 'var(--slow)' : 'var(--error)'
   const accentRgb = sc === 'ok' ? '56,217,150' : sc === 'slow' ? '246,196,83' : '255,107,122'
 
   return (
-    <div className={`glass rounded-[28px] overflow-hidden border-${sc} transition-all duration-300`}>
+    <div className={`glass rounded-[28px] overflow-hidden border-${sc} transition-all duration-300 anim-scale-in`} style={{ animationDelay: `${animDelay}ms` }}>
       {/* Header */}
       <div
         className="flex items-center justify-between px-5 py-4"
@@ -254,12 +254,12 @@ function ProviderCard({ provider, showError, compact }: { provider: ProviderRepo
   )
 }
 
-function SummaryCard({ icon, label, value, status }: {
-  icon: React.ReactNode; label: string; value: number | string; status?: string
+function SummaryCard({ icon, label, value, status, animDelay = 0 }: {
+  icon: React.ReactNode; label: string; value: number | string; status?: string; animDelay?: number
 }) {
   const valueColor = status ? (status === 'ok' ? 'var(--ok)' : status === 'slow' ? 'var(--slow)' : 'var(--error)') : 'var(--text)'
   return (
-    <div className="glass summary-card rounded-[22px] px-4 py-4">
+    <div className="glass summary-card rounded-[22px] px-4 py-4 anim-fade-in-up" style={{ animationDelay: `${animDelay}ms` }}>
       <div className="flex items-center gap-1.5 mb-2" style={{ color: 'var(--muted)' }}>
         {icon}
         <span className="text-xs uppercase tracking-widest" style={{ letterSpacing: '.16em' }}>{label}</span>
@@ -420,7 +420,7 @@ export default function Dashboard() {
 
         {/* Hero banner */}
         {report && sc && (
-          <div className="glass rounded-[32px] px-8 py-6 flex flex-col sm:flex-row sm:items-center justify-between gap-6">
+          <div className="glass rounded-[32px] px-8 py-6 flex flex-col sm:flex-row sm:items-center justify-between gap-6 anim-fade-in-up" style={{ animationDelay: '0ms' }}>
             <div>
               <p className="text-xs uppercase tracking-widest mb-2" style={{ color: 'var(--muted)', letterSpacing: '.16em' }}>
                 整体状态
@@ -469,18 +469,18 @@ export default function Dashboard() {
         {/* Summary cards – 6 cols */}
         {report && (
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3.5">
-            <SummaryCard icon={<Zap className="w-3.5 h-3.5" />}           label="总模型"   value={report.total} />
-            <SummaryCard icon={<CheckCircle className="w-3.5 h-3.5" />}   label="正常"     value={report.ok_count}    status={report.ok_count > 0 ? 'ok' : undefined} />
-            <SummaryCard icon={<AlertTriangle className="w-3.5 h-3.5" />} label="较慢"     value={report.slow_count}  status={report.slow_count > 0 ? 'slow' : undefined} />
-            <SummaryCard icon={<XCircle className="w-3.5 h-3.5" />}       label="异常"     value={report.error_count} status={report.error_count > 0 ? 'error' : undefined} />
-            <SummaryCard icon={<Activity className="w-3.5 h-3.5" />}      label="Provider" value={report.provider_count} />
-            <SummaryCard icon={<Clock className="w-3.5 h-3.5" />}         label="耗时"     value={`${report.elapsed_ms} ms`} />
+            <SummaryCard icon={<Zap className="w-3.5 h-3.5" />}           label="总模型"   value={report.total}                                                     animDelay={80} />
+            <SummaryCard icon={<CheckCircle className="w-3.5 h-3.5" />}   label="正常"     value={report.ok_count}    status={report.ok_count > 0 ? 'ok' : undefined}    animDelay={130} />
+            <SummaryCard icon={<AlertTriangle className="w-3.5 h-3.5" />} label="较慢"     value={report.slow_count}  status={report.slow_count > 0 ? 'slow' : undefined}  animDelay={180} />
+            <SummaryCard icon={<XCircle className="w-3.5 h-3.5" />}       label="异常"     value={report.error_count} status={report.error_count > 0 ? 'error' : undefined} animDelay={230} />
+            <SummaryCard icon={<Activity className="w-3.5 h-3.5" />}      label="Provider" value={report.provider_count}                                              animDelay={280} />
+            <SummaryCard icon={<Clock className="w-3.5 h-3.5" />}         label="耗时"     value={`${report.elapsed_ms} ms`}                                          animDelay={330} />
           </div>
         )}
 
         {/* Search & filter bar */}
         {report?.providers && report.providers.length > 0 && (
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2 anim-fade-in" style={{ animationDelay: '380ms' }}>
             <div className="relative flex-1 min-w-[160px] max-w-xs">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 pointer-events-none" style={{ color: 'var(--muted)' }} />
               <input
@@ -572,8 +572,8 @@ export default function Dashboard() {
                 <Search className="w-8 h-8 mx-auto mb-3 opacity-40" />
                 <p className="text-sm">未找到匹配的模型或 Provider</p>
               </div>
-            ) : filteredProviders.map(provider => (
-              <ProviderCard key={provider.provider_id} provider={provider} showError={true} compact={viewMode === 'compact'} />
+            ) : filteredProviders.map((provider, i) => (
+              <ProviderCard key={provider.provider_id} provider={provider} showError={true} compact={viewMode === 'compact'} animDelay={440 + i * 80} />
             ))}
           </div>
         ) : !error && !report ? (
