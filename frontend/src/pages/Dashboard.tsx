@@ -42,7 +42,10 @@ function barCls(s: string) {
   return 'bar-empty'
 }
 
+const STATUS_LABEL: Record<string, string> = { ok: '正常', slow: '较慢', error: '异常', '': '无数据' }
+
 function StatusLights({ history }: { history: string[] }) {
+  const total = history.length
   return (
     <div className="flex flex-wrap gap-1 mt-2.5">
       {history.map((s, i) => {
@@ -54,12 +57,14 @@ function StatusLights({ history }: { history: string[] }) {
           : s === 'error'
           ? '0 0 5px rgba(255,107,122,.8)'
           : undefined
+        const label = STATUS_LABEL[s] ?? s
+        const seq = total - i
         return (
           <div
             key={i}
             className={`w-2.5 h-2.5 rounded-full shrink-0 transition-all ${barCls(s)}`}
             style={colored ? { boxShadow: glow } : undefined}
-            title={s}
+            title={`第 ${seq} 次 · ${label}`}
           />
         )
       })}
