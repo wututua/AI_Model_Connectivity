@@ -445,10 +445,8 @@ func (a *application) scheduler(ctx context.Context) {
 				return
 			}
 		}
-		interval := time.Duration((minHours + rand.Float64()*(maxHours-minHours)) * float64(time.Hour))
-		if interval < time.Minute {
-			interval = time.Minute
-		}
+		interval := max(time.Duration((minHours+rand.Float64()*(maxHours-minHours))*float64(time.Hour)), time.Minute)
+		log.Printf("next scheduled check in %v (at %s)", interval.Round(time.Minute), time.Now().Add(interval).Format("15:04"))
 		timer := time.NewTimer(interval)
 		select {
 		case <-timer.C:
@@ -481,13 +479,6 @@ func filterProvider(cfg config.Config, providerID string) (config.Config, bool) 
 		}
 	}
 	return cfg, false
-}
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
 }
 
 func intervalRange(cfg config.Config) (float64, float64, bool) {

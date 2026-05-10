@@ -276,13 +276,6 @@ func cleanPath(path string) string {
 	return filepath.Clean(path)
 }
 
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
-
 func clamp(value, minValue, maxValue int) int {
 	if value < minValue {
 		return minValue
