@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useMemo } from 'react'
 import { Link } from 'react-router-dom'
-import { Activity, Settings, RefreshCw, Zap, CheckCircle, AlertTriangle, XCircle, Clock, Sun, Moon, Search, X } from 'lucide-react'
+import { Activity, Settings, RefreshCw, Zap, CheckCircle, AlertTriangle, XCircle, Clock, Sun, Moon, Search, X, ArrowUpDown, LayoutDashboard, List } from 'lucide-react'
 import type { Report, ProviderReport, ModelResult } from '../types'
 import { api } from '../api'
 import { useTheme } from '../hooks/useTheme'
@@ -251,6 +251,7 @@ export default function Dashboard() {
   const [refreshing, setRefreshing] = useState(false)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<'all' | 'ok' | 'slow' | 'error'>('all')
+  const [sortBy, setSortBy] = useState<'status' | 'name' | 'latency' | 'models'>('status')
   const { theme, toggle: toggleTheme } = useTheme()
   const navVisible = useScrollNav()
 
@@ -288,6 +289,13 @@ export default function Dashboard() {
   const filteredProviders = useMemo(() => {
     if (!report?.providers) return []
     const q = search.trim().toLowerCase()
+    const STATUS_ORDER = { error: 0, slow: 1, ok: 2 }
+
+    const avgLatency = (p: ProviderReport) => {
+      const valid = p.results.filter(r => r.latency_ms > 0)
+      return valid.length ? valid.reduce((s, r) => s + r.latency_ms, 0) / valid.length : Infinity
+    }
+
     return report.providers
       .map(p => ({
         ...p,
@@ -298,10 +306,15 @@ export default function Dashboard() {
       }))
       .filter(p => p.results.length > 0 || (!q && statusFilter === 'all'))
       .sort((a, b) => {
-        const order = { error: 0, slow: 1, ok: 2 }
-        return (order[a.status as keyof typeof order] ?? 3) - (order[b.status as keyof typeof order] ?? 3)
+        switch (sortBy) {
+          case 'name':    return a.provider_name.localeCompare(b.provider_name)
+          case 'latency': return avgLatency(a) - avgLatency(b)
+          case 'models':  return b.model_count - a.model_count
+          default:        return (STATUS_ORDER[a.status as keyof typeof STATUS_ORDER] ?? 3)
+                               - (STATUS_ORDER[b.status as keyof typeof STATUS_ORDER] ?? 3)
+        }
       })
-  }, [report, search, statusFilter])
+  }, [report, search, statusFilter, sortBy])
 
   const navBtnStyle: React.CSSProperties = { color: 'var(--muted)' }
   const navBtnHover = (e: React.MouseEvent<HTMLElement>) => (e.currentTarget.style.color = 'var(--text)')
@@ -464,6 +477,21 @@ export default function Dashboard() {
                 {{ all: '全部', ok: '正常', slow: '较慢', error: '异常' }[s]}
               </button>
             ))}
+
+            {/* Sort selector */}
+            <div className="flex items-center gap-1.5 ml-auto" style={{ color: 'var(--muted)' }}>
+              <ArrowUpDown className="w-3.5 h-3.5 shrink-0" />
+              <select
+                value={sortBy}
+                onChange={e => setSortBy(e.target.value as typeof sortBy)}
+                className="input-glass rounded-xl px-2 py-1.5 text-xs cursor-pointer focus:outline-none"
+              >
+                <option value="status">按状态</option>
+                <option value="name">按名称</option>
+                <option value="latency">按延迟</option>
+                <option value="models">按模型数</option>
+              </select>
+            </div>
           </div>
         )}
 
