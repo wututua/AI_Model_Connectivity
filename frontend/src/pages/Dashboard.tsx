@@ -225,6 +225,7 @@ export default function Dashboard() {
   const [report, setReport] = useState<Report | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [live, setLive] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
   const { theme, toggle: toggleTheme } = useTheme()
   const navVisible = useScrollNav()
 
@@ -233,6 +234,11 @@ export default function Dashboard() {
       .then(r => { setReport(r); setError(null) })
       .catch(e => setError((e as Error).message)),
   [])
+
+  const handleRefresh = useCallback(() => {
+    setRefreshing(true)
+    fetchReport().finally(() => setRefreshing(false))
+  }, [fetchReport])
 
   useEffect(() => {
     fetchReport()
@@ -286,15 +292,16 @@ export default function Dashboard() {
               </span>
             )}
             <button
-              onClick={fetchReport}
-              className="p-1.5 rounded-lg transition-colors cursor-pointer"
+              onClick={handleRefresh}
+              disabled={refreshing}
+              className="p-1.5 rounded-lg transition-colors cursor-pointer disabled:opacity-50"
               style={navBtnStyle}
               onMouseEnter={navBtnHover}
               onMouseLeave={navBtnLeave}
               title="手动刷新"
               aria-label="手动刷新"
             >
-              <RefreshCw className="w-4 h-4" />
+              <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
             </button>
             <button
               onClick={toggleTheme}
