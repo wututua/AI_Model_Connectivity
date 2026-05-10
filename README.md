@@ -97,8 +97,8 @@ cd frontend && npm run dev
 |------|--------|------|
 | `TIMEOUT_SECONDS` | `30` | 单模型检测超时（秒） |
 | `MODEL_LIST_TIMEOUT_SECONDS` | `20` | 获取模型列表超时（秒） |
-| `SLOW_THRESHOLD_MS` | `8000` | 超过此延迟标记为"较慢"（毫秒） |
-| `CONCURRENCY` | `3` | 全局最大并发数 |
+| `SLOW_THRESHOLD_MS` | `300` | 超过此延迟标记为"较慢"（毫秒） |
+| `CONCURRENCY` | `1` | 全局最大并发数；默认 `1` 表示所有模型严格逐个检测 |
 | `PROVIDER_CONCURRENCY` | `1` | 单 Provider 最大并发数 |
 | `MAX_MODELS_PER_PROVIDER` | `0` | 每个 Provider 最多检测模型数，`0` 不限制 |
 | `SKIP_MODELS` | — | 跳过的模型，支持 `model`、`provider/model`、`provider::model`，逗号分隔 |
