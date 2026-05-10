@@ -266,7 +266,10 @@ function OverviewTab() {
   const load = useCallback(() => {
     setLoading(true)
     Promise.all([api.detection(), api.config()])
-      .then(([s, c]) => { setState(s); setCfg({ providers: c.providers, settings: c.settings }) })
+      .then(([s, c]) => {
+        setState(s)
+        setCfg({ providers: c.providers, settings: normalizeSettings(c.settings) })
+      })
       .catch(() => {})
       .finally(() => setLoading(false))
   }, [])
@@ -632,6 +635,15 @@ function ProvidersTab() {
 
 // ── Settings Tab ──────────────────────────────────────────────────────────────
 
+function normalizeSettings(s: RuntimeSettings): RuntimeSettings {
+  return {
+    ...s,
+    skip_models: s.skip_models ?? [],
+    notify_providers: s.notify_providers ?? [],
+    notify_models: s.notify_models ?? [],
+  }
+}
+
 function SettingsTab() {
   const [form, setForm] = useState<RuntimeSettings | null>(null)
   const [loading, setLoading] = useState(false)
@@ -640,7 +652,10 @@ function SettingsTab() {
 
   useEffect(() => {
     setLoading(true)
-    api.config().then(c => { setForm({ ...c.settings }) }).catch(() => {}).finally(() => setLoading(false))
+    api.config()
+      .then(c => setForm(normalizeSettings(c.settings)))
+      .catch(e => setMsg(`加载失败：${(e as Error).message}`))
+      .finally(() => setLoading(false))
   }, [])
 
   const set = <K extends keyof RuntimeSettings>(key: K, val: RuntimeSettings[K]) =>
@@ -660,8 +675,16 @@ function SettingsTab() {
     }
   }
 
-  if (loading || !form) {
+  if (loading) {
     return <div className="flex justify-center py-12"><Spinner /></div>
+  }
+
+  if (!form) {
+    return (
+      <div className="py-12 text-center">
+        <p className="text-red-400 text-sm">{msg || '加载失败，请刷新重试'}</p>
+      </div>
+    )
   }
 
   const numInput = (key: keyof RuntimeSettings, label: string, hint?: string) => (
