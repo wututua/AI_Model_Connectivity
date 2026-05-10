@@ -785,9 +785,15 @@ function SettingsTab() {
         <h3 className="text-xs font-medium uppercase tracking-widest mb-3" style={{ color: 'var(--muted)', letterSpacing: '.12em' }}>基础</h3>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {textInput('dashboard_title', '仪表盘标题')}
-          {textInput('theme_mode', '主题模式', 'auto / dark / light')}
-          {numInput('day_mode_start_hour', '日间模式起始时（0-23）')}
-          {numInput('day_mode_end_hour', '日间模式结束时（0-23）')}
+          <Field label="主题模式" hint="已由前端接管（localStorage），此字段不再生效">
+            <input className={`${inputCls} opacity-40 cursor-not-allowed`} value={form.theme_mode} readOnly tabIndex={-1} />
+          </Field>
+          <Field label="日间模式起始时（0-23）" hint="已由前端接管，此字段不再生效">
+            <input type="number" className={`${inputCls} opacity-40 cursor-not-allowed`} value={form.day_mode_start_hour} readOnly tabIndex={-1} />
+          </Field>
+          <Field label="日间模式结束时（0-23）" hint="已由前端接管，此字段不再生效">
+            <input type="number" className={`${inputCls} opacity-40 cursor-not-allowed`} value={form.day_mode_end_hour} readOnly tabIndex={-1} />
+          </Field>
         </div>
       </section>
 
