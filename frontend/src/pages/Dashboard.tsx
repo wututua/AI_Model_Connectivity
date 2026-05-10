@@ -4,6 +4,7 @@ import { Activity, Settings, RefreshCw, Zap, CheckCircle, AlertTriangle, XCircle
 import type { Report, ProviderReport, ModelResult } from '../types'
 import { api } from '../api'
 import { useTheme } from '../hooks/useTheme'
+import { useScrollNav } from '../hooks/useScrollNav'
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -228,6 +229,7 @@ export default function Dashboard() {
   const [error, setError] = useState<string | null>(null)
   const [live, setLive] = useState(false)
   const { theme, toggle: toggleTheme } = useTheme()
+  const navVisible = useScrollNav()
 
   const fetchReport = useCallback(() =>
     api.status()
@@ -263,7 +265,7 @@ export default function Dashboard() {
     <div className="min-h-screen">
       {/* ── Navbar ─────────────────────────────────────────────── */}
       <nav
-        className="sticky top-0 z-30 backdrop-blur-glass border-b nav-glass"
+        className={`fixed top-0 left-0 right-0 z-30 backdrop-blur-glass border-b nav-glass transition-transform duration-300 ease-in-out ${navVisible ? 'translate-y-0' : '-translate-y-full'}`}
         style={{ borderColor: 'var(--border)' }}
       >
         <div className="max-w-[1180px] mx-auto px-4 h-14 flex items-center justify-between">
@@ -323,7 +325,7 @@ export default function Dashboard() {
       </nav>
 
       {/* ── Content ────────────────────────────────────────────── */}
-      <main className="max-w-[1180px] mx-auto px-4 py-10 space-y-5">
+      <main className="max-w-[1180px] mx-auto px-4 pt-[96px] pb-10 space-y-5">
 
         {/* Hero banner */}
         {report && sc && (

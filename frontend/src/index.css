@@ -14,7 +14,7 @@
   --slow:        #f6c453;
   --error:       #ff6b7a;
   --shadow:      0 24px 80px rgba(0, 0, 0, .35);
-  --nav-bg:      rgba(11, 16, 32, .88);
+  --nav-bg:      rgba(11, 16, 32, .70);
   --row-bg:      rgba(255, 255, 255, .04);
   --row-hover:   rgba(255, 255, 255, .07);
 }
@@ -27,7 +27,7 @@ body[data-theme="light"] {
   --muted:       #5f6f8a;
   --border:      rgba(86, 104, 134, .18);
   --shadow:      0 24px 80px rgba(86, 104, 134, .18);
-  --nav-bg:      rgba(238, 243, 255, .9);
+  --nav-bg:      rgba(238, 243, 255, .75);
   --row-bg:      rgba(0, 0, 0, .03);
   --row-hover:   rgba(0, 0, 0, .06);
 }

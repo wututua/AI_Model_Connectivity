@@ -7,6 +7,7 @@ import {
 } from 'lucide-react'
 import { api, getToken, setToken } from '../api'
 import { useTheme } from '../hooks/useTheme'
+import { useScrollNav } from '../hooks/useScrollNav'
 import type {
   RunningState, SafeProviderConfig, ProviderUpdate,
   CheckTask, RuntimeSettings, ConfigExport,
@@ -1044,6 +1045,7 @@ const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
 
 export default function Admin() {
   const { theme, toggle: toggleTheme } = useTheme()
+  const navVisible = useScrollNav()
   const [authed, setAuthed] = useState(false)
   const [verifying, setVerifying] = useState(!!getToken())
   const [tab, setTab] = useState<Tab>('overview')
@@ -1072,7 +1074,7 @@ export default function Admin() {
     <div className="min-h-screen flex flex-col">
       {/* Navbar */}
       <nav
-        className="sticky top-0 z-30 backdrop-blur-glass border-b nav-glass"
+        className={`fixed top-0 left-0 right-0 z-30 backdrop-blur-glass border-b nav-glass transition-transform duration-300 ease-in-out ${navVisible ? 'translate-y-0' : '-translate-y-full'}`}
         style={{ borderColor: 'var(--border)' }}
       >
         <div className="max-w-[1180px] mx-auto px-4 h-14 flex items-center justify-between">
@@ -1115,7 +1117,7 @@ export default function Admin() {
         </div>
       </nav>
 
-      <div className="flex flex-1 max-w-[1180px] mx-auto w-full px-4 py-6 gap-6">
+      <div className="flex flex-1 max-w-[1180px] mx-auto w-full px-4 pt-[80px] pb-6 gap-6">
         {/* Sidebar */}
         <aside className="w-44 shrink-0 hidden sm:block">
           <nav className="space-y-0.5">
