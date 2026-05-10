@@ -81,17 +81,31 @@ function TokenGate({ onEnter }: { onEnter: () => void }) {
   const [show, setShow] = useState(false)
   const [err, setErr] = useState('')
   const [loading, setLoading] = useState(false)
+  // tracks whether the server requires a token (set to true after first 401)
+  const [tokenRequired, setTokenRequired] = useState(false)
 
   const submit = async () => {
+    const token = value.trim()
+    if (tokenRequired && !token) {
+      setErr('服务器已设置 ADMIN_TOKEN，不能留空')
+      return
+    }
     setLoading(true)
     setErr('')
-    setToken(value.trim())
+    // set token for the verification request only; clear on failure
+    setToken(token)
     try {
       await api.detection()
       onEnter()
-    } catch {
+    } catch (e) {
       setToken('')
-      setErr('Token 验证失败，请检查后重试')
+      const msg = (e as Error).message ?? ''
+      if (msg.toLowerCase().includes('unauthorized') || msg === '401') {
+        setTokenRequired(true)
+        setErr('Token 错误或未提供，请检查后重试')
+      } else {
+        setErr(`验证失败：${msg}`)
+      }
     } finally {
       setLoading(false)
     }
@@ -107,16 +121,17 @@ function TokenGate({ onEnter }: { onEnter: () => void }) {
           </div>
           <p className="text-sm text-slate-400 mb-5">
             输入 <code className="font-mono bg-slate-800 px-1 rounded">ADMIN_TOKEN</code> 访问管理面板。
-            若服务运行在 localhost 且未设置 Token，可直接留空进入。
+            {!tokenRequired && <span className="block mt-1 text-slate-500 text-xs">若服务运行在 localhost 且未设置 Token，可直接留空进入。</span>}
           </p>
           <div className="relative mb-3">
             <input
               type={show ? 'text' : 'password'}
               value={value}
-              onChange={e => setValue(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && submit()}
-              placeholder="Admin Token（可为空）"
-              className={`${inputCls} pr-9`}
+              onChange={e => { setValue(e.target.value); setErr('') }}
+              onKeyDown={e => e.key === 'Enter' && !loading && submit()}
+              placeholder={tokenRequired ? 'Admin Token（必填）' : 'Admin Token（可为空）'}
+              className={`${inputCls} pr-9 ${tokenRequired && !value.trim() ? 'border-amber-500/50' : ''}`}
+              autoFocus
             />
             <button
               onClick={() => setShow(!show)}
@@ -141,17 +156,119 @@ function TokenGate({ onEnter }: { onEnter: () => void }) {
   )
 }
 
+// ── Token Estimator ──────────────────────────────────────────────────────────
+
+const TOKENS_PER_MODEL = 40 // conservative: ~35 input (prompts) + ~5 output
+
+function fmtNum(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`
+  return String(Math.round(n))
+}
+
+function TokenEstimateCard({ providers, settings }: {
+  providers: SafeProviderConfig[]
+  settings: RuntimeSettings
+}) {
+  const enabledProviders = providers.filter(p => p.enabled)
+  let totalModels: number | null = 0
+  for (const p of enabledProviders) {
+    const cnt = p.models.length
+    if (cnt === 0) {
+      if (settings.max_models_per_provider > 0) {
+        totalModels = (totalModels ?? 0) + settings.max_models_per_provider
+      } else {
+        totalModels = null
+        break
+      }
+    } else {
+      const cap = settings.max_models_per_provider > 0 ? settings.max_models_per_provider : cnt
+      totalModels = (totalModels ?? 0) + Math.min(cnt, cap)
+    }
+  }
+
+  const minH = settings.auto_check_interval_min_hours
+  const maxH = settings.auto_check_interval_max_hours
+  const schedulingOn = minH > 0 || maxH > 0
+  const avgH = schedulingOn ? ((minH <= 0 ? maxH : minH) + (maxH <= 0 ? minH : maxH)) / 2 : 0
+  const dailyChecks = schedulingOn && avgH > 0 ? 24 / avgH : 0
+
+  const modelsKnown = totalModels !== null
+  const dailyTokens = modelsKnown && schedulingOn ? totalModels! * TOKENS_PER_MODEL * dailyChecks : null
+  const monthlyTokens = dailyTokens !== null ? dailyTokens * 30 : null
+
+  const row = (label: string, value: React.ReactNode, sub?: string) => (
+    <div className="flex items-center justify-between py-2 border-b border-slate-800 last:border-0">
+      <span className="text-xs text-slate-500">{label}</span>
+      <span className="text-sm font-mono text-white text-right">
+        {value}
+        {sub && <span className="text-xs text-slate-500 ml-1.5">{sub}</span>}
+      </span>
+    </div>
+  )
+
+  return (
+    <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
+      <div className="flex items-center gap-1.5 mb-3">
+        <Activity className="w-3.5 h-3.5 text-amber-400" />
+        <p className="text-xs font-medium text-amber-400">Token 消耗估算</p>
+      </div>
+      {row('启用 Provider', enabledProviders.length, `/ ${providers.length} 个`)}
+      {row(
+        '探测模型总数',
+        modelsKnown ? totalModels : '—',
+        modelsKnown
+          ? (settings.max_models_per_provider > 0 ? `(上限 ${settings.max_models_per_provider}/Provider)` : '')
+          : '含有 Provider 未指定模型列表'
+      )}
+      {row(
+        '每次检测消耗',
+        modelsKnown ? fmtNum(totalModels! * TOKENS_PER_MODEL) : '—',
+        'tokens（估算）'
+      )}
+      {row(
+        '定时检测频率',
+        schedulingOn
+          ? `${minH <= 0 ? maxH : minH}h – ${maxH <= 0 ? minH : maxH}h`
+          : '已关闭'
+      )}
+      {schedulingOn && row(
+        '每日检测次数',
+        dailyChecks > 0 ? `≈ ${dailyChecks.toFixed(1)} 次` : '—'
+      )}
+      {row(
+        '每日消耗预估',
+        dailyTokens !== null ? fmtNum(dailyTokens) : '—',
+        'tokens'
+      )}
+      {row(
+        '每月消耗预估',
+        monthlyTokens !== null ? fmtNum(monthlyTokens) : '—',
+        'tokens'
+      )}
+      <p className="text-[10px] text-slate-600 mt-2">
+        基于每模型约 {TOKENS_PER_MODEL} token（系统提示词 + 探测提示词 + 响应），实际消耗因模型而异。
+        不含手动触发的检测。
+      </p>
+    </div>
+  )
+}
+
 // ── Overview Tab ─────────────────────────────────────────────────────────────
 
 function OverviewTab() {
   const [state, setState] = useState<RunningState | null>(null)
+  const [cfg, setCfg] = useState<{ providers: SafeProviderConfig[]; settings: RuntimeSettings } | null>(null)
   const [loading, setLoading] = useState(false)
   const [actionLoading, setActionLoading] = useState(false)
   const [msg, setMsg] = useState('')
 
   const load = useCallback(() => {
     setLoading(true)
-    api.detection().then(setState).catch(() => {}).finally(() => setLoading(false))
+    Promise.all([api.detection(), api.config()])
+      .then(([s, c]) => { setState(s); setCfg({ providers: c.providers, settings: c.settings }) })
+      .catch(() => {})
+      .finally(() => setLoading(false))
   }, [])
 
   useEffect(() => { load() }, [load])
@@ -230,6 +347,8 @@ function OverviewTab() {
           {msg}
         </p>
       )}
+
+      {cfg && <TokenEstimateCard providers={cfg.providers} settings={cfg.settings} />}
     </div>
   )
 }
@@ -894,8 +1013,25 @@ const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
 ]
 
 export default function Admin() {
-  const [authed, setAuthed] = useState(!!getToken())
+  const [authed, setAuthed] = useState(false)
+  const [verifying, setVerifying] = useState(!!getToken())
   const [tab, setTab] = useState<Tab>('overview')
+
+  useEffect(() => {
+    if (!getToken()) return
+    api.detection()
+      .then(() => setAuthed(true))
+      .catch(() => setToken(''))
+      .finally(() => setVerifying(false))
+  }, [])
+
+  if (verifying) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center">
+        <Loader2 className="w-6 h-6 text-blue-400 animate-spin" />
+      </div>
+    )
+  }
 
   if (!authed) {
     return <TokenGate onEnter={() => setAuthed(true)} />
