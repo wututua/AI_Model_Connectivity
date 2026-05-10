@@ -47,3 +47,7 @@ __pycache__/
 frontend/node_modules/
 frontend/.vite/
 frontend/dist/
+frontend/tsconfig.tsbuildinfo
+
+# Refer to the frontend
+Refer_to_the_frontend/
