@@ -430,16 +430,26 @@ export default function Dashboard() {
           <div className="flex flex-col items-center justify-center py-24" style={{ color: 'var(--muted)' }}>
             <XCircle className="w-12 h-12 mb-4" style={{ color: 'var(--error)', opacity: .5 }} />
             <p className="text-lg mb-2">无法获取状态</p>
-            <p className="text-sm font-mono" style={{ color: 'var(--error)', opacity: .7 }}>{error}</p>
-            <p className="text-xs mt-3" style={{ color: 'var(--muted)' }}>
-              请先触发一次检测：
-              <code className="font-mono px-1.5 py-0.5 rounded ml-1" style={{ background: 'var(--card-strong)' }}>POST /api/admin/check</code>
-            </p>
+            <p className="text-sm font-mono mb-4" style={{ color: 'var(--error)', opacity: .7 }}>{error}</p>
+            <Link
+              to="/admin"
+              className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-colors cursor-pointer glass"
+              style={{ color: 'var(--ok)', border: '1px solid rgba(56,217,150,.35)' }}
+            >
+              <Settings className="w-4 h-4" />前往管理面板触发检测
+            </Link>
           </div>
         ) : (
           <div className="flex flex-col items-center justify-center py-24" style={{ color: 'var(--muted)' }}>
             <Activity className="w-12 h-12 mb-4" />
-            <p>暂无数据，请触发检测</p>
+            <p className="mb-4">暂无数据</p>
+            <Link
+              to="/admin"
+              className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-colors cursor-pointer glass"
+              style={{ color: 'var(--ok)', border: '1px solid rgba(56,217,150,.35)' }}
+            >
+              <Settings className="w-4 h-4" />前往管理面板触发检测
+            </Link>
           </div>
         )}
       </main>
