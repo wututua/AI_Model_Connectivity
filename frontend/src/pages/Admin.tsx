@@ -736,7 +736,7 @@ function SettingsTab() {
         </Btn>
       </div>
 
-      {msg && <p className={`text-sm font-mono ${msg.startsWith('错误') ? 'text-red-400' : 'text-green-400'}`}>{msg}</p>}
+      {msg && <p className="text-sm font-mono" style={{ color: msg.startsWith('错误') ? 'var(--error)' : 'var(--ok)' }}>{msg}</p>}
 
       <section>
         <h3 className="text-xs font-medium uppercase tracking-widest mb-3" style={{ color: 'var(--muted)', letterSpacing: '.12em' }}>基础</h3>
@@ -854,7 +854,7 @@ function TasksTab() {
           <select
             value={filter}
             onChange={e => { setFilter(e.target.value); setOffset(0) }}
-            className="bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-xs text-slate-300 focus:outline-none cursor-pointer"
+            className="input-glass rounded-xl px-2 py-1.5 text-xs cursor-pointer focus:outline-none"
           >
             <option value="">全部状态</option>
             <option value="success">成功</option>
@@ -878,13 +878,19 @@ function TasksTab() {
               <th className="pb-2 font-medium">结果</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-800/60">
+          <tbody>
             {tasks.map(t => (
-              <tr key={t.id} className="hover:bg-slate-800/30 transition-colors">
-                <td className="py-2.5 pr-3 font-mono text-xs text-slate-500">#{t.id}</td>
+              <tr
+                key={t.id}
+                className="transition-colors"
+                style={{ borderBottom: '1px solid var(--border)' }}
+                onMouseEnter={e => (e.currentTarget.style.background = 'var(--row-hover)')}
+                onMouseLeave={e => (e.currentTarget.style.background = '')}
+              >
+                <td className="py-2.5 pr-3 font-mono text-xs" style={{ color: 'var(--muted)' }}>#{t.id}</td>
                 <td className="py-2.5 pr-3 text-xs">
-                  <span className="text-slate-400">{kindLabel[t.kind] ?? t.kind}</span>
-                  {t.provider_id && <span className="text-slate-600 font-mono"> {t.provider_id}</span>}
+                  <span style={{ color: 'var(--text)' }}>{kindLabel[t.kind] ?? t.kind}</span>
+                  {t.provider_id && <span className="font-mono ml-1" style={{ color: 'var(--muted)', opacity: .7 }}>{t.provider_id}</span>}
                 </td>
                 <td className="py-2.5 pr-3">
                   <div className="flex items-center gap-1.5">
@@ -892,22 +898,22 @@ function TasksTab() {
                     <Badge status={t.status} />
                   </div>
                   {t.error_message && (
-                    <p className="text-[11px] text-red-400/70 font-mono mt-0.5 max-w-[200px] truncate">{t.error_message}</p>
+                    <p className="text-[11px] font-mono mt-0.5 max-w-[200px] truncate" style={{ color: 'var(--error)', opacity: .7 }}>{t.error_message}</p>
                   )}
                 </td>
-                <td className="py-2.5 pr-3 font-mono text-xs text-slate-400">
+                <td className="py-2.5 pr-3 font-mono text-xs" style={{ color: 'var(--muted)' }}>
                   {t.started_at ? new Date(t.started_at).toLocaleString('zh-CN') : '—'}
                 </td>
-                <td className="py-2.5 pr-3 font-mono text-xs text-slate-400">
+                <td className="py-2.5 pr-3 font-mono text-xs" style={{ color: 'var(--muted)' }}>
                   {t.elapsed_ms ? `${(t.elapsed_ms / 1000).toFixed(1)}s` : '—'}
                 </td>
                 <td className="py-2.5 text-xs font-mono">
                   {t.total > 0 && (
-                    <span className="text-slate-400">
-                      <span className="text-green-400">{t.ok_count}</span>/
-                      <span className="text-yellow-400">{t.slow_count}</span>/
-                      <span className="text-red-400">{t.error_count}</span>
-                      <span className="text-slate-600"> ({t.total})</span>
+                    <span style={{ color: 'var(--muted)' }}>
+                      <span style={{ color: 'var(--ok)' }}>{t.ok_count}</span>/
+                      <span style={{ color: 'var(--slow)' }}>{t.slow_count}</span>/
+                      <span style={{ color: 'var(--error)' }}>{t.error_count}</span>
+                      <span style={{ color: 'var(--muted)', opacity: .6 }}> ({t.total})</span>
                     </span>
                   )}
                 </td>
@@ -915,7 +921,7 @@ function TasksTab() {
             ))}
             {!loading && tasks.length === 0 && (
               <tr>
-                <td colSpan={6} className="py-12 text-center text-slate-600">暂无检测记录</td>
+                <td colSpan={6} className="py-12 text-center" style={{ color: 'var(--muted)', opacity: .5 }}>暂无检测记录</td>
               </tr>
             )}
           </tbody>
@@ -926,8 +932,8 @@ function TasksTab() {
         <Btn onClick={() => setOffset(o => Math.max(0, o - LIMIT))} disabled={offset === 0} variant="ghost">
           上一页
         </Btn>
-        <span className="text-xs text-slate-500 font-mono">
-          {Math.floor(offset / LIMIT) + 1} 页
+        <span className="text-xs font-mono" style={{ color: 'var(--muted)' }}>
+          第 {Math.floor(offset / LIMIT) + 1} 页
         </span>
         <Btn onClick={() => setOffset(o => o + LIMIT)} disabled={tasks.length < LIMIT} variant="ghost">
           下一页
@@ -987,9 +993,9 @@ function ConfigTab() {
 
   return (
     <div className="space-y-6 max-w-2xl">
-      <h2 className="text-base font-semibold text-white">配置管理</h2>
+      <h2 className="text-base font-semibold" style={{ color: 'var(--text)' }}>配置管理</h2>
 
-      {msg && <p className={`text-sm font-mono ${msg.startsWith('错误') ? 'text-red-400' : 'text-green-400'}`}>{msg}</p>}
+      {msg && <p className="text-sm font-mono" style={{ color: msg.startsWith('错误') ? 'var(--error)' : 'var(--ok)' }}>{msg}</p>}
 
       <section className="glass rounded-[22px] p-5 space-y-3">
         <h3 className="text-sm font-medium" style={{ color: 'var(--text)' }}>导出配置</h3>
