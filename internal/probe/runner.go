@@ -264,9 +264,4 @@ func truncate(text string, limit int) string {
 	return string(runes[:limit]) + "..."
 }
 
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
+
