@@ -561,12 +561,12 @@ function ProvidersTab() {
     }
   }
 
-  const handleRerun = async (id: string) => {
+  const handleRerun = async (id: string, name: string) => {
     setRerunning(id)
     setMsg('')
     try {
       await api.rerunProvider(id)
-      setMsg(`已触发 ${id} 重新检测`)
+      setMsg(`「${name}」重新检测已触发，完成后结果将更新至仪表盘`)
     } catch (e) {
       setMsg(`错误：${(e as Error).message}`)
     } finally {
@@ -639,7 +639,7 @@ function ProvidersTab() {
                 </td>
                 <td className="py-3">
                   <div className="flex items-center gap-1">
-                    <Btn variant="ghost" onClick={() => handleRerun(p.id)} loading={rerunning === p.id}>
+                    <Btn variant="ghost" onClick={() => handleRerun(p.id, p.name)} loading={rerunning === p.id} className="shrink-0" title="重新检测此 Provider">
                       <RefreshCw className="w-3.5 h-3.5" />
                     </Btn>
                     <Btn variant="ghost" onClick={() => setEditing(p)}>
