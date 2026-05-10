@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import {
   Activity, ArrowLeft, Play, Square, RefreshCw, Plus, Edit2, Trash2,
-  Save, Download, Upload, RotateCcw, CheckCircle, XCircle, AlertTriangle,
+  Save, Download, Upload, RotateCcw, CheckCircle, XCircle,
   Clock, Loader2, LogOut, Eye, EyeOff, Sun, Moon, Settings, FileJson, Database,
 } from 'lucide-react'
 import { api, getToken, setToken } from '../api'
@@ -506,6 +506,7 @@ function ProvidersTab() {
   const [editing, setEditing] = useState<SafeProviderConfig | null | 'new'>(null)
   const [msg, setMsg] = useState('')
   const [deleting, setDeleting] = useState<string | null>(null)
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
   const [rerunning, setRerunning] = useState<string | null>(null)
 
   const load = useCallback(() => {
@@ -527,6 +528,11 @@ function ProvidersTab() {
   }
 
   const handleDelete = async (id: string) => {
+    if (confirmDelete !== id) {
+      setConfirmDelete(id)
+      return
+    }
+    setConfirmDelete(null)
     setDeleting(id)
     try {
       await api.deleteProvider(id)
@@ -613,9 +619,20 @@ function ProvidersTab() {
                     <Btn variant="ghost" onClick={() => setEditing(p)}>
                       <Edit2 className="w-3.5 h-3.5" />
                     </Btn>
-                    <Btn variant="danger" onClick={() => handleDelete(p.id)} loading={deleting === p.id}>
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </Btn>
+                    {confirmDelete === p.id ? (
+                      <>
+                        <Btn variant="danger" onClick={() => handleDelete(p.id)} loading={deleting === p.id} className="text-[11px] px-2">
+                          确认删除
+                        </Btn>
+                        <Btn variant="ghost" onClick={() => setConfirmDelete(null)} className="text-[11px] px-2">
+                          取消
+                        </Btn>
+                      </>
+                    ) : (
+                      <Btn variant="danger" onClick={() => handleDelete(p.id)} loading={deleting === p.id}>
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </Btn>
+                    )}
                   </div>
                 </td>
               </tr>
