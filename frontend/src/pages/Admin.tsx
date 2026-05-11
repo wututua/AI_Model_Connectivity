@@ -160,7 +160,7 @@ export default function Admin() {
               onMouseEnter={e => (e.currentTarget.style.color = 'var(--text)')}
               onMouseLeave={e => (e.currentTarget.style.color = 'var(--muted)')}
             >
-              <ArrowLeft className="w-3.5 h-3.5" />仪表盘
+              <ArrowLeft className="w-3.5 h-3.5" /><span className="hidden sm:inline">仪表盘</span>
             </Link>
             <button
               onClick={toggleTheme}
@@ -188,6 +188,7 @@ export default function Admin() {
       </nav>
 
       <div className="flex flex-1 max-w-[1180px] mx-auto w-full px-4 pt-[80px] pb-6 gap-6">
+        {/* Desktop sidebar – hidden on mobile */}
         <aside className="w-44 shrink-0 hidden sm:block">
           <nav className="space-y-0.5">
             {TABS.map((t, i) => (
@@ -210,33 +211,37 @@ export default function Admin() {
           </nav>
         </aside>
 
-        <div className="sm:hidden w-full">
-          <div className="flex overflow-x-auto gap-1 pb-3 mb-4" style={{ borderBottom: '1px solid var(--border)' }}>
-            {TABS.map((t, i) => (
-              <button
-                key={t.id}
-                onClick={() => setTab(t.id)}
-                className="flex-none flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs whitespace-nowrap transition-colors cursor-pointer anim-slide-in-down"
-                style={{
-                  ...(tab === t.id
-                    ? { background: 'rgba(56,217,150,.12)', color: 'var(--ok)', fontWeight: 600 }
-                    : { background: 'var(--card)', color: 'var(--muted)' }),
-                  animationDelay: `${i * 40}ms`,
-                }}
-              >
-                {t.label}
-              </button>
-            ))}
+        {/* Content column: mobile tab bar stacked above main */}
+        <div className="flex-1 min-w-0 flex flex-col">
+          {/* Mobile tab bar – stacked above content, hidden on desktop */}
+          <div className="sm:hidden mb-4">
+            <div className="flex overflow-x-auto gap-1 pb-3" style={{ borderBottom: '1px solid var(--border)' }}>
+              {TABS.map((t, i) => (
+                <button
+                  key={t.id}
+                  onClick={() => setTab(t.id)}
+                  className="flex-none flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs whitespace-nowrap transition-colors cursor-pointer anim-slide-in-down"
+                  style={{
+                    ...(tab === t.id
+                      ? { background: 'rgba(56,217,150,.12)', color: 'var(--ok)', fontWeight: 600 }
+                      : { background: 'var(--card)', color: 'var(--muted)' }),
+                    animationDelay: `${i * 40}ms`,
+                  }}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
 
-        <main key={tab} className="flex-1 min-w-0 anim-fade-in">
-          {tab === 'overview'  && <OverviewTab />}
-          {tab === 'providers' && <ProvidersTab />}
-          {tab === 'settings'  && <SettingsTab />}
-          {tab === 'tasks'     && <TasksTab />}
-          {tab === 'config'    && <ConfigTab />}
-        </main>
+          <main key={tab} className="anim-fade-in">
+            {tab === 'overview'  && <OverviewTab />}
+            {tab === 'providers' && <ProvidersTab />}
+            {tab === 'settings'  && <SettingsTab />}
+            {tab === 'tasks'     && <TasksTab />}
+            {tab === 'config'    && <ConfigTab />}
+          </main>
+        </div>
       </div>
     </div>
   )
