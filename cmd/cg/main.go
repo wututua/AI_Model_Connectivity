@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"math/rand"
 	"net/http"
 	"os"
@@ -22,18 +22,23 @@ import (
 )
 
 func main() {
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
+
 	baseCfg, err := config.Load(".env")
 	if err != nil {
-		log.Fatalf("load config: %v", err)
+		slog.Error("load config", "err", err)
+		os.Exit(1)
 	}
 	store, err := storage.NewSQLite(context.Background(), baseCfg.DatabasePath, baseCfg.DataDir)
 	if err != nil {
-		log.Fatalf("open database: %v", err)
+		slog.Error("open database", "err", err)
+		os.Exit(1)
 	}
 	defer store.Close()
 	runtimeCfg, ok, err := store.LoadRuntimeConfig(context.Background())
 	if err != nil {
-		log.Fatalf("load runtime config: %v", err)
+		slog.Error("load runtime config", "err", err)
+		os.Exit(1)
 	}
 	cfg := baseCfg
 	if ok {
@@ -44,7 +49,8 @@ func main() {
 	} else {
 		runtimeCfg = config.RuntimeConfigFromConfig(baseCfg)
 		if err := store.SaveRuntimeConfig(context.Background(), runtimeCfg); err != nil {
-			log.Fatalf("save runtime config: %v", err)
+			slog.Error("save runtime config", "err", err)
+			os.Exit(1)
 		}
 	}
 
@@ -55,13 +61,15 @@ func main() {
 		switch args[0] {
 		case "check", "once":
 			if _, err := app.check(context.Background()); err != nil {
-				log.Fatalf("check failed: %v", err)
+				slog.Error("check failed", "err", err)
+				os.Exit(1)
 			}
 			return
 		case "serve":
 			// fall through
 		default:
-			log.Fatalf("unknown command %q; use serve or check", args[0])
+			slog.Error("unknown command", "cmd", args[0], "hint", "use serve or check")
+			os.Exit(1)
 		}
 	}
 
@@ -71,10 +79,10 @@ func main() {
 		go func() {
 			if _, err := app.checkWithOptions(ctx, checkOptions{Kind: "startup", SaveLatest: true}); err != nil {
 				if errors.Is(err, web.ErrCheckAlreadyRunning) {
-					log.Printf("startup check skipped: %v", err)
+					slog.Warn("startup check skipped", "err", err)
 					return
 				}
-				log.Printf("startup check failed: %v", err)
+				slog.Error("startup check failed", "err", err)
 			}
 		}()
 	}
@@ -89,20 +97,24 @@ func main() {
 	select {
 	case err := <-serverErr:
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Fatal(err)
+			slog.Error("server error", "err", err)
+			os.Exit(1)
 		}
 	case <-ctx.Done():
 		app.StopCheck()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 		defer cancel()
 		if err := server.Shutdown(shutdownCtx); err != nil && !errors.Is(err, context.DeadlineExceeded) {
-			log.Fatalf("shutdown server: %v", err)
+			slog.Error("shutdown server", "err", err)
+			os.Exit(1)
 		}
 		if err := server.Close(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Fatalf("close server: %v", err)
+			slog.Error("close server", "err", err)
+			os.Exit(1)
 		}
 		if err := <-serverErr; err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Fatal(err)
+			slog.Error("server error", "err", err)
+			os.Exit(1)
 		}
 	}
 }
@@ -367,7 +379,7 @@ func (a *application) checkWithOptions(ctx context.Context, options checkOptions
 		ErrorMessage:      errorMessage,
 		ReportGeneratedAt: value.GeneratedAt,
 	}); err != nil {
-		log.Printf("finish check task failed: %v", err)
+		slog.Error("finish check task failed", "err", err)
 	}
 	a.finishRunState()
 	cancel()
@@ -403,7 +415,7 @@ func (a *application) runCheck(ctx context.Context, options checkOptions) (repor
 	if cfg.EnableHistory {
 		loaded, loadErr := a.store.LoadHistory(ctx, max(cfg.HistorySize, cfg.MaxHistoryRecords), cfg.StatsWindowDays)
 		if loadErr != nil {
-			log.Printf("load history failed: %v", loadErr)
+			slog.Warn("load history failed", "err", loadErr)
 		} else {
 			history = loaded
 		}
@@ -411,7 +423,7 @@ func (a *application) runCheck(ctx context.Context, options checkOptions) (repor
 	value, _ := report.Build(cfg, results, providerErrors, history, started)
 	if cfg.EnableHistory {
 		if err := a.store.AppendResults(ctx, results, time.Now()); err != nil {
-			log.Printf("save history failed: %v", err)
+			slog.Error("save history failed", "err", err)
 		}
 	}
 	if options.SaveLatest {
@@ -422,10 +434,10 @@ func (a *application) runCheck(ctx context.Context, options checkOptions) (repor
 			a.broker.Publish(value)
 		}
 		if err := notify.New(cfg, storage.SQLiteNotifyStateStore{Store: a.store}).SendIfNeeded(ctx, value); err != nil {
-			log.Printf("send notify failed: %v", err)
+			slog.Warn("send notify failed", "err", err)
 		}
 	}
-	log.Printf("check finished: ok=%d slow=%d error=%d total=%d", value.OKCount, value.SlowCount, value.ErrorCount, value.Total)
+	slog.Info("check finished", "ok", value.OKCount, "slow", value.SlowCount, "error", value.ErrorCount, "total", value.Total)
 	return value, nil
 }
 
@@ -442,16 +454,16 @@ func (a *application) scheduler(ctx context.Context) {
 			}
 		}
 		interval := max(time.Duration((minHours+rand.Float64()*(maxHours-minHours))*float64(time.Hour)), time.Minute)
-		log.Printf("next scheduled check in %v (at %s)", interval.Round(time.Minute), time.Now().Add(interval).Format("15:04"))
+		slog.Info("next scheduled check", "interval", interval.Round(time.Minute).String(), "at", time.Now().Add(interval).Format("15:04"))
 		timer := time.NewTimer(interval)
 		select {
 		case <-timer.C:
 			if _, err := a.checkWithOptions(ctx, checkOptions{Kind: "scheduled", SaveLatest: true}); err != nil {
 				if errors.Is(err, web.ErrCheckAlreadyRunning) {
-					log.Printf("scheduled check skipped: %v", err)
+					slog.Warn("scheduled check skipped", "err", err)
 					continue
 				}
-				log.Printf("scheduled check failed: %v", err)
+				slog.Error("scheduled check failed", "err", err)
 			}
 		case <-a.schedulerWake:
 			if !timer.Stop() {

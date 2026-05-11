@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -364,7 +364,7 @@ func (s *Server) checkAfterReload() {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
 	if _, err := s.check(ctx); err != nil {
-		log.Printf("reload check failed: %v", err)
+		slog.Warn("reload check failed", "err", err)
 	}
 }
 
@@ -421,7 +421,7 @@ func (s *Server) writeCheckError(w http.ResponseWriter, err error) {
 
 func (s *Server) HTTPServer() *http.Server {
 	addr := fmt.Sprintf("%s:%d", s.cfg.AppHost, s.cfg.AppPort)
-	log.Printf("serving %s at http://%s/", filepath.Clean(s.cfg.WebDir), addr)
+	slog.Info("server started", "web_dir", filepath.Clean(s.cfg.WebDir), "addr", "http://"+addr+"/")
 	return &http.Server{
 		Addr:              addr,
 		Handler:           s.Handler(),
