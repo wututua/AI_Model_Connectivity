@@ -126,7 +126,7 @@ export default function Dashboard() {
     <div className="min-h-screen">
       {/* ── Navbar ─────────────────────────────────────────────── */}
       <nav
-        className={`fixed top-0 left-0 right-0 z-30 backdrop-blur-glass border-b nav-glass transition-transform duration-300 ease-in-out ${navVisible ? 'translate-y-0' : '-translate-y-full'}`}
+        className={`fixed top-0 left-0 right-0 z-30 backdrop-blur-glass border-b nav-glass ${navVisible ? 'translate-y-0 opacity-100' : '-translate-y-full opacity-0'}`}
         style={{ borderColor: 'var(--border)' }}
       >
         <div className="max-w-[1180px] mx-auto px-4 h-14 flex items-center justify-between">

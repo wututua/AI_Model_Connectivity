@@ -47,7 +47,6 @@ body[data-theme="light"] {
     overflow-wrap: anywhere;
     word-break: break-word;
     min-height: 100vh;
-    transition: background-color 0.3s ease, color 0.3s ease;
   }
 
   /*
@@ -84,7 +83,6 @@ body[data-theme="light"] {
     border: 1px solid var(--border);
     box-shadow: var(--shadow);
     contain: layout style;
-    transition: background-color 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
   }
 
   .glass-strong {
@@ -94,7 +92,6 @@ body[data-theme="light"] {
     border: 1px solid var(--border);
     box-shadow: var(--shadow);
     contain: layout style;
-    transition: background-color 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
   }
 
   /* Status badges */
@@ -197,7 +194,12 @@ body[data-theme="light"] {
 
   .nav-glass {
     background: var(--nav-bg);
-    transition: background-color 0.3s ease;
+    /*
+     * transform + opacity transition drives the scroll hide/show animation.
+     * background-color transition is intentionally omitted — theme switches are
+     * handled by the View Transitions API at compositor level (no live repaints).
+     */
+    transition: transform 0.2s ease-in-out, opacity 0.18s ease;
   }
 
   /*
@@ -240,5 +242,27 @@ body[data-theme="light"] {
     .anim-slide-in-left,
     .anim-slide-in-right,
     .anim-slide-in-down { animation: none; }
+  }
+}
+
+/* ── View Transitions (theme switch) ──────────────────────────────── */
+
+/*
+ * View Transitions API captures the page as a screenshot before and after
+ * the theme switch, then cross-fades between them entirely at compositor
+ * level — no live CSS repaint on backdrop-filter elements per frame.
+ * Browsers without support fall back to instant switch (no jank either).
+ */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 0.22s;
+  animation-timing-function: ease-out;
+  mix-blend-mode: normal;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation-duration: 0.001s;
   }
 }

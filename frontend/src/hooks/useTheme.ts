@@ -12,12 +12,13 @@ function applyTheme(theme: Theme) {
 }
 
 export function useTheme() {
-  const [theme, setTheme] = useState<Theme>(() =>
-    (localStorage.getItem('theme') as Theme) ?? 'dark'
-  )
+  const [theme, setTheme] = useState<Theme>(() => {
+    const stored = (localStorage.getItem('theme') as Theme) ?? 'dark'
+    applyTheme(stored)
+    return stored
+  })
 
   useEffect(() => {
-    applyTheme(theme)
     localStorage.setItem('theme', theme)
 
     if (theme === 'auto') {
@@ -29,9 +30,20 @@ export function useTheme() {
   }, [theme])
 
   // 循环：dark → light → auto → dark
-  const cycle = () => setTheme(t =>
-    t === 'dark' ? 'light' : t === 'light' ? 'auto' : 'dark'
-  )
+  // 使用 View Transitions API 在截图层级做交叉淡入，避免 backdrop-filter 实时重绘
+  const cycle = () => {
+    const next: Theme = theme === 'dark' ? 'light' : theme === 'light' ? 'auto' : 'dark'
+    const doApply = () => applyTheme(next)
+
+    if ('startViewTransition' in document) {
+      ;(document as unknown as { startViewTransition: (cb: () => void) => unknown })
+        .startViewTransition(doApply)
+    } else {
+      doApply()
+    }
+
+    setTheme(next)
+  }
 
   return { theme, toggle: cycle }
 }
