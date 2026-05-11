@@ -13,10 +13,16 @@ import (
 	"cg/internal/config"
 )
 
-var thinkingTagRE = regexp.MustCompile(`(?is)<think(?:ing)?>\s*.*?\s*</think(?:ing)?>`)
+var (
+	thinkTagCompleteRE = regexp.MustCompile(`(?is)<think(?:ing)?>\s*.*?\s*</think(?:ing)?>`)
+	thinkTagOpenRE     = regexp.MustCompile(`(?is)<think(?:ing)?>.*`)
+)
 
 func stripThinkingTags(s string) string {
-	return strings.TrimSpace(thinkingTagRE.ReplaceAllString(s, ""))
+	s = thinkTagCompleteRE.ReplaceAllString(s, "")
+	// Handle truncated responses where </think> was cut off by MaxTokens
+	s = thinkTagOpenRE.ReplaceAllString(s, "")
+	return strings.TrimSpace(s)
 }
 
 type OpenAICompatible struct {
