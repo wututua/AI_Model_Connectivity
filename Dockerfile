@@ -12,7 +12,7 @@ WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-COPY --from=frontend-builder /app/frontend/dist ./web
+COPY --from=frontend-builder /app/web ./web
 RUN CGO_ENABLED=0 go build \
     -trimpath \
     -ldflags="-s -w" \
