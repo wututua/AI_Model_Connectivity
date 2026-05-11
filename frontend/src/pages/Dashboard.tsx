@@ -205,16 +205,10 @@ export default function Dashboard() {
                 </span>
                 <StatusPill status={report.overall_class} label={report.overall_class.toUpperCase()} large />
               </div>
-              {(() => {
-                const { text: timeText, stale } = relativeTime(report.generated_at)
-                return (
-                  <p className="text-sm mt-3" style={{ color: stale ? 'var(--slow)' : 'var(--muted)' }}>
-                    更新于 <span title={report.generated_at}>{timeText}</span>
-                    {stale && ' ⚠'}
-                    {' · '}并发 {report.global_concurrency}/{report.provider_concurrency}
-                  </p>
-                )
-              })()}
+              <p className="text-sm mt-3" style={{ color: 'var(--muted)' }}>
+                更新于 <span title={report.generated_at}>{relativeTime(report.generated_at).text}</span>
+                {' · '}并发 {report.global_concurrency}/{report.provider_concurrency}
+              </p>
             </div>
             <div className="text-right shrink-0 flex flex-col gap-3 sm:gap-4">
               <div>
