@@ -89,9 +89,9 @@ export function ModelRow({ result, showError, compact }: { result: ModelResult; 
           <p className="text-[10px] mt-1" style={{ color: 'var(--muted)', opacity: .5 }}>点击展开详情</p>
         )}
 
-        <div className="flex flex-wrap items-center gap-4 mt-2 text-[11px] font-mono" style={{ color: 'var(--muted)', opacity: .75 }}>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-2 text-[11px] font-mono" style={{ color: 'var(--muted)', opacity: .75 }}>
           <span>24h均值 {result.avg_latency_24h}</span>
-          <span>{result.weekly_success_text}</span>
+          <span className="hidden sm:inline">{result.weekly_success_text}</span>
           <span>可用率 {result.availability}</span>
         </div>
 

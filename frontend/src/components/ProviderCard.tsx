@@ -47,7 +47,7 @@ export function ProviderCard({ provider, showError, compact, animDelay = 0 }: {
         </div>
 
         <div className="flex items-center gap-2">
-          <span className="hidden sm:flex items-center gap-2 text-[11px] font-mono mr-1" style={{ color: 'var(--muted)' }}>
+          <span className="flex items-center gap-1.5 text-[11px] font-mono mr-1" style={{ color: 'var(--muted)' }}>
             <span style={{ color: 'var(--ok)' }}>{provider.ok_count}↑</span>
             {provider.slow_count > 0 && <span style={{ color: 'var(--slow)' }}>{provider.slow_count}~</span>}
             {provider.error_count > 0 && <span style={{ color: 'var(--error)' }}>{provider.error_count}✕</span>}

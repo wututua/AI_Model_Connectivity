@@ -72,7 +72,7 @@ function ProviderModal({
         </div>
 
         <div className="p-5 space-y-4 max-h-[70vh] overflow-y-auto">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Field label="ID（唯一标识）">
               <input
                 className={inputCls}
@@ -87,7 +87,7 @@ function ProviderModal({
             </Field>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Field label="类型">
               <input className={inputCls} value={form.type} onChange={e => set('type', e.target.value)} placeholder="openai" />
             </Field>
@@ -249,12 +249,12 @@ export function ProvidersTab() {
           <thead>
             <tr className="text-xs text-left" style={{ borderBottom: '1px solid var(--border)', color: 'var(--muted)' }}>
               <th className="pb-2 pr-4 font-medium">ID / 名称</th>
-              <th className="pb-2 pr-4 font-medium">类型</th>
-              <th className="pb-2 pr-4 font-medium">Base URL</th>
-              <th className="pb-2 pr-4 font-medium">模型</th>
-              <th className="pb-2 pr-4 font-medium">Key</th>
+              <th className="pb-2 pr-4 font-medium hidden sm:table-cell">类型</th>
+              <th className="pb-2 pr-4 font-medium hidden md:table-cell">Base URL</th>
+              <th className="pb-2 pr-4 font-medium hidden sm:table-cell">模型</th>
+              <th className="pb-2 pr-4 font-medium hidden sm:table-cell">Key</th>
               <th className="pb-2 pr-3 font-medium">启用</th>
-              <th className="pb-2 pr-4 font-medium">检测</th>
+              <th className="pb-2 pr-4 font-medium hidden sm:table-cell">检测</th>
               <th className="pb-2 font-medium">操作</th>
             </tr>
           </thead>
@@ -269,16 +269,16 @@ export function ProvidersTab() {
                   <div className="font-mono text-xs" style={{ color: 'var(--muted)' }}>{p.id}</div>
                   <div style={{ color: 'var(--text)' }}>{p.name}</div>
                 </td>
-                <td className="py-3 pr-4 font-mono text-xs" style={{ color: 'var(--muted)' }}>{p.type}</td>
-                <td className="py-3 pr-4 max-w-[180px]">
+                <td className="py-3 pr-4 font-mono text-xs hidden sm:table-cell" style={{ color: 'var(--muted)' }}>{p.type}</td>
+                <td className="py-3 pr-4 max-w-[180px] hidden md:table-cell">
                   <span className="font-mono text-xs truncate block" style={{ color: 'var(--muted)' }} title={p.base_url}>
                     {p.base_url}
                   </span>
                 </td>
-                <td className="py-3 pr-4 text-xs" style={{ color: 'var(--muted)' }}>
+                <td className="py-3 pr-4 text-xs hidden sm:table-cell" style={{ color: 'var(--muted)' }}>
                   {p.models.length === 0 ? <span className="italic">自动</span> : p.models.length}
                 </td>
-                <td className="py-3 pr-4">
+                <td className="py-3 pr-4 hidden sm:table-cell">
                   {p.api_key_set
                     ? <span className="text-xs" style={{ color: 'var(--ok)' }}>●</span>
                     : <span className="text-xs" style={{ color: 'var(--muted)', opacity: .4 }}>—</span>}
@@ -286,7 +286,7 @@ export function ProvidersTab() {
                 <td className="py-3 pr-3">
                   <Badge status={p.enabled ? 'ok' : 'error'} />
                 </td>
-                <td className="py-3 pr-4">
+                <td className="py-3 pr-4 hidden sm:table-cell">
                   <Badge status={!p.enabled ? 'canceled' : p.probe_enabled ? 'ok' : 'paused'} />
                 </td>
                 <td className="py-3">

@@ -194,7 +194,7 @@ export default function Dashboard() {
 
         {/* Hero banner */}
         {report && sc && (
-          <div className="glass rounded-[32px] px-8 py-6 flex flex-col sm:flex-row sm:items-center justify-between gap-6 anim-fade-in-up" style={{ animationDelay: '0ms' }}>
+          <div className="glass rounded-[28px] sm:rounded-[32px] px-4 py-5 sm:px-8 sm:py-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 sm:gap-6 anim-fade-in-up" style={{ animationDelay: '0ms' }}>
             <div>
               <p className="text-xs uppercase tracking-widest mb-2" style={{ color: 'var(--muted)', letterSpacing: '.16em' }}>
                 整体状态
@@ -219,7 +219,7 @@ export default function Dashboard() {
                 )
               })()}
             </div>
-            <div className="text-right shrink-0 flex flex-col gap-3 sm:gap-4">
+            <div className="sm:text-right shrink-0 flex flex-row sm:flex-col gap-6 sm:gap-4">
               <div>
                 <p className="text-xs uppercase tracking-widest mb-1" style={{ color: 'var(--muted)', letterSpacing: '.12em' }}>检测耗时</p>
                 <p className="text-3xl font-mono font-bold" style={{ color: 'var(--text)' }}>
@@ -386,7 +386,7 @@ export default function Dashboard() {
       </main>
 
       <footer className="max-w-[1180px] mx-auto px-4 py-6 flex items-center justify-center">
-        <p className="text-[11px] font-mono" style={{ color: 'var(--muted)', opacity: .5 }}>
+        <p className="text-xs font-mono" style={{ color: 'var(--muted)', opacity: .5 }}>
           © {new Date().getFullYear()}&nbsp;
           <a
             href="https://github.com/wututua/AI_Model_Connectivity"
