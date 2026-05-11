@@ -18,7 +18,7 @@ export function StatusLights({ history }: { history: string[] }) {
         return (
           <div
             key={i}
-            className={`w-2.5 h-2.5 rounded-full shrink-0 transition-all ${barCls(s)}`}
+            className={`w-2 h-2 rounded-full shrink-0 ${barCls(s)}`}
             style={colored ? { boxShadow: glow } : undefined}
             title={`第 ${seq} 次 · ${label}`}
           />

@@ -30,7 +30,7 @@ export function ModelRow({ result, showError, compact }: { result: ModelResult; 
       >
         <div className="flex items-center gap-2 min-w-0">
           <div
-            className={`w-2 h-2 rounded-full shrink-0${sc === 'ok' ? ' animate-pulse' : ''}`}
+            className="w-2 h-2 rounded-full shrink-0"
             style={{ background: ledColor, boxShadow: ledGlow }}
           />
           <span className="font-mono text-xs truncate" style={{ color: 'var(--text)' }}>{result.model}</span>
@@ -64,7 +64,7 @@ export function ModelRow({ result, showError, compact }: { result: ModelResult; 
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 flex items-center gap-2">
             <div
-              className={`w-2 h-2 rounded-full shrink-0${sc === 'ok' ? ' animate-pulse' : ''}`}
+              className="w-2 h-2 rounded-full shrink-0"
               style={{ background: ledColor, boxShadow: ledGlow }}
             />
             <h3 className="font-mono text-sm font-medium truncate" style={{ color: 'var(--text)' }}>
