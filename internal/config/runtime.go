@@ -2,6 +2,9 @@ package config
 
 import (
 	"errors"
+	"fmt"
+	"net"
+	"net/url"
 	"strings"
 )
 
@@ -36,24 +39,26 @@ type RuntimeSettings struct {
 }
 
 type SafeProviderConfig struct {
-	ID        string   `json:"id"`
-	Name      string   `json:"name"`
-	Type      string   `json:"type"`
-	BaseURL   string   `json:"base_url"`
-	Models    []string `json:"models"`
-	Enabled   bool     `json:"enabled"`
-	APIKeySet bool     `json:"api_key_set"`
+	ID           string   `json:"id"`
+	Name         string   `json:"name"`
+	Type         string   `json:"type"`
+	BaseURL      string   `json:"base_url"`
+	Models       []string `json:"models"`
+	Enabled      bool     `json:"enabled"`
+	ProbeEnabled bool     `json:"probe_enabled"`
+	APIKeySet    bool     `json:"api_key_set"`
 }
 
 type ProviderUpdate struct {
-	ID          string   `json:"id"`
-	Name        string   `json:"name"`
-	Type        string   `json:"type"`
-	BaseURL     string   `json:"base_url"`
-	APIKey      string   `json:"api_key"`
-	ClearAPIKey bool     `json:"clear_api_key"`
-	Models      []string `json:"models"`
-	Enabled     bool     `json:"enabled"`
+	ID           string   `json:"id"`
+	Name         string   `json:"name"`
+	Type         string   `json:"type"`
+	BaseURL      string   `json:"base_url"`
+	APIKey       string   `json:"api_key"`
+	ClearAPIKey  bool     `json:"clear_api_key"`
+	Models       []string `json:"models"`
+	Enabled      bool     `json:"enabled"`
+	ProbeEnabled bool     `json:"probe_enabled"`
 }
 
 type RuntimeConfig struct {
@@ -154,13 +159,14 @@ func SafeProviders(providers []ProviderConfig) []SafeProviderConfig {
 	result := make([]SafeProviderConfig, 0, len(providers))
 	for _, provider := range providers {
 		result = append(result, SafeProviderConfig{
-			ID:        provider.ID,
-			Name:      provider.Name,
-			Type:      provider.Type,
-			BaseURL:   provider.BaseURL,
-			Models:    append([]string(nil), provider.Models...),
-			Enabled:   provider.Enabled,
-			APIKeySet: provider.APIKey != "",
+			ID:           provider.ID,
+			Name:         provider.Name,
+			Type:         provider.Type,
+			BaseURL:      provider.BaseURL,
+			Models:       append([]string(nil), provider.Models...),
+			Enabled:      provider.Enabled,
+			ProbeEnabled: provider.ProbeEnabled,
+			APIKeySet:    provider.APIKey != "",
 		})
 	}
 	return result
@@ -168,13 +174,14 @@ func SafeProviders(providers []ProviderConfig) []SafeProviderConfig {
 
 func ApplyProviderUpdate(existing ProviderConfig, update ProviderUpdate) ProviderConfig {
 	provider := ProviderConfig{
-		ID:      strings.TrimSpace(update.ID),
-		Name:    strings.TrimSpace(update.Name),
-		Type:    strings.ToLower(strings.TrimSpace(update.Type)),
-		BaseURL: strings.TrimRight(strings.TrimSpace(update.BaseURL), "/"),
-		APIKey:  existing.APIKey,
-		Models:  append([]string(nil), update.Models...),
-		Enabled: update.Enabled,
+		ID:           strings.TrimSpace(update.ID),
+		Name:         strings.TrimSpace(update.Name),
+		Type:         strings.ToLower(strings.TrimSpace(update.Type)),
+		BaseURL:      strings.TrimRight(strings.TrimSpace(update.BaseURL), "/"),
+		APIKey:       existing.APIKey,
+		Models:       append([]string(nil), update.Models...),
+		Enabled:      update.Enabled,
+		ProbeEnabled: update.ProbeEnabled,
 	}
 	if provider.ID == "" {
 		provider.ID = existing.ID
@@ -230,6 +237,32 @@ func ValidateProviders(providers []ProviderConfig) error {
 			return errors.New("provider id must be unique")
 		}
 		seen[key] = true
+		if provider.BaseURL != "" {
+			if err := validateProviderURL(provider.BaseURL); err != nil {
+				return fmt.Errorf("provider %q: %w", id, err)
+			}
+		}
+	}
+	return nil
+}
+
+// validateProviderURL rejects non-http(s) schemes and link-local addresses
+// (169.254.x.x) that are commonly used as cloud instance metadata endpoints.
+// Localhost and RFC-1918 ranges are intentionally allowed for self-hosted use.
+func validateProviderURL(rawURL string) error {
+	u, err := url.ParseRequestURI(rawURL)
+	if err != nil {
+		return fmt.Errorf("invalid base_url: %w", err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("base_url scheme must be http or https, got %q", u.Scheme)
+	}
+	host := u.Hostname()
+	if ip := net.ParseIP(host); ip != nil {
+		// Block link-local (169.254.0.0/16) — cloud metadata SSRF vector
+		if ip.IsLinkLocalUnicast() {
+			return fmt.Errorf("base_url resolves to a link-local address which is not allowed")
+		}
 	}
 	return nil
 }

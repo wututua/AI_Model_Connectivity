@@ -110,6 +110,7 @@ export interface SafeProviderConfig {
   base_url: string
   models: string[]
   enabled: boolean
+  probe_enabled: boolean
   api_key_set: boolean
 }
 
@@ -122,6 +123,7 @@ export interface ProviderUpdate {
   clear_api_key: boolean
   models: string[]
   enabled: boolean
+  probe_enabled: boolean
 }
 
 export interface AdminConfig {

@@ -54,7 +54,7 @@ type Runner struct {
 func NewRunner(cfg config.Config) *Runner {
 	providers := []provider.Provider{}
 	for _, providerCfg := range cfg.Providers {
-		if providerCfg.Enabled {
+		if providerCfg.Enabled && providerCfg.ProbeEnabled {
 			providers = append(providers, provider.New(providerCfg))
 		}
 	}

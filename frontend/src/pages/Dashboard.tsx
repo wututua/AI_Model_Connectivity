@@ -1,214 +1,14 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useMemo } from 'react'
 import { Link } from 'react-router-dom'
-import { Activity, Settings, RefreshCw, Zap, CheckCircle, AlertTriangle, XCircle, Clock } from 'lucide-react'
-import type { Report, ProviderReport, ModelResult } from '../types'
+import { Activity, Settings, RefreshCw, Zap, CheckCircle, AlertTriangle, XCircle, Clock, Sun, Moon, Monitor, Search, X, ArrowUpDown, LayoutDashboard, List } from 'lucide-react'
+import type { Report, ProviderReport } from '../types'
 import { api } from '../api'
-
-// ── Helpers ────────────────────────────────────────────────────────────────
-
-function statusClass(status: string) {
-  return status === 'ok' ? 'ok' : status === 'slow' ? 'slow' : 'error'
-}
-
-function StatusPill({ status, label, large }: { status: string; label: string; large?: boolean }) {
-  const sz = large ? 'px-4 py-2.5 text-base font-black' : 'px-3 py-1.5 text-xs font-bold'
-  return (
-    <span
-      className={`inline-flex items-center rounded-full border whitespace-nowrap font-mono ${sz} badge-${statusClass(status)}`}
-    >
-      {label}
-    </span>
-  )
-}
-
-function barCls(s: string) {
-  if (s === 'ok') return 'bar-ok'
-  if (s === 'slow') return 'bar-slow'
-  if (s === 'error') return 'bar-error'
-  return 'bar-empty'
-}
-
-function StatusLights({ history }: { history: string[] }) {
-  return (
-    <div className="flex flex-wrap gap-1 mt-2.5">
-      {history.map((s, i) => {
-        const colored = s === 'ok' || s === 'slow' || s === 'error'
-        const glow = s === 'ok'
-          ? '0 0 5px rgba(56,217,150,.8)'
-          : s === 'slow'
-          ? '0 0 5px rgba(246,196,83,.8)'
-          : s === 'error'
-          ? '0 0 5px rgba(255,107,122,.8)'
-          : undefined
-        return (
-          <div
-            key={i}
-            className={`w-2.5 h-2.5 rounded-full shrink-0 transition-all ${barCls(s)}`}
-            style={colored ? { boxShadow: glow } : undefined}
-            title={s}
-          />
-        )
-      })}
-    </div>
-  )
-}
-
-function CurveChart({ pathLine, pathArea, status }: { pathLine: string; pathArea: string; status: string }) {
-  const color = status === 'ok' ? 'var(--ok)' : status === 'slow' ? 'var(--slow)' : 'var(--error)'
-  return (
-    <svg
-      className="curve-overlay"
-      viewBox="0 0 100 40"
-      preserveAspectRatio="none"
-      aria-hidden="true"
-    >
-      <path d={pathArea} fill={color} opacity=".18" />
-      <path d={pathLine} fill="none" stroke={color} strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
-    </svg>
-  )
-}
-
-function ModelRow({ result, showError }: { result: ModelResult; showError: boolean }) {
-  const sc = statusClass(result.status)
-  const ledColor = sc === 'ok' ? 'var(--ok)' : sc === 'slow' ? 'var(--slow)' : 'var(--error)'
-  const ledGlow = sc === 'ok'
-    ? '0 0 6px rgba(56,217,150,.9)'
-    : sc === 'slow'
-    ? '0 0 6px rgba(246,196,83,.9)'
-    : '0 0 6px rgba(255,107,122,.9)'
-
-  return (
-    <div
-      className="relative overflow-hidden rounded-[20px] p-4 border transition-all"
-      style={{ background: 'rgba(255,255,255,.04)', borderColor: 'var(--border)' }}
-    >
-      {result.show_curve_chart && result.svg_path_line && (
-        <CurveChart pathLine={result.svg_path_line} pathArea={result.svg_path_area} status={result.status} />
-      )}
-
-      <div className="relative" style={{ zIndex: 1 }}>
-        {/* Model name + status */}
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0 flex items-center gap-2">
-            {/* Current-detection LED */}
-            <div
-              className={`w-2 h-2 rounded-full shrink-0${sc === 'ok' ? ' animate-pulse' : ''}`}
-              style={{ background: ledColor, boxShadow: ledGlow }}
-            />
-            <h3 className="font-mono text-sm font-medium truncate" style={{ color: 'var(--text)' }}>
-              {result.model}
-              {result.is_current && (
-                <em className="ml-2 text-[11px] not-italic" style={{ color: 'var(--muted)' }}>[默认]</em>
-              )}
-            </h3>
-          </div>
-          <div className="flex items-center gap-2 shrink-0">
-            <StatusPill status={result.status} label={result.status_label} />
-            <span className="text-xs font-mono w-16 text-right" style={{ color: 'var(--muted)' }}>
-              {result.latency_ms > 0 ? `${result.latency_ms} ms` : '—'}
-            </span>
-          </div>
-        </div>
-
-        {/* Error / preview */}
-        {showError && result.error && (
-          <p className="mt-1.5 text-xs font-mono truncate" style={{ color: 'var(--error)', opacity: .8 }}>
-            {result.error}
-          </p>
-        )}
-        {result.response_preview && !result.error && (
-          <p className="mt-1.5 text-xs font-mono truncate" style={{ color: 'var(--muted)' }}>
-            {result.response_preview}
-          </p>
-        )}
-
-        {/* Stats */}
-        <div className="flex flex-wrap items-center gap-4 mt-2 text-[11px] font-mono" style={{ color: 'var(--muted)', opacity: .75 }}>
-          <span>24h均值 {result.avg_latency_24h}</span>
-          <span>{result.weekly_success_text}</span>
-          <span>可用率 {result.availability}</span>
-        </div>
-
-        {/* History bars */}
-        {result.history && result.history.length > 0 && (
-          <StatusLights history={result.history} />
-        )}
-      </div>
-    </div>
-  )
-}
-
-function ProviderCard({ provider, showError }: { provider: ProviderReport; showError: boolean }) {
-  const sc = statusClass(provider.status)
-  const accentColor = sc === 'ok' ? 'var(--ok)' : sc === 'slow' ? 'var(--slow)' : 'var(--error)'
-
-  return (
-    <div className={`glass rounded-[28px] overflow-hidden border-${sc}`}>
-      {/* Header */}
-      <div
-        className="flex items-center justify-between px-5 py-4"
-        style={{ borderBottom: '1px solid var(--border)', background: `linear-gradient(90deg, rgba(${sc === 'ok' ? '56,217,150' : sc === 'slow' ? '246,196,83' : '255,107,122'},.06), transparent)` }}
-      >
-        <div className="flex items-center gap-3">
-          {provider.provider_logo ? (
-            <img
-              src={provider.provider_logo}
-              alt={provider.provider_name}
-              className="w-9 h-9 rounded-xl object-contain"
-              style={{ background: 'var(--card-strong)' }}
-            />
-          ) : (
-            <div className="w-9 h-9 rounded-xl flex items-center justify-center text-xs font-black font-mono"
-              style={{ background: 'var(--card-strong)', color: accentColor }}>
-              {provider.provider_name.slice(0, 2).toUpperCase()}
-            </div>
-          )}
-          <div>
-            <h2 className="text-sm font-semibold leading-tight" style={{ color: 'var(--text)' }}>
-              {provider.provider_name}
-            </h2>
-            <p className="text-[11px] font-mono mt-0.5" style={{ color: 'var(--muted)' }}>
-              {provider.provider_type} · {provider.model_count} 个模型
-            </p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <span className="hidden sm:flex items-center gap-2 text-[11px] font-mono mr-1" style={{ color: 'var(--muted)' }}>
-            <span style={{ color: 'var(--ok)' }}>{provider.ok_count}↑</span>
-            {provider.slow_count > 0 && <span style={{ color: 'var(--slow)' }}>{provider.slow_count}~</span>}
-            {provider.error_count > 0 && <span style={{ color: 'var(--error)' }}>{provider.error_count}✕</span>}
-          </span>
-          <StatusPill status={provider.status} label={provider.status_label} />
-        </div>
-      </div>
-
-      {/* Model rows */}
-      <div className="p-4 space-y-3">
-        {provider.results.map(result => (
-          <ModelRow key={result.model} result={result} showError={showError} />
-        ))}
-      </div>
-    </div>
-  )
-}
-
-function SummaryCard({ icon, label, value, status }: {
-  icon: React.ReactNode; label: string; value: number | string; status?: string
-}) {
-  const valueColor = status ? (status === 'ok' ? 'var(--ok)' : status === 'slow' ? 'var(--slow)' : 'var(--error)') : 'var(--text)'
-  return (
-    <div className="glass rounded-[22px] px-4 py-4">
-      <div className="flex items-center gap-1.5 mb-2" style={{ color: 'var(--muted)' }}>
-        {icon}
-        <span className="text-xs uppercase tracking-widest" style={{ letterSpacing: '.16em' }}>{label}</span>
-      </div>
-      <strong className="block text-2xl font-mono font-bold" style={{ color: valueColor }}>
-        {value}
-      </strong>
-    </div>
-  )
-}
+import { useTheme } from '../hooks/useTheme'
+import { useScrollNav } from '../hooks/useScrollNav'
+import { relativeTime, statusClass } from '../utils/status'
+import { StatusPill } from '../components/StatusPill'
+import { ProviderCard } from '../components/ProviderCard'
+import { SummaryCard } from '../components/SummaryCard'
 
 // ── Main page ───────────────────────────────────────────────────────────────
 
@@ -216,6 +16,13 @@ export default function Dashboard() {
   const [report, setReport] = useState<Report | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [live, setLive] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
+  const [search, setSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState<'all' | 'ok' | 'slow' | 'error'>('all')
+  const [sortBy, setSortBy] = useState<'default' | 'status' | 'name' | 'latency' | 'models'>('default')
+  const [viewMode, setViewMode] = useState<'detailed' | 'compact'>('detailed')
+  const { theme, toggle: toggleTheme } = useTheme()
+  const navVisible = useScrollNav()
 
   const fetchReport = useCallback(() =>
     api.status()
@@ -223,39 +30,104 @@ export default function Dashboard() {
       .catch(e => setError((e as Error).message)),
   [])
 
-  useEffect(() => {
-    // apply light/dark theme from report
-    const root = document.body
-    const theme = report?.theme ?? 'dark'
-    root.setAttribute('data-theme', theme === 'light' ? 'light' : 'dark')
-  }, [report])
+  const handleRefresh = useCallback(() => {
+    setRefreshing(true)
+    fetchReport().finally(() => setRefreshing(false))
+  }, [fetchReport])
 
   useEffect(() => {
     fetchReport()
 
     if (!window.EventSource) {
-      const id = setInterval(fetchReport, 30_000)
-      return () => clearInterval(id)
+      // No SSE support: exponential backoff polling (30s → 60s → 120s)
+      let delay = 30_000
+      let timerId: ReturnType<typeof setTimeout>
+      const poll = () => {
+        fetchReport()
+        delay = Math.min(delay * 2, 120_000)
+        timerId = setTimeout(poll, delay)
+      }
+      timerId = setTimeout(poll, delay)
+      return () => clearTimeout(timerId)
     }
 
-    const es = new EventSource('/api/events')
-    es.onmessage = e => {
-      setReport(JSON.parse(e.data) as Report)
-      setError(null)
-      setLive(true)
+    // SSE with exponential backoff reconnect on error
+    let es: EventSource | null = null
+    let reconnectDelay = 30_000
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+    let closed = false
+
+    const connect = () => {
+      es = new EventSource('/api/events')
+      es.onmessage = e => {
+        setReport(JSON.parse(e.data) as Report)
+        setError(null)
+        setLive(true)
+        reconnectDelay = 30_000
+      }
+      es.onerror = () => {
+        setLive(false)
+        es?.close()
+        if (!closed) {
+          reconnectTimer = setTimeout(() => {
+            reconnectDelay = Math.min(reconnectDelay * 2, 120_000)
+            connect()
+          }, reconnectDelay)
+        }
+      }
     }
-    es.onerror = () => setLive(false)
-    return () => es.close()
+
+    connect()
+    return () => {
+      closed = true
+      if (reconnectTimer) clearTimeout(reconnectTimer)
+      es?.close()
+    }
   }, [fetchReport])
 
   const sc = report ? statusClass(report.overall_class) : null
+
+  const filteredProviders = useMemo(() => {
+    if (!report?.providers) return []
+    const q = search.trim().toLowerCase()
+    const STATUS_ORDER = { error: 0, slow: 1, ok: 2 }
+
+    const avgLatency = (p: ProviderReport) => {
+      const valid = p.results.filter(r => r.latency_ms > 0)
+      return valid.length ? valid.reduce((s, r) => s + r.latency_ms, 0) / valid.length : Infinity
+    }
+
+    return report.providers
+      .map(p => ({
+        ...p,
+        results: p.results.filter(r =>
+          (statusFilter === 'all' || r.status === statusFilter) &&
+          (!q || r.model.toLowerCase().includes(q) || p.provider_name.toLowerCase().includes(q))
+        ),
+      }))
+      .filter(p => p.results.length > 0 || (!q && statusFilter === 'all'))
+      .sort((a, b) => {
+        switch (sortBy) {
+          case 'name':    return a.provider_name.localeCompare(b.provider_name)
+          case 'latency': return avgLatency(a) - avgLatency(b)
+          case 'models':  return b.model_count - a.model_count
+          case 'status':  return (STATUS_ORDER[a.status as keyof typeof STATUS_ORDER] ?? 3)
+                               - (STATUS_ORDER[b.status as keyof typeof STATUS_ORDER] ?? 3)
+          default:        return 0  // 保持 API 返回的原始顺序
+        }
+      })
+  }, [report, search, statusFilter, sortBy])
+
+  const navBtnStyle: React.CSSProperties = { color: 'var(--muted)' }
+  const navBtnHover = (e: React.MouseEvent<HTMLElement>) => (e.currentTarget.style.color = 'var(--text)')
+  const navBtnLeave = (e: React.MouseEvent<HTMLElement>) => (e.currentTarget.style.color = 'var(--muted)')
 
   return (
     <div className="min-h-screen">
       {/* ── Navbar ─────────────────────────────────────────────── */}
       <nav
-        className="sticky top-0 z-30 backdrop-blur-glass border-b"
-        style={{ background: 'rgba(11,16,32,.85)', borderColor: 'var(--border)' }}
+        className={`fixed top-0 left-0 right-0 z-30 backdrop-blur-glass border-b nav-glass ${navVisible ? 'translate-y-0 opacity-100' : '-translate-y-full opacity-0'}`}
+        style={{ borderColor: 'var(--border)' }}
       >
         <div className="max-w-[1180px] mx-auto px-4 h-14 flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -271,29 +143,41 @@ export default function Dashboard() {
             )}
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-1">
             {report && sc && (
-              <span className={`hidden sm:inline text-xs font-mono text-${sc}`}>
+              <span className={`hidden sm:inline text-xs font-mono mr-2 text-${sc}`}>
                 {report.overall_status}
               </span>
             )}
             <button
-              onClick={fetchReport}
-              className="p-1.5 rounded-lg transition-colors cursor-pointer"
-              style={{ color: 'var(--muted)' }}
-              onMouseEnter={e => (e.currentTarget.style.color = 'var(--text)')}
-              onMouseLeave={e => (e.currentTarget.style.color = 'var(--muted)')}
+              onClick={handleRefresh}
+              disabled={refreshing}
+              className="p-1.5 rounded-lg transition-colors cursor-pointer disabled:opacity-50"
+              style={navBtnStyle}
+              onMouseEnter={navBtnHover}
+              onMouseLeave={navBtnLeave}
               title="手动刷新"
               aria-label="手动刷新"
             >
-              <RefreshCw className="w-4 h-4" />
+              <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
+            </button>
+            <button
+              onClick={toggleTheme}
+              className="p-1.5 rounded-lg transition-colors cursor-pointer"
+              style={navBtnStyle}
+              onMouseEnter={navBtnHover}
+              onMouseLeave={navBtnLeave}
+              title={theme === 'dark' ? '深色 → 浅色' : theme === 'light' ? '浅色 → 跟随系统' : '跟随系统 → 深色'}
+              aria-label="切换主题"
+            >
+              {theme === 'dark' ? <Moon className="w-4 h-4" /> : theme === 'light' ? <Sun className="w-4 h-4" /> : <Monitor className="w-4 h-4" />}
             </button>
             <Link
               to="/admin"
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm transition-colors cursor-pointer glass"
-              style={{ color: 'var(--muted)' }}
-              onMouseEnter={e => (e.currentTarget.style.color = 'var(--text)')}
-              onMouseLeave={e => (e.currentTarget.style.color = 'var(--muted)')}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm transition-colors cursor-pointer glass ml-1"
+              style={navBtnStyle}
+              onMouseEnter={navBtnHover}
+              onMouseLeave={navBtnLeave}
             >
               <Settings className="w-3.5 h-3.5" />
               管理
@@ -303,11 +187,11 @@ export default function Dashboard() {
       </nav>
 
       {/* ── Content ────────────────────────────────────────────── */}
-      <main className="max-w-[1180px] mx-auto px-4 py-10 space-y-5">
+      <main className="max-w-[1180px] mx-auto px-4 pt-[96px] pb-10 space-y-5">
 
         {/* Hero banner */}
         {report && sc && (
-          <div className="glass rounded-[32px] px-8 py-6 flex flex-col sm:flex-row sm:items-center justify-between gap-6">
+          <div className="glass rounded-[32px] px-8 py-6 flex flex-col sm:flex-row sm:items-center justify-between gap-6 anim-fade-in-up" style={{ animationDelay: '0ms' }}>
             <div>
               <p className="text-xs uppercase tracking-widest mb-2" style={{ color: 'var(--muted)', letterSpacing: '.16em' }}>
                 整体状态
@@ -321,13 +205,34 @@ export default function Dashboard() {
                 </span>
                 <StatusPill status={report.overall_class} label={report.overall_class.toUpperCase()} large />
               </div>
-              <p className="text-sm mt-3" style={{ color: 'var(--muted)' }}>
-                更新于 {report.generated_at} · {report.theme_label} · 并发 {report.global_concurrency}/{report.provider_concurrency}
-              </p>
+              {(() => {
+                const { text: timeText, stale } = relativeTime(report.generated_at)
+                return (
+                  <p className="text-sm mt-3" style={{ color: stale ? 'var(--slow)' : 'var(--muted)' }}>
+                    更新于 <span title={report.generated_at}>{timeText}</span>
+                    {stale && ' ⚠'}
+                    {' · '}并发 {report.global_concurrency}/{report.provider_concurrency}
+                  </p>
+                )
+              })()}
             </div>
-            <div className="text-right shrink-0">
-              <p className="text-xs uppercase tracking-widest mb-1" style={{ color: 'var(--muted)', letterSpacing: '.12em' }}>检测耗时</p>
-              <p className="text-3xl font-mono font-bold" style={{ color: 'var(--text)' }}>{report.elapsed_ms}<span className="text-base font-normal ml-1" style={{ color: 'var(--muted)' }}>ms</span></p>
+            <div className="text-right shrink-0 flex flex-col gap-3 sm:gap-4">
+              <div>
+                <p className="text-xs uppercase tracking-widest mb-1" style={{ color: 'var(--muted)', letterSpacing: '.12em' }}>检测耗时</p>
+                <p className="text-3xl font-mono font-bold" style={{ color: 'var(--text)' }}>
+                  {report.elapsed_ms}
+                  <span className="text-base font-normal ml-1" style={{ color: 'var(--muted)' }}>ms</span>
+                </p>
+              </div>
+              {report.total > 0 && (
+                <div>
+                  <p className="text-xs uppercase tracking-widest mb-1" style={{ color: 'var(--muted)', letterSpacing: '.12em' }}>可用率</p>
+                  <p className="text-3xl font-mono font-bold" style={{ color: report.ok_count === report.total ? 'var(--ok)' : report.error_count > 0 ? 'var(--error)' : 'var(--slow)' }}>
+                    {Math.round((report.ok_count / report.total) * 100)}
+                    <span className="text-base font-normal ml-0.5">%</span>
+                  </p>
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -335,12 +240,81 @@ export default function Dashboard() {
         {/* Summary cards – 6 cols */}
         {report && (
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3.5">
-            <SummaryCard icon={<Zap className="w-3.5 h-3.5" />}           label="总模型"   value={report.total} />
-            <SummaryCard icon={<CheckCircle className="w-3.5 h-3.5" />}   label="正常"     value={report.ok_count}    status={report.ok_count > 0 ? 'ok' : undefined} />
-            <SummaryCard icon={<AlertTriangle className="w-3.5 h-3.5" />} label="较慢"     value={report.slow_count}  status={report.slow_count > 0 ? 'slow' : undefined} />
-            <SummaryCard icon={<XCircle className="w-3.5 h-3.5" />}       label="异常"     value={report.error_count} status={report.error_count > 0 ? 'error' : undefined} />
-            <SummaryCard icon={<Activity className="w-3.5 h-3.5" />}      label="Provider" value={report.provider_count} />
-            <SummaryCard icon={<Clock className="w-3.5 h-3.5" />}         label="耗时"     value={`${report.elapsed_ms} ms`} />
+            <SummaryCard icon={<Zap className="w-3.5 h-3.5" />}           label="总模型"   value={report.total}                                                     animDelay={80} />
+            <SummaryCard icon={<CheckCircle className="w-3.5 h-3.5" />}   label="正常"     value={report.ok_count}    status={report.ok_count > 0 ? 'ok' : undefined}    animDelay={130} />
+            <SummaryCard icon={<AlertTriangle className="w-3.5 h-3.5" />} label="较慢"     value={report.slow_count}  status={report.slow_count > 0 ? 'slow' : undefined}  animDelay={180} />
+            <SummaryCard icon={<XCircle className="w-3.5 h-3.5" />}       label="异常"     value={report.error_count} status={report.error_count > 0 ? 'error' : undefined} animDelay={230} />
+            <SummaryCard icon={<Activity className="w-3.5 h-3.5" />}      label="Provider" value={report.provider_count}                                              animDelay={280} />
+            <SummaryCard icon={<Clock className="w-3.5 h-3.5" />}         label="耗时"     value={`${report.elapsed_ms} ms`}                                          animDelay={330} />
+          </div>
+        )}
+
+        {/* Search & filter bar */}
+        {report?.providers && report.providers.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2 anim-fade-in" style={{ animationDelay: '380ms' }}>
+            <div className="relative flex-1 min-w-[160px] max-w-xs">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 pointer-events-none" style={{ color: 'var(--muted)' }} />
+              <input
+                className="input-glass w-full rounded-xl pl-8 pr-8 py-2 text-sm"
+                placeholder="搜索模型或 Provider…"
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+              />
+              {search && (
+                <button onClick={() => setSearch('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 cursor-pointer" style={{ color: 'var(--muted)' }}>
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+            {(['all', 'ok', 'slow', 'error'] as const).map(s => (
+              <button
+                key={s}
+                onClick={() => setStatusFilter(s)}
+                className="px-3 py-1.5 rounded-xl text-xs font-medium transition-colors cursor-pointer"
+                style={statusFilter === s
+                  ? { background: s === 'all' ? 'var(--card-strong)' : `rgba(${s === 'ok' ? '56,217,150' : s === 'slow' ? '246,196,83' : '255,107,122'},.2)`, color: s === 'all' ? 'var(--text)' : `var(--${s})`, border: `1px solid ${s === 'all' ? 'var(--border)' : `rgba(${s === 'ok' ? '56,217,150' : s === 'slow' ? '246,196,83' : '255,107,122'},.4)`}` }
+                  : { background: 'transparent', color: 'var(--muted)', border: '1px solid transparent' }
+                }
+              >
+                {{ all: '全部', ok: '正常', slow: '较慢', error: '异常' }[s]}
+              </button>
+            ))}
+
+            {/* Sort selector */}
+            <div className="flex items-center gap-1.5 ml-auto" style={{ color: 'var(--muted)' }}>
+              <ArrowUpDown className="w-3.5 h-3.5 shrink-0" />
+              <select
+                value={sortBy}
+                onChange={e => setSortBy(e.target.value as typeof sortBy)}
+                className="input-glass rounded-xl px-2 py-1.5 text-xs cursor-pointer focus:outline-none"
+              >
+                <option value="default">默认顺序</option>
+                <option value="status">按状态</option>
+                <option value="name">按名称</option>
+                <option value="latency">按延迟</option>
+                <option value="models">按模型数</option>
+              </select>
+            </div>
+
+            {/* View toggle */}
+            <div className="flex items-center rounded-xl overflow-hidden border" style={{ borderColor: 'var(--border)' }}>
+              <button
+                onClick={() => setViewMode('detailed')}
+                className="p-1.5 transition-colors cursor-pointer"
+                style={viewMode === 'detailed' ? { background: 'var(--card-strong)', color: 'var(--text)' } : { color: 'var(--muted)' }}
+                title="详细视图"
+              >
+                <LayoutDashboard className="w-4 h-4" />
+              </button>
+              <button
+                onClick={() => setViewMode('compact')}
+                className="p-1.5 transition-colors cursor-pointer"
+                style={viewMode === 'compact' ? { background: 'var(--card-strong)', color: 'var(--text)' } : { color: 'var(--muted)' }}
+                title="简洁视图"
+              >
+                <List className="w-4 h-4" />
+              </button>
+            </div>
           </div>
         )}
 
@@ -364,8 +338,13 @@ export default function Dashboard() {
         {/* Provider grid */}
         {report?.providers && report.providers.length > 0 ? (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-[18px]">
-            {report.providers.map(provider => (
-              <ProviderCard key={provider.provider_id} provider={provider} showError={true} />
+            {filteredProviders.length === 0 ? (
+              <div className="col-span-2 py-16 text-center" style={{ color: 'var(--muted)' }}>
+                <Search className="w-8 h-8 mx-auto mb-3 opacity-40" />
+                <p className="text-sm">未找到匹配的模型或 Provider</p>
+              </div>
+            ) : filteredProviders.map((provider, i) => (
+              <ProviderCard key={provider.provider_id} provider={provider} showError={true} compact={viewMode === 'compact'} animDelay={440 + i * 80} />
             ))}
           </div>
         ) : !error && !report ? (
@@ -377,19 +356,61 @@ export default function Dashboard() {
           <div className="flex flex-col items-center justify-center py-24" style={{ color: 'var(--muted)' }}>
             <XCircle className="w-12 h-12 mb-4" style={{ color: 'var(--error)', opacity: .5 }} />
             <p className="text-lg mb-2">无法获取状态</p>
-            <p className="text-sm font-mono" style={{ color: 'var(--error)', opacity: .7 }}>{error}</p>
-            <p className="text-xs mt-3" style={{ color: 'var(--muted)' }}>
-              请先触发一次检测：
-              <code className="font-mono px-1.5 py-0.5 rounded ml-1" style={{ background: 'var(--card-strong)' }}>POST /api/admin/check</code>
-            </p>
+            <p className="text-sm font-mono mb-4" style={{ color: 'var(--error)', opacity: .7 }}>{error}</p>
+            <Link
+              to="/admin"
+              className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-colors cursor-pointer glass"
+              style={{ color: 'var(--ok)', border: '1px solid rgba(56,217,150,.35)' }}
+            >
+              <Settings className="w-4 h-4" />前往管理面板触发检测
+            </Link>
           </div>
         ) : (
           <div className="flex flex-col items-center justify-center py-24" style={{ color: 'var(--muted)' }}>
             <Activity className="w-12 h-12 mb-4" />
-            <p>暂无数据，请触发检测</p>
+            <p className="mb-4">暂无数据</p>
+            <Link
+              to="/admin"
+              className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-colors cursor-pointer glass"
+              style={{ color: 'var(--ok)', border: '1px solid rgba(56,217,150,.35)' }}
+            >
+              <Settings className="w-4 h-4" />前往管理面板触发检测
+            </Link>
           </div>
         )}
       </main>
+
+      <footer className="max-w-[1180px] mx-auto px-4 py-6 flex items-center justify-center">
+        <p className="text-[11px] font-mono" style={{ color: 'var(--muted)', opacity: .5 }}>
+          © {new Date().getFullYear()}&nbsp;
+          <a
+            href="https://github.com/wututua/AI_Model_Connectivity"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="transition-opacity hover:opacity-100"
+          >
+            AI Model Connectivity
+          </a>
+          &nbsp;by&nbsp;
+          <a
+            href="https://github.com/wututua"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="transition-opacity hover:opacity-100"
+          >
+            wututu
+          </a>
+          &nbsp;&amp;&nbsp;
+          <a
+            href="https://github.com/Meow-Calculations"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="transition-opacity hover:opacity-100"
+          >
+            Meow-Calculations
+          </a>
+        </p>
+      </footer>
     </div>
   )
 }

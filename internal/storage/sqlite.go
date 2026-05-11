@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -461,8 +460,18 @@ func (s *SQLiteStore) importLegacyNotifyState(ctx context.Context) error {
 }
 
 func (s *SQLiteStore) tableEmpty(ctx context.Context, table string) bool {
+	var query string
+	switch table {
+	case "probe_results":
+		query = "SELECT COUNT(*) FROM probe_results"
+	case "latest_report":
+		query = "SELECT COUNT(*) FROM latest_report"
+	case "notify_state":
+		query = "SELECT COUNT(*) FROM notify_state"
+	default:
+		return false
+	}
 	var count int
-	query := fmt.Sprintf("SELECT COUNT(*) FROM %s", table)
 	if err := s.db.QueryRowContext(ctx, query).Scan(&count); err != nil {
 		return false
 	}

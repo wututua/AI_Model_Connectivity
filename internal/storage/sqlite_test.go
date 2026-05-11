@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"cg/internal/config"
 	"cg/internal/notify"
 	"cg/internal/probe"
 	"cg/internal/report"
@@ -61,6 +62,103 @@ func TestSQLiteNotifyStateStore(t *testing.T) {
 	}
 	if loaded.Status != state.Status || !loaded.SentAt.Equal(state.SentAt) {
 		t.Fatalf("notify state mismatch: %#v", loaded)
+	}
+}
+
+func TestSQLiteRuntimeConfig(t *testing.T) {
+	store := newTestSQLiteStore(t)
+	ctx := context.Background()
+
+	// first load returns not-found
+	_, ok, err := store.LoadRuntimeConfig(ctx)
+	if err != nil {
+		t.Fatalf("load runtime config: %v", err)
+	}
+	if ok {
+		t.Fatal("expected no runtime config initially")
+	}
+
+	// save then reload
+	cfg := config.RuntimeConfig{Settings: config.RuntimeSettings{DashboardTitle: "test-title", TimeoutSeconds: 42}}
+	if err := store.SaveRuntimeConfig(ctx, cfg); err != nil {
+		t.Fatalf("save runtime config: %v", err)
+	}
+	loaded, ok, err := store.LoadRuntimeConfig(ctx)
+	if err != nil {
+		t.Fatalf("load runtime config after save: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected runtime config to exist after save")
+	}
+	if loaded.Settings.DashboardTitle != cfg.Settings.DashboardTitle || loaded.Settings.TimeoutSeconds != cfg.Settings.TimeoutSeconds {
+		t.Fatalf("runtime config mismatch: got %+v", loaded)
+	}
+}
+
+func TestSQLiteTaskLifecycle(t *testing.T) {
+	store := newTestSQLiteStore(t)
+	ctx := context.Background()
+
+	id, err := store.CreateCheckTask(ctx, CheckTask{Kind: "manual", Status: "running", StartedAt: time.Now().UTC().Format(time.RFC3339)})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if id <= 0 {
+		t.Fatalf("expected positive task id, got %d", id)
+	}
+
+	update := CheckTaskUpdate{
+		Status:     "ok",
+		FinishedAt: time.Now().UTC(),
+		ElapsedMS:  250,
+		OKCount:    3,
+		Total:      3,
+	}
+	if err := store.FinishCheckTask(ctx, id, update); err != nil {
+		t.Fatalf("finish task: %v", err)
+	}
+
+	task, err := store.GetCheckTask(ctx, id)
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if task.Status != "ok" || task.OKCount != 3 || task.ElapsedMS != 250 {
+		t.Fatalf("task mismatch: %+v", task)
+	}
+
+	tasks, err := store.ListCheckTasks(ctx, TaskQuery{Limit: 10})
+	if err != nil {
+		t.Fatalf("list tasks: %v", err)
+	}
+	if len(tasks) != 1 || tasks[0].ID != id {
+		t.Fatalf("list tasks returned unexpected results: %+v", tasks)
+	}
+}
+
+func TestSQLiteHistoryLimitPerKey(t *testing.T) {
+	store := newTestSQLiteStore(t)
+	ctx := context.Background()
+
+	for i := range 5 {
+		results := []probe.Result{{
+			ProviderID:   "p1",
+			ProviderName: "P1",
+			Model:        "m1",
+			Status:       "ok",
+			LatencyMS:    100 + i,
+			HistoryKey:   "p1::m1",
+		}}
+		if err := store.AppendResults(ctx, results, time.Now().UTC()); err != nil {
+			t.Fatalf("append results iter %d: %v", i, err)
+		}
+	}
+
+	history, err := store.LoadHistory(ctx, 3, 7)
+	if err != nil {
+		t.Fatalf("load history: %v", err)
+	}
+	if len(history["p1::m1"]) != 3 {
+		t.Fatalf("expected 3 records (limit), got %d", len(history["p1::m1"]))
 	}
 }
 
