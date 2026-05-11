@@ -8,11 +8,6 @@ import { StatusLights } from './StatusLights'
 export function ModelRow({ result, showError, compact }: { result: ModelResult; showError: boolean; compact?: boolean }) {
   const sc = statusClass(result.status)
   const ledColor = sc === 'ok' ? 'var(--ok)' : sc === 'slow' ? 'var(--slow)' : 'var(--error)'
-  const ledGlow = sc === 'ok'
-    ? '0 0 6px rgba(56,217,150,.9)'
-    : sc === 'slow'
-    ? '0 0 6px rgba(246,196,83,.9)'
-    : '0 0 6px rgba(255,107,122,.9)'
   const [hovered, setHovered] = useState(false)
   const [expanded, setExpanded] = useState(false)
   const hasDetail = !!result.error
@@ -31,7 +26,7 @@ export function ModelRow({ result, showError, compact }: { result: ModelResult; 
         <div className="flex items-center gap-2 min-w-0">
           <div
             className="w-2 h-2 rounded-full shrink-0"
-            style={{ background: ledColor, boxShadow: ledGlow }}
+            style={{ background: ledColor }}
           />
           <span className="font-mono text-xs truncate" style={{ color: 'var(--text)' }}>{result.model}</span>
         </div>
@@ -65,7 +60,7 @@ export function ModelRow({ result, showError, compact }: { result: ModelResult; 
           <div className="min-w-0 flex items-center gap-2">
             <div
               className="w-2 h-2 rounded-full shrink-0"
-              style={{ background: ledColor, boxShadow: ledGlow }}
+              style={{ background: ledColor }}
             />
             <h3 className="font-mono text-sm font-medium truncate" style={{ color: 'var(--text)' }}>
               {result.model}
