@@ -41,8 +41,6 @@ body[data-theme="light"] {
 
   body {
     background-color: var(--bg);
-    background-image: radial-gradient(circle at top left, rgba(74, 144, 226, .35), transparent 36rem);
-    background-attachment: fixed;
     color: var(--text);
     font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     -webkit-font-smoothing: antialiased;
@@ -51,35 +49,55 @@ body[data-theme="light"] {
     min-height: 100vh;
     transition: background-color 0.3s ease, color 0.3s ease;
   }
+
+  /*
+   * Fixed decorative gradient implemented as a pseudo-element rather than
+   * background-attachment:fixed.  background-attachment:fixed disables GPU
+   * layer caching on Firefox/Safari and triggers a full background repaint on
+   * every scroll frame.  A fixed-position ::before with z-index:-1 achieves
+   * the same visual result using a single compositor layer that never repaints.
+   */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: radial-gradient(circle at top left, rgba(74,144,226,.35), transparent 36rem);
+    pointer-events: none;
+    z-index: -1;
+  }
 }
 
 /* ── Glassmorphism Components ──────────────────────────────────────── */
 @layer components {
-  /* Primary glass card
-   * translateZ(0) promotes each card to its own compositing layer so that
-   * backdrop-filter blur is isolated and doesn't repaint sibling layers. */
+  /*
+   * NO transform:translateZ(0) here.
+   * backdrop-filter already creates its own compositing layer automatically;
+   * adding translateZ(0) would create a second redundant layer for the card
+   * content, doubling layer count and GPU memory usage.
+   * contain:layout style limits reflow and style-recalculation propagation
+   * without the overhead of a paint layer.
+   */
   .glass {
     background: var(--card);
     backdrop-filter: blur(18px);
     -webkit-backdrop-filter: blur(18px);
     border: 1px solid var(--border);
     box-shadow: var(--shadow);
-    transform: translateZ(0);
+    contain: layout style;
     transition: background-color 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
   }
 
-  /* Stronger overlay (modal backdrops, hero) */
   .glass-strong {
     background: var(--card-strong);
     backdrop-filter: blur(18px);
     -webkit-backdrop-filter: blur(18px);
     border: 1px solid var(--border);
     box-shadow: var(--shadow);
-    transform: translateZ(0);
+    contain: layout style;
     transition: background-color 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
   }
 
-  /* Status badges – pill style */
+  /* Status badges */
   .badge-ok      { background: rgba(56,217,150,.15);  color: var(--ok);    border: 1px solid rgba(56,217,150,.35); }
   .badge-slow    { background: rgba(246,196,83,.15);  color: var(--slow);  border: 1px solid rgba(246,196,83,.35); }
   .badge-error   { background: rgba(255,107,122,.15); color: var(--error); border: 1px solid rgba(255,107,122,.35); }
@@ -102,45 +120,56 @@ body[data-theme="light"] {
   .border-slow  { border-color: rgba(246,196,83,.35) !important; }
   .border-error { border-color: rgba(255,107,122,.35) !important; }
 
-  /* Summary card hover */
+  /*
+   * summary-card hover: translateY only — no translateZ(0).
+   * translateZ(0) on hover creates a compositing-layer flash on enter/leave.
+   * The browser promotes the element automatically for transform animations.
+   */
   .summary-card {
     transition: box-shadow 0.2s ease, transform 0.2s ease;
   }
   .summary-card:hover {
-    transform: translateY(-2px) translateZ(0);
+    transform: translateY(-2px);
     box-shadow: var(--shadow), 0 0 0 1px rgba(148, 163, 184, .15);
   }
 }
 
 /* ── Animation Keyframes ───────────────────────────────────────────── */
-@keyframes fadeInUp {
-  from { opacity: 0; transform: translateY(16px) translateZ(0); }
-  to   { opacity: 1; transform: translateY(0)    translateZ(0); }
-}
 
-@keyframes fadeIn {
-  from { opacity: 0; }
-  to   { opacity: 1; }
+/* translateY/scale/translateX animations — safe for elements WITHOUT
+   backdrop-filter children (sidebar buttons, simple text rows, etc.) */
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: none; }
 }
 
 @keyframes scaleIn {
-  from { opacity: 0; transform: scale(.94) translateZ(0); }
-  to   { opacity: 1; transform: scale(1)   translateZ(0); }
+  from { opacity: 0; transform: scale(.95); }
+  to   { opacity: 1; transform: none; }
 }
 
 @keyframes slideInLeft {
-  from { opacity: 0; transform: translateX(-10px) translateZ(0); }
-  to   { opacity: 1; transform: translateX(0)     translateZ(0); }
+  from { opacity: 0; transform: translateX(-10px); }
+  to   { opacity: 1; transform: none; }
 }
 
 @keyframes slideInRight {
-  from { opacity: 0; transform: translateX(10px) translateZ(0); }
-  to   { opacity: 1; transform: translateX(0)    translateZ(0); }
+  from { opacity: 0; transform: translateX(10px); }
+  to   { opacity: 1; transform: none; }
 }
 
 @keyframes slideInDown {
-  from { opacity: 0; transform: translateY(-8px) translateZ(0); }
-  to   { opacity: 1; transform: translateY(0)   translateZ(0); }
+  from { opacity: 0; transform: translateY(-8px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* Opacity-only animation — use for glass cards and any container that has
+   backdrop-filter children.  Translating/scaling such containers forces the
+   compositor to recapture and re-blur every child backdrop region every frame,
+   which is the primary source of animation jank on glass-heavy pages. */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
 }
 
 /* ── Utilities ─────────────────────────────────────────────────────── */
@@ -149,7 +178,6 @@ body[data-theme="light"] {
   .glow-error { filter: drop-shadow(0 0 10px rgba(255,107,122,.55)); }
   .glow-slow  { filter: drop-shadow(0 0 10px rgba(246,196,83,.55)); }
 
-  /* Form inputs */
   .input-glass {
     background: var(--card-strong);
     border: 1px solid var(--border);
@@ -159,52 +187,50 @@ body[data-theme="light"] {
   .input-glass::placeholder { color: var(--muted); opacity: .7; }
   .input-glass:focus { border-color: rgba(56,217,150,.5); outline: none; }
 
-  /* Curve SVG overlay for model cards */
   .curve-overlay {
     position: absolute;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    width: 100%;
-    height: 70%;
+    bottom: 0; left: 0; right: 0;
+    width: 100%; height: 70%;
     opacity: .16;
     pointer-events: none;
   }
 
-  /* Nav bg */
   .nav-glass {
     background: var(--nav-bg);
     transition: background-color 0.3s ease;
   }
 
-  /* ── Entrance animations ──
-   * will-change: transform, opacity is set during the animation to hint the
-   * compositor. The "both" fill-mode keeps the final state so the hint is
-   * automatically cleared once the element reaches opacity:1 / no transform. */
-
+  /*
+   * Animation utility classes — NO will-change in the class definition.
+   *
+   * Putting will-change in a CSS class means the browser allocates a
+   * compositor layer for EVERY matching element at mount time, not just during
+   * animation.  With 20+ rows or cards all having will-change:transform, this
+   * creates 20+ compositor layers simultaneously, exhausting GPU memory and
+   * causing jank.
+   *
+   * Modern browsers promote transform+opacity animations to the compositor
+   * automatically without an explicit hint.  The hint only helps for elements
+   * that will animate VERY soon after mount — and even then, applying it
+   * dynamically (e.g. via JS just before the animation) is better.
+   */
   .anim-fade-in-up {
-    will-change: transform, opacity;
-    animation: fadeInUp 0.42s cubic-bezier(.25,.46,.45,.94) both;
+    animation: fadeInUp 0.4s cubic-bezier(.25,.46,.45,.94) both;
   }
   .anim-fade-in {
-    will-change: opacity;
-    animation: fadeIn 0.3s ease-out both;
+    animation: fadeIn 0.28s ease-out both;
   }
   .anim-scale-in {
-    will-change: transform, opacity;
-    animation: scaleIn 0.35s cubic-bezier(.25,.46,.45,.94) both;
+    animation: scaleIn 0.32s cubic-bezier(.25,.46,.45,.94) both;
   }
   .anim-slide-in-left {
-    will-change: transform, opacity;
-    animation: slideInLeft 0.28s cubic-bezier(.25,.46,.45,.94) both;
+    animation: slideInLeft 0.26s cubic-bezier(.25,.46,.45,.94) both;
   }
   .anim-slide-in-right {
-    will-change: transform, opacity;
-    animation: slideInRight 0.28s cubic-bezier(.25,.46,.45,.94) both;
+    animation: slideInRight 0.26s cubic-bezier(.25,.46,.45,.94) both;
   }
   .anim-slide-in-down {
-    will-change: transform, opacity;
-    animation: slideInDown 0.25s cubic-bezier(.25,.46,.45,.94) both;
+    animation: slideInDown 0.22s cubic-bezier(.25,.46,.45,.94) both;
   }
 
   @media (prefers-reduced-motion: reduce) {

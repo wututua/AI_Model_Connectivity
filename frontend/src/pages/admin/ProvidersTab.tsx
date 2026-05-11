@@ -61,7 +61,7 @@ function ProviderModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 backdrop-blur-sm" style={{ background: 'rgba(11,16,32,.75)' }}>
-      <div className="w-full max-w-lg glass rounded-[24px] overflow-hidden anim-scale-in">
+      <div className="w-full max-w-lg glass rounded-[24px] overflow-hidden anim-fade-in">
         <div className="flex items-center justify-between px-5 py-4" style={{ borderBottom: '1px solid var(--border)' }}>
           <h3 className="font-semibold" style={{ color: 'var(--text)' }}>
             {initial ? '编辑 Provider' : '新增 Provider'}
@@ -259,11 +259,11 @@ export function ProvidersTab() {
             </tr>
           </thead>
           <tbody>
-            {filtered.map((p, i) => (
+            {filtered.map((p) => (
               <tr
                 key={p.id}
-                className="transition-colors anim-fade-in-up"
-                style={{ borderBottom: '1px solid var(--border)', animationDelay: `${i * 30}ms` }}
+                className="transition-colors"
+                style={{ borderBottom: '1px solid var(--border)' }}
               >
                 <td className="py-3 pr-4">
                   <div className="font-mono text-xs" style={{ color: 'var(--muted)' }}>{p.id}</div>

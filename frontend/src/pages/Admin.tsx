@@ -226,7 +226,7 @@ export default function Admin() {
           </div>
         </div>
 
-        <main key={tab} className="flex-1 min-w-0 anim-slide-in-right">
+        <main key={tab} className="flex-1 min-w-0 anim-fade-in">
           {tab === 'overview'  && <OverviewTab />}
           {tab === 'providers' && <ProvidersTab />}
           {tab === 'settings'  && <SettingsTab />}

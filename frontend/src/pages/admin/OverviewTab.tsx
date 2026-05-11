@@ -49,7 +49,7 @@ export function OverviewTab() {
 
       {state && (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div className="glass rounded-[22px] p-4 anim-fade-in-up" style={{ animationDelay: '60ms' }}>
+          <div className="glass rounded-[22px] p-4 anim-fade-in" style={{ animationDelay: '50ms' }}>
             <p className="text-xs mb-2" style={{ color: 'var(--muted)' }}>当前状态</p>
             <div className="flex items-center gap-2">
               {state.running
@@ -64,7 +64,7 @@ export function OverviewTab() {
             )}
           </div>
 
-          <div className="glass rounded-[22px] p-4 anim-fade-in-up" style={{ animationDelay: '100ms' }}>
+          <div className="glass rounded-[22px] p-4 anim-fade-in" style={{ animationDelay: '90ms' }}>
             <p className="text-xs mb-2" style={{ color: 'var(--muted)' }}>自动检测</p>
             <p className="font-mono text-sm" style={{ color: 'var(--text)' }}>
               {state.auto_check_interval_min_hours <= 0 && state.auto_check_interval_max_hours <= 0
