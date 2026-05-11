@@ -39,24 +39,26 @@ type RuntimeSettings struct {
 }
 
 type SafeProviderConfig struct {
-	ID        string   `json:"id"`
-	Name      string   `json:"name"`
-	Type      string   `json:"type"`
-	BaseURL   string   `json:"base_url"`
-	Models    []string `json:"models"`
-	Enabled   bool     `json:"enabled"`
-	APIKeySet bool     `json:"api_key_set"`
+	ID           string   `json:"id"`
+	Name         string   `json:"name"`
+	Type         string   `json:"type"`
+	BaseURL      string   `json:"base_url"`
+	Models       []string `json:"models"`
+	Enabled      bool     `json:"enabled"`
+	ProbeEnabled bool     `json:"probe_enabled"`
+	APIKeySet    bool     `json:"api_key_set"`
 }
 
 type ProviderUpdate struct {
-	ID          string   `json:"id"`
-	Name        string   `json:"name"`
-	Type        string   `json:"type"`
-	BaseURL     string   `json:"base_url"`
-	APIKey      string   `json:"api_key"`
-	ClearAPIKey bool     `json:"clear_api_key"`
-	Models      []string `json:"models"`
-	Enabled     bool     `json:"enabled"`
+	ID           string   `json:"id"`
+	Name         string   `json:"name"`
+	Type         string   `json:"type"`
+	BaseURL      string   `json:"base_url"`
+	APIKey       string   `json:"api_key"`
+	ClearAPIKey  bool     `json:"clear_api_key"`
+	Models       []string `json:"models"`
+	Enabled      bool     `json:"enabled"`
+	ProbeEnabled bool     `json:"probe_enabled"`
 }
 
 type RuntimeConfig struct {
@@ -157,13 +159,14 @@ func SafeProviders(providers []ProviderConfig) []SafeProviderConfig {
 	result := make([]SafeProviderConfig, 0, len(providers))
 	for _, provider := range providers {
 		result = append(result, SafeProviderConfig{
-			ID:        provider.ID,
-			Name:      provider.Name,
-			Type:      provider.Type,
-			BaseURL:   provider.BaseURL,
-			Models:    append([]string(nil), provider.Models...),
-			Enabled:   provider.Enabled,
-			APIKeySet: provider.APIKey != "",
+			ID:           provider.ID,
+			Name:         provider.Name,
+			Type:         provider.Type,
+			BaseURL:      provider.BaseURL,
+			Models:       append([]string(nil), provider.Models...),
+			Enabled:      provider.Enabled,
+			ProbeEnabled: provider.ProbeEnabled,
+			APIKeySet:    provider.APIKey != "",
 		})
 	}
 	return result
@@ -171,13 +174,14 @@ func SafeProviders(providers []ProviderConfig) []SafeProviderConfig {
 
 func ApplyProviderUpdate(existing ProviderConfig, update ProviderUpdate) ProviderConfig {
 	provider := ProviderConfig{
-		ID:      strings.TrimSpace(update.ID),
-		Name:    strings.TrimSpace(update.Name),
-		Type:    strings.ToLower(strings.TrimSpace(update.Type)),
-		BaseURL: strings.TrimRight(strings.TrimSpace(update.BaseURL), "/"),
-		APIKey:  existing.APIKey,
-		Models:  append([]string(nil), update.Models...),
-		Enabled: update.Enabled,
+		ID:           strings.TrimSpace(update.ID),
+		Name:         strings.TrimSpace(update.Name),
+		Type:         strings.ToLower(strings.TrimSpace(update.Type)),
+		BaseURL:      strings.TrimRight(strings.TrimSpace(update.BaseURL), "/"),
+		APIKey:       existing.APIKey,
+		Models:       append([]string(nil), update.Models...),
+		Enabled:      update.Enabled,
+		ProbeEnabled: update.ProbeEnabled,
 	}
 	if provider.ID == "" {
 		provider.ID = existing.ID

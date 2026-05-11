@@ -91,7 +91,7 @@ export function SettingsTab() {
 
       {msg && <p className="text-sm font-mono" style={{ color: msg.startsWith('错误') ? 'var(--error)' : 'var(--ok)' }}>{msg}</p>}
 
-      <section>
+      <section className="anim-fade-in-up" style={{ animationDelay: '60ms' }}>
         <h3 className="text-xs font-medium uppercase tracking-widest mb-3" style={{ color: 'var(--muted)', letterSpacing: '.12em' }}>基础</h3>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {textInput('dashboard_title', '仪表盘标题')}
@@ -107,7 +107,7 @@ export function SettingsTab() {
         </div>
       </section>
 
-      <section>
+      <section className="anim-fade-in-up" style={{ animationDelay: '120ms' }}>
         <h3 className="text-xs font-medium uppercase tracking-widest mb-3" style={{ color: 'var(--muted)', letterSpacing: '.12em' }}>检测</h3>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {numInput('timeout_seconds', '单模型超时（秒）', '每个模型等待响应的最大时间，超时计为错误')}
@@ -130,7 +130,7 @@ export function SettingsTab() {
         </div>
       </section>
 
-      <section>
+      <section className="anim-fade-in-up" style={{ animationDelay: '180ms' }}>
         <h3 className="text-xs font-medium uppercase tracking-widest mb-3" style={{ color: 'var(--muted)', letterSpacing: '.12em' }}>历史</h3>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           {numInput('stats_window_days', '统计窗口（天）', '可用率和均值的计算时间窗口')}
@@ -144,7 +144,7 @@ export function SettingsTab() {
         </div>
       </section>
 
-      <section>
+      <section className="anim-fade-in-up" style={{ animationDelay: '240ms' }}>
         <h3 className="text-xs font-medium uppercase tracking-widest mb-3" style={{ color: 'var(--muted)', letterSpacing: '.12em' }}>告警通知</h3>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {textInput('notify_platform', '平台', '支持：webhook / discord / bark / wecom / dingtalk / telegram')}

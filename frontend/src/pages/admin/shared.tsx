@@ -58,14 +58,14 @@ export function Btn({
 export function Badge({ status }: { status: string }) {
   const map: Record<string, string> = {
     ok: 'badge-ok', success: 'badge-ok',
-    slow: 'badge-slow',
+    slow: 'badge-slow', paused: 'badge-slow',
     error: 'badge-error', canceled: 'badge-error',
     running: 'badge-ok',
   }
   const cls = map[status] ?? 'badge-unknown'
   const labels: Record<string, string> = {
     ok: '正常', success: '成功', slow: '较慢', error: '错误',
-    canceled: '已取消', running: '运行中',
+    canceled: '已取消', running: '运行中', paused: '已暂停',
   }
   return (
     <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-mono ${cls}`}>
@@ -111,7 +111,7 @@ export function TokenEstimateCard({ providers, settings }: {
   providers: SafeProviderConfig[]
   settings: RuntimeSettings
 }) {
-  const enabledProviders = providers.filter(p => p.enabled)
+  const enabledProviders = providers.filter(p => p.enabled && p.probe_enabled)
   let totalModels: number | null = 0
   for (const p of enabledProviders) {
     const cnt = p.models.length
@@ -154,7 +154,7 @@ export function TokenEstimateCard({ providers, settings }: {
         <Activity className="w-3.5 h-3.5 text-amber-400" />
         <p className="text-xs font-medium text-amber-400">Token 消耗估算</p>
       </div>
-      {row('启用 Provider', enabledProviders.length, `/ ${providers.length} 个`)}
+      {row('参与检测 Provider', enabledProviders.length, `/ ${providers.length} 个已启用`)}
       {row(
         '探测模型总数',
         modelsKnown ? totalModels : '—',

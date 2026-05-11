@@ -55,13 +55,16 @@ body[data-theme="light"] {
 
 /* ── Glassmorphism Components ──────────────────────────────────────── */
 @layer components {
-  /* Primary glass card */
+  /* Primary glass card
+   * translateZ(0) promotes each card to its own compositing layer so that
+   * backdrop-filter blur is isolated and doesn't repaint sibling layers. */
   .glass {
     background: var(--card);
     backdrop-filter: blur(18px);
     -webkit-backdrop-filter: blur(18px);
     border: 1px solid var(--border);
     box-shadow: var(--shadow);
+    transform: translateZ(0);
     transition: background-color 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
   }
 
@@ -72,13 +75,14 @@ body[data-theme="light"] {
     -webkit-backdrop-filter: blur(18px);
     border: 1px solid var(--border);
     box-shadow: var(--shadow);
+    transform: translateZ(0);
     transition: background-color 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
   }
 
   /* Status badges – pill style */
-  .badge-ok    { background: rgba(56,217,150,.15); color: var(--ok);    border: 1px solid rgba(56,217,150,.35); }
-  .badge-slow  { background: rgba(246,196,83,.15);  color: var(--slow);  border: 1px solid rgba(246,196,83,.35); }
-  .badge-error { background: rgba(255,107,122,.15); color: var(--error); border: 1px solid rgba(255,107,122,.35); }
+  .badge-ok      { background: rgba(56,217,150,.15);  color: var(--ok);    border: 1px solid rgba(56,217,150,.35); }
+  .badge-slow    { background: rgba(246,196,83,.15);  color: var(--slow);  border: 1px solid rgba(246,196,83,.35); }
+  .badge-error   { background: rgba(255,107,122,.15); color: var(--error); border: 1px solid rgba(255,107,122,.35); }
   .badge-unknown { background: rgba(148,163,184,.12); color: var(--muted); border: 1px solid rgba(148,163,184,.22); }
 
   /* History bars */
@@ -103,15 +107,15 @@ body[data-theme="light"] {
     transition: box-shadow 0.2s ease, transform 0.2s ease;
   }
   .summary-card:hover {
-    transform: translateY(-1px);
+    transform: translateY(-2px) translateZ(0);
     box-shadow: var(--shadow), 0 0 0 1px rgba(148, 163, 184, .15);
   }
 }
 
-/* ── Animations ────────────────────────────────────────────────────── */
+/* ── Animation Keyframes ───────────────────────────────────────────── */
 @keyframes fadeInUp {
-  from { opacity: 0; transform: translateY(18px); }
-  to   { opacity: 1; transform: translateY(0); }
+  from { opacity: 0; transform: translateY(16px) translateZ(0); }
+  to   { opacity: 1; transform: translateY(0)    translateZ(0); }
 }
 
 @keyframes fadeIn {
@@ -120,8 +124,23 @@ body[data-theme="light"] {
 }
 
 @keyframes scaleIn {
-  from { opacity: 0; transform: scale(.96); }
-  to   { opacity: 1; transform: scale(1); }
+  from { opacity: 0; transform: scale(.94) translateZ(0); }
+  to   { opacity: 1; transform: scale(1)   translateZ(0); }
+}
+
+@keyframes slideInLeft {
+  from { opacity: 0; transform: translateX(-10px) translateZ(0); }
+  to   { opacity: 1; transform: translateX(0)     translateZ(0); }
+}
+
+@keyframes slideInRight {
+  from { opacity: 0; transform: translateX(10px) translateZ(0); }
+  to   { opacity: 1; transform: translateX(0)    translateZ(0); }
+}
+
+@keyframes slideInDown {
+  from { opacity: 0; transform: translateY(-8px) translateZ(0); }
+  to   { opacity: 1; transform: translateY(0)   translateZ(0); }
 }
 
 /* ── Utilities ─────────────────────────────────────────────────────── */
@@ -158,20 +177,42 @@ body[data-theme="light"] {
     transition: background-color 0.3s ease;
   }
 
-  /* Entrance animations */
+  /* ── Entrance animations ──
+   * will-change: transform, opacity is set during the animation to hint the
+   * compositor. The "both" fill-mode keeps the final state so the hint is
+   * automatically cleared once the element reaches opacity:1 / no transform. */
+
   .anim-fade-in-up {
-    animation: fadeInUp 0.45s cubic-bezier(.25,.46,.45,.94) both;
+    will-change: transform, opacity;
+    animation: fadeInUp 0.42s cubic-bezier(.25,.46,.45,.94) both;
   }
   .anim-fade-in {
-    animation: fadeIn 0.35s ease-out both;
+    will-change: opacity;
+    animation: fadeIn 0.3s ease-out both;
   }
   .anim-scale-in {
-    animation: scaleIn 0.4s cubic-bezier(.25,.46,.45,.94) both;
+    will-change: transform, opacity;
+    animation: scaleIn 0.35s cubic-bezier(.25,.46,.45,.94) both;
+  }
+  .anim-slide-in-left {
+    will-change: transform, opacity;
+    animation: slideInLeft 0.28s cubic-bezier(.25,.46,.45,.94) both;
+  }
+  .anim-slide-in-right {
+    will-change: transform, opacity;
+    animation: slideInRight 0.28s cubic-bezier(.25,.46,.45,.94) both;
+  }
+  .anim-slide-in-down {
+    will-change: transform, opacity;
+    animation: slideInDown 0.25s cubic-bezier(.25,.46,.45,.94) both;
   }
 
   @media (prefers-reduced-motion: reduce) {
     .anim-fade-in-up,
     .anim-fade-in,
-    .anim-scale-in { animation: none; }
+    .anim-scale-in,
+    .anim-slide-in-left,
+    .anim-slide-in-right,
+    .anim-slide-in-down { animation: none; }
   }
 }

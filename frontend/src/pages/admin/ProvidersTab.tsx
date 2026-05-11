@@ -15,7 +15,8 @@ function ProviderModal({
 }) {
   const [form, setForm] = useState<{
     id: string; name: string; type: string; base_url: string
-    api_key: string; clear_api_key: boolean; models: string; enabled: boolean
+    api_key: string; clear_api_key: boolean; models: string
+    enabled: boolean; probe_enabled: boolean
   }>(() => ({
     id: initial?.id ?? '',
     name: initial?.name ?? '',
@@ -25,6 +26,7 @@ function ProviderModal({
     clear_api_key: false,
     models: initial?.models.join(', ') ?? '',
     enabled: initial?.enabled ?? true,
+    probe_enabled: initial?.probe_enabled ?? true,
   }))
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState('')
@@ -49,6 +51,7 @@ function ProviderModal({
         clear_api_key: form.clear_api_key,
         models: form.models.split(',').map(m => m.trim()).filter(Boolean),
         enabled: form.enabled,
+        probe_enabled: form.probe_enabled,
       })
     } catch (e) {
       setErr((e as Error).message)
@@ -58,7 +61,7 @@ function ProviderModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 backdrop-blur-sm" style={{ background: 'rgba(11,16,32,.75)' }}>
-      <div className="w-full max-w-lg glass rounded-[24px] overflow-hidden">
+      <div className="w-full max-w-lg glass rounded-[24px] overflow-hidden anim-scale-in">
         <div className="flex items-center justify-between px-5 py-4" style={{ borderBottom: '1px solid var(--border)' }}>
           <h3 className="font-semibold" style={{ color: 'var(--text)' }}>
             {initial ? '编辑 Provider' : '新增 Provider'}
@@ -118,10 +121,27 @@ function ProviderModal({
             <input className={inputCls} value={form.models} onChange={e => set('models', e.target.value)} placeholder="gpt-4o-mini, gpt-4.1-mini" />
           </Field>
 
-          <label className="flex items-center gap-2 cursor-pointer">
-            <input type="checkbox" checked={form.enabled} onChange={e => set('enabled', e.target.checked)} className="rounded" />
-            <span className="text-sm" style={{ color: 'var(--text)' }}>启用此 Provider</span>
-          </label>
+          <div className="flex flex-col gap-2">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" checked={form.enabled} onChange={e => set('enabled', e.target.checked)} className="rounded" />
+              <span className="text-sm" style={{ color: 'var(--text)' }}>启用此 Provider</span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={form.probe_enabled}
+                onChange={e => set('probe_enabled', e.target.checked)}
+                className="rounded"
+                disabled={!form.enabled}
+              />
+              <span className="text-sm" style={{ color: form.enabled ? 'var(--text)' : 'var(--muted)', opacity: form.enabled ? 1 : .5 }}>
+                参与检测运行
+              </span>
+              <span className="text-[11px] font-mono" style={{ color: 'var(--muted)', opacity: .6 }}>
+                （关闭后保留配置但不会被探测）
+              </span>
+            </label>
+          </div>
 
           {err && <p className="text-red-400 text-xs">{err}</p>}
         </div>
@@ -196,8 +216,14 @@ export function ProvidersTab() {
     }
   }
 
+  const filtered = providers.filter(p => {
+    if (!search.trim()) return true
+    const q = search.toLowerCase()
+    return p.id.toLowerCase().includes(q) || p.name.toLowerCase().includes(q) || p.base_url.toLowerCase().includes(q)
+  })
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 anim-fade-in">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-base font-semibold" style={{ color: 'var(--text)' }}>Provider 管理</h2>
         <div className="flex items-center gap-2 flex-wrap">
@@ -213,7 +239,7 @@ export function ProvidersTab() {
       </div>
 
       {msg && (
-        <p className="text-sm font-mono" style={{ color: msg.startsWith('错误') ? 'var(--error)' : 'var(--ok)' }}>
+        <p className="text-sm font-mono anim-slide-in-down" style={{ color: msg.startsWith('错误') ? 'var(--error)' : 'var(--ok)' }}>
           {msg}
         </p>
       )}
@@ -227,17 +253,18 @@ export function ProvidersTab() {
               <th className="pb-2 pr-4 font-medium">Base URL</th>
               <th className="pb-2 pr-4 font-medium">模型</th>
               <th className="pb-2 pr-4 font-medium">Key</th>
-              <th className="pb-2 pr-4 font-medium">状态</th>
+              <th className="pb-2 pr-3 font-medium">启用</th>
+              <th className="pb-2 pr-4 font-medium">检测</th>
               <th className="pb-2 font-medium">操作</th>
             </tr>
           </thead>
           <tbody>
-            {providers.filter(p => {
-              if (!search.trim()) return true
-              const q = search.toLowerCase()
-              return p.id.toLowerCase().includes(q) || p.name.toLowerCase().includes(q) || p.base_url.toLowerCase().includes(q)
-            }).map(p => (
-              <tr key={p.id} className="transition-colors" style={{ borderBottom: '1px solid var(--border)' }}>
+            {filtered.map((p, i) => (
+              <tr
+                key={p.id}
+                className="transition-colors anim-fade-in-up"
+                style={{ borderBottom: '1px solid var(--border)', animationDelay: `${i * 30}ms` }}
+              >
                 <td className="py-3 pr-4">
                   <div className="font-mono text-xs" style={{ color: 'var(--muted)' }}>{p.id}</div>
                   <div style={{ color: 'var(--text)' }}>{p.name}</div>
@@ -256,8 +283,11 @@ export function ProvidersTab() {
                     ? <span className="text-xs" style={{ color: 'var(--ok)' }}>●</span>
                     : <span className="text-xs" style={{ color: 'var(--muted)', opacity: .4 }}>—</span>}
                 </td>
-                <td className="py-3 pr-4">
+                <td className="py-3 pr-3">
                   <Badge status={p.enabled ? 'ok' : 'error'} />
+                </td>
+                <td className="py-3 pr-4">
+                  <Badge status={!p.enabled ? 'canceled' : p.probe_enabled ? 'ok' : 'paused'} />
                 </td>
                 <td className="py-3">
                   <div className="flex items-center gap-1">
@@ -287,7 +317,7 @@ export function ProvidersTab() {
             ))}
             {!loading && providers.length === 0 && (
               <tr>
-                <td colSpan={7} className="py-12 text-center" style={{ color: 'var(--muted)', opacity: .5 }}>暂无 Provider</td>
+                <td colSpan={8} className="py-12 text-center" style={{ color: 'var(--muted)', opacity: .5 }}>暂无 Provider</td>
               </tr>
             )}
           </tbody>

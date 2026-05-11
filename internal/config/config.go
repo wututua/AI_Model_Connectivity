@@ -50,13 +50,14 @@ type Config struct {
 }
 
 type ProviderConfig struct {
-	ID      string   `json:"id"`
-	Name    string   `json:"name"`
-	Type    string   `json:"type"`
-	BaseURL string   `json:"base_url"`
-	APIKey  string   `json:"api_key,omitempty"`
-	Models  []string `json:"models"`
-	Enabled bool     `json:"enabled"`
+	ID           string   `json:"id"`
+	Name         string   `json:"name"`
+	Type         string   `json:"type"`
+	BaseURL      string   `json:"base_url"`
+	APIKey       string   `json:"api_key,omitempty"`
+	Models       []string `json:"models"`
+	Enabled      bool     `json:"enabled"`
+	ProbeEnabled bool     `json:"probe_enabled"`
 }
 
 func Load(path string) (Config, error) {
@@ -194,13 +195,14 @@ func loadProviders(values map[string]string) []ProviderConfig {
 		}
 		providerType := strings.ToLower(getString(values, prefix+"TYPE", "openai"))
 		providers = append(providers, ProviderConfig{
-			ID:      id,
-			Name:    name,
-			Type:    providerType,
-			BaseURL: baseURL,
-			APIKey:  apiKey,
-			Models:  models,
-			Enabled: getBool(values, prefix+"ENABLED", true),
+			ID:           id,
+			Name:         name,
+			Type:         providerType,
+			BaseURL:      baseURL,
+			APIKey:       apiKey,
+			Models:       models,
+			Enabled:      getBool(values, prefix+"ENABLED", true),
+			ProbeEnabled: getBool(values, prefix+"PROBE_ENABLED", true),
 		})
 	}
 	return providers

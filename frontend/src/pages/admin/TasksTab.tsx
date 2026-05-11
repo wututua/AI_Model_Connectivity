@@ -24,7 +24,7 @@ export function TasksTab() {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 anim-fade-in">
       <div className="flex items-center justify-between">
         <h2 className="text-base font-semibold" style={{ color: 'var(--text)' }}>检测历史</h2>
         <div className="flex items-center gap-2">

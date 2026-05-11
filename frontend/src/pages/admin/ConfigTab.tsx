@@ -56,7 +56,7 @@ export function ConfigTab() {
 
       {msg && <p className="text-sm font-mono" style={{ color: msg.startsWith('错误') ? 'var(--error)' : 'var(--ok)' }}>{msg}</p>}
 
-      <section className="glass rounded-[22px] p-5 space-y-3">
+      <section className="glass rounded-[22px] p-5 space-y-3 anim-scale-in" style={{ animationDelay: '40ms' }}>
         <h3 className="text-sm font-medium" style={{ color: 'var(--text)' }}>导出配置</h3>
         <p className="text-xs" style={{ color: 'var(--muted)' }}>下载当前设置和 Provider 列表（不含 API Key）为 JSON 文件</p>
         <Btn onClick={doExport} loading={loading === 'export'} variant="default">
@@ -71,7 +71,7 @@ export function ConfigTab() {
         )}
       </section>
 
-      <section className="glass rounded-[22px] p-5 space-y-3">
+      <section className="glass rounded-[22px] p-5 space-y-3 anim-scale-in" style={{ animationDelay: '110ms' }}>
         <h3 className="text-sm font-medium" style={{ color: 'var(--text)' }}>导入配置</h3>
         <p className="text-xs" style={{ color: 'var(--muted)' }}>粘贴 JSON 配置并导入；已有 API Key 将自动保留</p>
         <textarea
@@ -85,7 +85,7 @@ export function ConfigTab() {
         </Btn>
       </section>
 
-      <section className="glass rounded-[22px] p-5 space-y-3">
+      <section className="glass rounded-[22px] p-5 space-y-3 anim-scale-in" style={{ animationDelay: '180ms' }}>
         <h3 className="text-sm font-medium" style={{ color: 'var(--text)' }}>热加载 .env</h3>
         <p className="text-xs" style={{ color: 'var(--muted)' }}>重新读取 .env 文件并热加载配置，不重启服务</p>
         <Btn onClick={doReload} loading={loading === 'reload'} variant="default">

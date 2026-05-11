@@ -186,15 +186,17 @@ export default function Admin() {
       <div className="flex flex-1 max-w-[1180px] mx-auto w-full px-4 pt-[80px] pb-6 gap-6">
         <aside className="w-44 shrink-0 hidden sm:block">
           <nav className="space-y-0.5">
-            {TABS.map(t => (
+            {TABS.map((t, i) => (
               <button
                 key={t.id}
                 onClick={() => setTab(t.id)}
-                className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-sm transition-colors cursor-pointer"
-                style={tab === t.id
-                  ? { background: 'rgba(56,217,150,.12)', color: 'var(--ok)', fontWeight: 600 }
-                  : { color: 'var(--muted)' }
-                }
+                className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-sm transition-colors cursor-pointer anim-slide-in-left"
+                style={{
+                  ...(tab === t.id
+                    ? { background: 'rgba(56,217,150,.12)', color: 'var(--ok)', fontWeight: 600 }
+                    : { color: 'var(--muted)' }),
+                  animationDelay: `${i * 45}ms`,
+                }}
                 onMouseEnter={e => { if (tab !== t.id) (e.currentTarget as HTMLElement).style.color = 'var(--text)' }}
                 onMouseLeave={e => { if (tab !== t.id) (e.currentTarget as HTMLElement).style.color = 'var(--muted)' }}
               >
@@ -206,15 +208,17 @@ export default function Admin() {
 
         <div className="sm:hidden w-full">
           <div className="flex overflow-x-auto gap-1 pb-3 mb-4" style={{ borderBottom: '1px solid var(--border)' }}>
-            {TABS.map(t => (
+            {TABS.map((t, i) => (
               <button
                 key={t.id}
                 onClick={() => setTab(t.id)}
-                className="flex-none flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs whitespace-nowrap transition-colors cursor-pointer"
-                style={tab === t.id
-                  ? { background: 'rgba(56,217,150,.12)', color: 'var(--ok)', fontWeight: 600 }
-                  : { background: 'var(--card)', color: 'var(--muted)' }
-                }
+                className="flex-none flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs whitespace-nowrap transition-colors cursor-pointer anim-slide-in-down"
+                style={{
+                  ...(tab === t.id
+                    ? { background: 'rgba(56,217,150,.12)', color: 'var(--ok)', fontWeight: 600 }
+                    : { background: 'var(--card)', color: 'var(--muted)' }),
+                  animationDelay: `${i * 40}ms`,
+                }}
               >
                 {t.label}
               </button>
@@ -222,7 +226,7 @@ export default function Admin() {
           </div>
         </div>
 
-        <main className="flex-1 min-w-0">
+        <main key={tab} className="flex-1 min-w-0 anim-slide-in-right">
           {tab === 'overview'  && <OverviewTab />}
           {tab === 'providers' && <ProvidersTab />}
           {tab === 'settings'  && <SettingsTab />}

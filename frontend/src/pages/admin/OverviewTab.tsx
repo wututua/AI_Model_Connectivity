@@ -42,14 +42,14 @@ export function OverviewTab() {
 
   return (
     <div className="space-y-5">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between anim-fade-in-up" style={{ animationDelay: '0ms' }}>
         <h2 className="text-base font-semibold" style={{ color: 'var(--text)' }}>检测控制</h2>
         <Btn onClick={load} loading={loading} variant="ghost"><RefreshCw className="w-3.5 h-3.5" />刷新</Btn>
       </div>
 
       {state && (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div className="glass rounded-[22px] p-4">
+          <div className="glass rounded-[22px] p-4 anim-fade-in-up" style={{ animationDelay: '60ms' }}>
             <p className="text-xs mb-2" style={{ color: 'var(--muted)' }}>当前状态</p>
             <div className="flex items-center gap-2">
               {state.running
@@ -64,7 +64,7 @@ export function OverviewTab() {
             )}
           </div>
 
-          <div className="glass rounded-[22px] p-4">
+          <div className="glass rounded-[22px] p-4 anim-fade-in-up" style={{ animationDelay: '100ms' }}>
             <p className="text-xs mb-2" style={{ color: 'var(--muted)' }}>自动检测</p>
             <p className="font-mono text-sm" style={{ color: 'var(--text)' }}>
               {state.auto_check_interval_min_hours <= 0 && state.auto_check_interval_max_hours <= 0
@@ -76,7 +76,7 @@ export function OverviewTab() {
         </div>
       )}
 
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap gap-2 anim-fade-in-up" style={{ animationDelay: '140ms' }}>
         <Btn
           variant="primary"
           loading={actionLoading}
