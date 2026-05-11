@@ -44,7 +44,11 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 
 export const api = {
   status: (): Promise<Report> =>
-    fetch('/api/status').then(r => r.json() as Promise<Report>),
+    fetch('/api/status').then(async r => {
+      const data = await r.json()
+      if (!r.ok) throw new Error((data as { error?: string }).error ?? `HTTP ${r.status}`)
+      return data as Report
+    }),
 
   detection: (): Promise<RunningState> =>
     request<RunningState>('GET', '/api/admin/detection'),

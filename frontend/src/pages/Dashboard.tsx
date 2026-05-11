@@ -206,7 +206,7 @@ export default function Dashboard() {
                 >
                   {report.overall_status}
                 </span>
-                <StatusPill status={report.overall_class} label={report.overall_class.toUpperCase()} large />
+                <StatusPill status={report.overall_class} label={(report.overall_class ?? '').toUpperCase()} large />
               </div>
               {(() => {
                 const { text: timeText, stale } = relativeTime(report.generated_at)
