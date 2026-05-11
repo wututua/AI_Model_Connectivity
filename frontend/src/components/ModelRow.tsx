@@ -15,7 +15,7 @@ export function ModelRow({ result, showError, compact }: { result: ModelResult; 
     : '0 0 6px rgba(255,107,122,.9)'
   const [hovered, setHovered] = useState(false)
   const [expanded, setExpanded] = useState(false)
-  const hasDetail = !!(result.error || result.response_preview)
+  const hasDetail = !!result.error
 
   if (compact) {
     return (
@@ -84,11 +84,7 @@ export function ModelRow({ result, showError, compact }: { result: ModelResult; 
             {result.error}
           </p>
         )}
-        {result.response_preview && !result.error && (
-          <p className={`mt-1.5 text-xs font-mono ${expanded ? 'whitespace-pre-wrap break-all' : 'truncate'}`} style={{ color: 'var(--muted)' }}>
-            {result.response_preview}
-          </p>
-        )}
+
         {hasDetail && !expanded && (
           <p className="text-[10px] mt-1" style={{ color: 'var(--muted)', opacity: .5 }}>点击展开详情</p>
         )}
