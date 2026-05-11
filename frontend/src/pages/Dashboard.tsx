@@ -300,18 +300,50 @@ export default function Dashboard() {
     fetchReport()
 
     if (!window.EventSource) {
-      const id = setInterval(fetchReport, 30_000)
-      return () => clearInterval(id)
+      // No SSE support: exponential backoff polling (30s → 60s → 120s)
+      let delay = 30_000
+      let timerId: ReturnType<typeof setTimeout>
+      const poll = () => {
+        fetchReport()
+        delay = Math.min(delay * 2, 120_000)
+        timerId = setTimeout(poll, delay)
+      }
+      timerId = setTimeout(poll, delay)
+      return () => clearTimeout(timerId)
     }
 
-    const es = new EventSource('/api/events')
-    es.onmessage = e => {
-      setReport(JSON.parse(e.data) as Report)
-      setError(null)
-      setLive(true)
+    // SSE with exponential backoff reconnect on error
+    let es: EventSource | null = null
+    let reconnectDelay = 30_000
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+    let closed = false
+
+    const connect = () => {
+      es = new EventSource('/api/events')
+      es.onmessage = e => {
+        setReport(JSON.parse(e.data) as Report)
+        setError(null)
+        setLive(true)
+        reconnectDelay = 30_000
+      }
+      es.onerror = () => {
+        setLive(false)
+        es?.close()
+        if (!closed) {
+          reconnectTimer = setTimeout(() => {
+            reconnectDelay = Math.min(reconnectDelay * 2, 120_000)
+            connect()
+          }, reconnectDelay)
+        }
+      }
     }
-    es.onerror = () => setLive(false)
-    return () => es.close()
+
+    connect()
+    return () => {
+      closed = true
+      if (reconnectTimer) clearTimeout(reconnectTimer)
+      es?.close()
+    }
   }, [fetchReport])
 
   const sc = report ? statusClass(report.overall_class) : null
