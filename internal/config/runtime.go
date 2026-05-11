@@ -2,6 +2,9 @@ package config
 
 import (
 	"errors"
+	"fmt"
+	"net"
+	"net/url"
 	"strings"
 )
 
@@ -230,6 +233,32 @@ func ValidateProviders(providers []ProviderConfig) error {
 			return errors.New("provider id must be unique")
 		}
 		seen[key] = true
+		if provider.BaseURL != "" {
+			if err := validateProviderURL(provider.BaseURL); err != nil {
+				return fmt.Errorf("provider %q: %w", id, err)
+			}
+		}
+	}
+	return nil
+}
+
+// validateProviderURL rejects non-http(s) schemes and link-local addresses
+// (169.254.x.x) that are commonly used as cloud instance metadata endpoints.
+// Localhost and RFC-1918 ranges are intentionally allowed for self-hosted use.
+func validateProviderURL(rawURL string) error {
+	u, err := url.ParseRequestURI(rawURL)
+	if err != nil {
+		return fmt.Errorf("invalid base_url: %w", err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("base_url scheme must be http or https, got %q", u.Scheme)
+	}
+	host := u.Hostname()
+	if ip := net.ParseIP(host); ip != nil {
+		// Block link-local (169.254.0.0/16) — cloud metadata SSRF vector
+		if ip.IsLinkLocalUnicast() {
+			return fmt.Errorf("base_url resolves to a link-local address which is not allowed")
+		}
 	}
 	return nil
 }
