@@ -7,11 +7,14 @@
 - 检测 `/v1/chat/completions` 和 `/v1/models` 接口
 - 支持多个 Provider 和多个模型，双层并发控制（全局 + 单 Provider）
 - 三态展示：正常、较慢、异常；记录历史、24h 平均延迟和统计窗口可用率
-- SSE 实时推送，仪表盘自动刷新；无实时推送时自动降级为 30 秒轮询
+- SSE 实时推送，仪表盘自动刷新；无实时推送时自动降级为指数退避轮询（30s → 60s → 120s）
 - 自动剥离响应中的 `<think>` / `<thinking>` 思考标签，兼容 DeepSeek-R1、QwQ 等推理模型
-- 仪表盘展示每次历史检测的圆形 LED 状态灯及每个模型的当前检测状态指示灯
+- 仪表盘全局搜索 + 状态过滤（正常 / 较慢 / 异常），多维排序（状态 / 名称 / 延迟 / 模型数），简洁 / 详细卡片视图切换
+- 仪表盘展示每次历史检测的圆形 LED 状态灯、每个模型的当前检测状态指示灯及延迟曲线
 - Web 管理面板：在浏览器中动态增删 Provider、调整检测参数、查看任务历史、导入导出配置；内置 Token 消耗估算
+- 每个 Provider 独立检测开关（`probe_enabled`）：可保留配置但暂停探测，不影响仪表盘展示
 - 支持 Telegram、Discord、Bark、企业微信、钉钉和通用 Webhook 告警通知
+- 主题跟随系统 / 深色 / 浅色三态切换，支持滚动自动隐藏顶栏
 
 ## 快速开始
 
@@ -37,13 +40,30 @@ curl -X POST http://127.0.0.1:8080/api/admin/check
 
 | 标签页 | 功能 |
 |--------|------|
-| 检测控制 | 查看运行状态、手动触发检测、停止检测；Token 消耗估算 |
-| Provider | 新增、编辑、删除、单独重跑 Provider |
+| 检测控制 | 查看运行状态、手动触发检测、停止检测；查看上次检测摘要；Token 消耗估算 |
+| Provider | 新增、编辑、删除、单独重跑 Provider；独立检测开关控制 |
 | 设置 | 修改检测参数、历史配置、告警通知 |
 | 任务历史 | 分页查看历史检测任务及结果 |
 | 配置管理 | 导出/导入 JSON 配置、热加载 `.env` |
 
 ## 部署
+
+### Docker（推荐）
+
+```bash
+# 构建镜像
+docker build -t model-connectivity .
+
+# 运行（挂载数据目录和配置文件）
+docker run -d \
+  --name model-connectivity \
+  -p 8080:8080 \
+  -v $(pwd)/data:/app/data \
+  -v $(pwd)/.env:/app/.env \
+  model-connectivity
+```
+
+镜像采用三阶段构建：Node 20 构建前端 → Go 编译后端 → distroless/static 最小运行时（非 root），最终镜像不含 shell 和包管理器。
 
 ### 二进制部署
 
@@ -59,6 +79,15 @@ cd frontend && npm install && npm run build && cd ..
 
 go run ./cmd/cg          # 持续服务模式
 go run ./cmd/cg check    # 只运行一次检测后退出
+```
+
+也可以使用 Makefile：
+
+```bash
+make dev       # 后端热更新（需安装 air）
+make build     # 完整构建（含前端）
+make test      # 运行全部测试
+make lint      # 运行 golangci-lint
 ```
 
 ### 前端开发模式
@@ -117,7 +146,7 @@ cd frontend && npm run dev
 | `HISTORY_SIZE` | `30` | 历史条长度（仪表盘展示） |
 | `MAX_HISTORY_RECORDS` | `500` | 每个模型在数据库中最多保留的记录数 |
 | `SHOW_ERROR_DETAIL` | `true` | 显示错误详情 |
-| `THEME_MODE` | `auto` | 主题模式：`auto`、`dark`、`light` |
+| `THEME_MODE` | `auto` | 主题初始模式：`auto`、`dark`、`light`；前端可实时切换 |
 | `DAY_MODE_START_HOUR` | `8` | `auto` 主题下亮色模式起始小时（0–23） |
 | `DAY_MODE_END_HOUR` | `18` | `auto` 主题下亮色模式结束小时（0–23） |
 
@@ -173,6 +202,7 @@ PROVIDER_1_BASE_URL=https://api.openai.com/v1
 PROVIDER_1_API_KEY=sk-xxx
 PROVIDER_1_MODELS=gpt-4o-mini,gpt-4.1-mini
 PROVIDER_1_ENABLED=true
+PROVIDER_1_PROBE_ENABLED=true
 
 PROVIDER_2_ID=ollama-local
 PROVIDER_2_NAME=Ollama
@@ -181,9 +211,21 @@ PROVIDER_2_BASE_URL=http://127.0.0.1:11434/v1
 PROVIDER_2_API_KEY=
 PROVIDER_2_MODELS=llama3.1
 PROVIDER_2_ENABLED=true
+PROVIDER_2_PROBE_ENABLED=true
 ```
 
-`PROVIDER_N_MODELS` 留空时，自动请求 `{BASE_URL}/models` 获取模型列表。
+| 字段 | 说明 |
+|------|------|
+| `PROVIDER_N_ID` | 唯一标识，用于 API 和告警过滤 |
+| `PROVIDER_N_NAME` | 显示名称 |
+| `PROVIDER_N_TYPE` | 类型，用于自动匹配图标 |
+| `PROVIDER_N_BASE_URL` | API 根地址，须以 `http://` 或 `https://` 开头 |
+| `PROVIDER_N_API_KEY` | API Key，留空表示无需鉴权 |
+| `PROVIDER_N_MODELS` | 模型列表，逗号分隔；留空时自动请求 `{BASE_URL}/models` 获取 |
+| `PROVIDER_N_ENABLED` | `true` 启用，`false` 完全禁用（不展示、不探测） |
+| `PROVIDER_N_PROBE_ENABLED` | `true` 参与探测（默认），`false` 保留配置但不发送探测请求 |
+
+`ENABLED=false` 会将 Provider 从仪表盘和探测中完全移除；`PROBE_ENABLED=false`（`ENABLED=true`）则保留仪表盘展示但跳过探测，适合临时暂停某个 Provider 的检测而不删除配置。
 
 Provider 也可以在管理面板的 **Provider** 标签页中通过界面增删，无需重启服务。
 
@@ -251,6 +293,7 @@ data/cg.sqlite
 
 - 该项目会真实调用模型接口并消耗 token，建议适当拉长检测间隔。
 - **公开部署（监听 `0.0.0.0` / `::`）时必须设置 `ADMIN_TOKEN`**，否则任何人均可触发检测或修改配置。
+- Provider `base_url` 会校验 scheme（须为 `http://` 或 `https://`）并拦截链路本地地址，防止 SSRF。
 
 ## License
 
