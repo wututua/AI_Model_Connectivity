@@ -3,6 +3,7 @@ package report
 import (
 	"fmt"
 	"math"
+	"strings"
 	"time"
 
 	"cg/internal/config"
@@ -272,18 +273,18 @@ func generateSVGPath(latencies []int, width, height int) string {
 		return fmt.Sprintf("M 0,%.1f L %d,%.1f", y, width, y)
 	}
 	step := float64(width) / float64(len(latencies)-1)
-	path := ""
 	prevX, prevY := 0.0, float64(height)-float64(latencies[0])/float64(maxLat)*float64(height)
-	path = fmt.Sprintf("M %.1f,%.1f", prevX, prevY)
+	var buf strings.Builder
+	buf.WriteString(fmt.Sprintf("M %.1f,%.1f", prevX, prevY))
 	for i := 1; i < len(latencies); i++ {
 		x := float64(i) * step
 		y := float64(height) - float64(latencies[i])/float64(maxLat)*float64(height)
 		cx1 := prevX + step/2
 		cx2 := x - step/2
-		path += fmt.Sprintf(" C %.1f,%.1f %.1f,%.1f %.1f,%.1f", cx1, prevY, cx2, y, x, y)
+		buf.WriteString(fmt.Sprintf(" C %.1f,%.1f %.1f,%.1f %.1f,%.1f", cx1, prevY, cx2, y, x, y))
 		prevX, prevY = x, y
 	}
-	return path
+	return buf.String()
 }
 
 func historyTimeLabels(records []HistoryRecord, size int) []string {

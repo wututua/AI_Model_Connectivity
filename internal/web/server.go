@@ -152,15 +152,23 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 		writeSSE(w, flusher, value)
 	}
 
-	keepAlive := time.NewTicker(25 * time.Second)
+	keepAlive := time.NewTimer(25 * time.Second)
 	defer keepAlive.Stop()
 	for {
 		select {
 		case value := <-ch:
 			writeSSE(w, flusher, value)
+			if !keepAlive.Stop() {
+				select {
+				case <-keepAlive.C:
+				default:
+				}
+			}
+			keepAlive.Reset(25 * time.Second)
 		case <-keepAlive.C:
 			_, _ = fmt.Fprint(w, ": keep-alive\n\n")
 			flusher.Flush()
+			keepAlive.Reset(25 * time.Second)
 		case <-r.Context().Done():
 			return
 		}

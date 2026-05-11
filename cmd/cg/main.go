@@ -125,7 +125,7 @@ type application struct {
 	store          *storage.SQLiteStore
 	broker         *web.Broker
 	schedulerWake  chan struct{}
-	mu             sync.Mutex
+	mu             sync.RWMutex
 	running        bool
 	runCancel      context.CancelFunc
 	taskID         int64
@@ -158,8 +158,8 @@ func (a *application) StopCheck() bool {
 }
 
 func (a *application) RunningState() web.RunningState {
-	a.mu.Lock()
-	defer a.mu.Unlock()
+	a.mu.RLock()
+	defer a.mu.RUnlock()
 	cfg := a.cfg
 	return web.RunningState{
 		Running:                   a.running,
@@ -297,8 +297,8 @@ func (a *application) GetTask(ctx context.Context, id int64) (storage.CheckTask,
 }
 
 func (a *application) currentConfig() config.Config {
-	a.mu.Lock()
-	defer a.mu.Unlock()
+	a.mu.RLock()
+	defer a.mu.RUnlock()
 	return a.cfg
 }
 
