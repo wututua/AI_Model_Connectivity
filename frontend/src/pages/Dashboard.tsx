@@ -5,6 +5,7 @@ import type { Report, ProviderReport } from '../types'
 import { api } from '../api'
 import { useTheme } from '../hooks/useTheme'
 import { useScrollNav } from '../hooks/useScrollNav'
+import { useNavTransition } from '../hooks/useNavTransition'
 import { relativeTime, statusClass } from '../utils/status'
 import { StatusPill } from '../components/StatusPill'
 import { ProviderCard } from '../components/ProviderCard'
@@ -23,6 +24,7 @@ export default function Dashboard() {
   const [viewMode, setViewMode] = useState<'detailed' | 'compact'>('detailed')
   const { theme, toggle: toggleTheme } = useTheme()
   const navVisible = useScrollNav()
+  const navTo = useNavTransition()
 
   const fetchReport = useCallback(() =>
     api.status()
@@ -174,6 +176,7 @@ export default function Dashboard() {
             </button>
             <Link
               to="/admin"
+              onClick={e => { e.preventDefault(); navTo('/admin') }}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm transition-colors cursor-pointer glass ml-1"
               style={navBtnStyle}
               onMouseEnter={navBtnHover}
@@ -359,6 +362,7 @@ export default function Dashboard() {
             <p className="text-sm font-mono mb-4" style={{ color: 'var(--error)', opacity: .7 }}>{error}</p>
             <Link
               to="/admin"
+              onClick={e => { e.preventDefault(); navTo('/admin') }}
               className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-colors cursor-pointer glass"
               style={{ color: 'var(--ok)', border: '1px solid rgba(56,217,150,.35)' }}
             >
@@ -371,6 +375,7 @@ export default function Dashboard() {
             <p className="mb-4">暂无数据</p>
             <Link
               to="/admin"
+              onClick={e => { e.preventDefault(); navTo('/admin') }}
               className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-colors cursor-pointer glass"
               style={{ color: 'var(--ok)', border: '1px solid rgba(56,217,150,.35)' }}
             >

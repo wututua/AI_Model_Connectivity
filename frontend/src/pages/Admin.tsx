@@ -7,6 +7,7 @@ import {
 import { api, getToken, setToken } from '../api'
 import { useTheme } from '../hooks/useTheme'
 import { useScrollNav } from '../hooks/useScrollNav'
+import { useNavTransition } from '../hooks/useNavTransition'
 import { Btn, inputCls } from './admin/shared'
 import { OverviewTab } from './admin/OverviewTab'
 import { ProvidersTab } from './admin/ProvidersTab'
@@ -22,6 +23,7 @@ function TokenGate({ onEnter }: { onEnter: () => void }) {
   const [err, setErr] = useState('')
   const [loading, setLoading] = useState(false)
   const [tokenRequired, setTokenRequired] = useState(false)
+  const navTo = useNavTransition()
 
   const submit = async () => {
     const token = value.trim()
@@ -89,7 +91,7 @@ function TokenGate({ onEnter }: { onEnter: () => void }) {
           </Btn>
         </div>
         <div className="text-center mt-4">
-          <Link to="/" className="text-xs transition-colors cursor-pointer" style={{ color: 'var(--muted)', opacity: .6 }}>
+          <Link to="/" onClick={e => { e.preventDefault(); navTo('/') }} className="text-xs transition-colors cursor-pointer" style={{ color: 'var(--muted)', opacity: .6 }}>
             返回仪表盘
           </Link>
         </div>
@@ -113,6 +115,7 @@ const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
 export default function Admin() {
   const { theme, toggle: toggleTheme } = useTheme()
   const navVisible = useScrollNav()
+  const navTo = useNavTransition()
   const [authed, setAuthed] = useState(false)
   const [verifying, setVerifying] = useState(!!getToken())
   const [tab, setTab] = useState<Tab>('overview')
@@ -151,6 +154,7 @@ export default function Admin() {
           <div className="flex items-center gap-1">
             <Link
               to="/"
+              onClick={e => { e.preventDefault(); navTo('/') }}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm transition-colors cursor-pointer"
               style={{ color: 'var(--muted)' }}
               onMouseEnter={e => (e.currentTarget.style.color = 'var(--text)')}

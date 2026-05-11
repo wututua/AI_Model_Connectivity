@@ -245,19 +245,31 @@ body[data-theme="light"] {
   }
 }
 
-/* ── View Transitions (theme switch) ──────────────────────────────── */
+/* ── View Transitions (theme switch + page navigation) ────────────── */
 
 /*
- * View Transitions API captures the page as a screenshot before and after
- * the theme switch, then cross-fades between them entirely at compositor
- * level — no live CSS repaint on backdrop-filter elements per frame.
- * Browsers without support fall back to instant switch (no jank either).
+ * Shared by two scenarios:
+ *   1. Theme switch  — useTheme cycle() wraps applyTheme in startViewTransition
+ *   2. Page navigation — React Router unstable_viewTransition on <Link>
+ *
+ * Old snapshot fades out; new snapshot slides up slightly (10px → 0) for
+ * a sense of forward movement. Screenshots are already composited, so
+ * backdrop-filter glass elements incur no per-frame repaint cost.
  */
-::view-transition-old(root),
+::view-transition-old(root) {
+  animation: vt-fade-out 0.2s ease-out both;
+}
 ::view-transition-new(root) {
-  animation-duration: 0.22s;
-  animation-timing-function: ease-out;
-  mix-blend-mode: normal;
+  animation: vt-slide-in 0.25s cubic-bezier(.25,.46,.45,.94) both;
+}
+
+@keyframes vt-fade-out {
+  from { opacity: 1; }
+  to   { opacity: 0; }
+}
+@keyframes vt-slide-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {
