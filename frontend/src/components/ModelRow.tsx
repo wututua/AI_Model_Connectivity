@@ -15,7 +15,7 @@ export function ModelRow({ result, showError, compact }: { result: ModelResult; 
     : '0 0 6px rgba(255,107,122,.9)'
   const [hovered, setHovered] = useState(false)
   const [expanded, setExpanded] = useState(false)
-  const hasDetail = !!(result.error || result.response_preview)
+  const hasDetail = !!result.error
 
   if (compact) {
     return (
@@ -84,18 +84,14 @@ export function ModelRow({ result, showError, compact }: { result: ModelResult; 
             {result.error}
           </p>
         )}
-        {result.response_preview && !result.error && (
-          <p className={`mt-1.5 text-xs font-mono ${expanded ? 'whitespace-pre-wrap break-all' : 'truncate'}`} style={{ color: 'var(--muted)' }}>
-            {result.response_preview}
-          </p>
-        )}
+
         {hasDetail && !expanded && (
           <p className="text-[10px] mt-1" style={{ color: 'var(--muted)', opacity: .5 }}>点击展开详情</p>
         )}
 
-        <div className="flex flex-wrap items-center gap-4 mt-2 text-[11px] font-mono" style={{ color: 'var(--muted)', opacity: .75 }}>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-2 text-[11px] font-mono" style={{ color: 'var(--muted)', opacity: .75 }}>
           <span>24h均值 {result.avg_latency_24h}</span>
-          <span>{result.weekly_success_text}</span>
+          <span className="hidden sm:inline">{result.weekly_success_text}</span>
           <span>可用率 {result.availability}</span>
         </div>
 

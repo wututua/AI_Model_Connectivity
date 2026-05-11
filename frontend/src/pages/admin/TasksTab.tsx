@@ -47,11 +47,11 @@ export function TasksTab() {
         <table className="w-full text-sm">
           <thead>
             <tr className="text-xs text-left" style={{ borderBottom: '1px solid var(--border)', color: 'var(--muted)' }}>
-              <th className="pb-2 pr-3 font-medium">ID</th>
+              <th className="pb-2 pr-3 font-medium hidden sm:table-cell">ID</th>
               <th className="pb-2 pr-3 font-medium">类型</th>
               <th className="pb-2 pr-3 font-medium">状态</th>
               <th className="pb-2 pr-3 font-medium">开始时间</th>
-              <th className="pb-2 pr-3 font-medium">耗时</th>
+              <th className="pb-2 pr-3 font-medium hidden sm:table-cell">耗时</th>
               <th className="pb-2 font-medium">结果</th>
             </tr>
           </thead>
@@ -64,7 +64,7 @@ export function TasksTab() {
                 onMouseEnter={e => (e.currentTarget.style.background = 'var(--row-hover)')}
                 onMouseLeave={e => (e.currentTarget.style.background = '')}
               >
-                <td className="py-2.5 pr-3 font-mono text-xs" style={{ color: 'var(--muted)' }}>#{t.id}</td>
+                <td className="py-2.5 pr-3 font-mono text-xs hidden sm:table-cell" style={{ color: 'var(--muted)' }}>#{t.id}</td>
                 <td className="py-2.5 pr-3 text-xs">
                   <span style={{ color: 'var(--text)' }}>{kindLabel[t.kind] ?? t.kind}</span>
                   {t.provider_id && <span className="font-mono ml-1" style={{ color: 'var(--muted)', opacity: .7 }}>{t.provider_id}</span>}
@@ -76,9 +76,14 @@ export function TasksTab() {
                   )}
                 </td>
                 <td className="py-2.5 pr-3 font-mono text-xs" style={{ color: 'var(--muted)' }}>
-                  {t.started_at ? new Date(t.started_at).toLocaleString('zh-CN') : '—'}
+                  {t.started_at ? (
+                    <>
+                      <span className="hidden sm:inline">{new Date(t.started_at).toLocaleString('zh-CN')}</span>
+                      <span className="sm:hidden">{new Date(t.started_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</span>
+                    </>
+                  ) : '—'}
                 </td>
-                <td className="py-2.5 pr-3 font-mono text-xs" style={{ color: 'var(--muted)' }}>
+                <td className="py-2.5 pr-3 font-mono text-xs hidden sm:table-cell" style={{ color: 'var(--muted)' }}>
                   {t.elapsed_ms ? `${(t.elapsed_ms / 1000).toFixed(1)}s` : '—'}
                 </td>
                 <td className="py-2.5 text-xs font-mono">

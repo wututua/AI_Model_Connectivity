@@ -5,6 +5,7 @@ import type { Report, ProviderReport } from '../types'
 import { api } from '../api'
 import { useTheme } from '../hooks/useTheme'
 import { useScrollNav } from '../hooks/useScrollNav'
+import { useNavTransition } from '../hooks/useNavTransition'
 import { relativeTime, statusClass } from '../utils/status'
 import { StatusPill } from '../components/StatusPill'
 import { ProviderCard } from '../components/ProviderCard'
@@ -23,6 +24,7 @@ export default function Dashboard() {
   const [viewMode, setViewMode] = useState<'detailed' | 'compact'>('detailed')
   const { theme, toggle: toggleTheme } = useTheme()
   const navVisible = useScrollNav()
+  const navTo = useNavTransition()
 
   const fetchReport = useCallback(() =>
     api.status()
@@ -174,6 +176,7 @@ export default function Dashboard() {
             </button>
             <Link
               to="/admin"
+              onClick={e => { e.preventDefault(); navTo('/admin') }}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm transition-colors cursor-pointer glass ml-1"
               style={navBtnStyle}
               onMouseEnter={navBtnHover}
@@ -191,7 +194,7 @@ export default function Dashboard() {
 
         {/* Hero banner */}
         {report && sc && (
-          <div className="glass rounded-[32px] px-8 py-6 flex flex-col sm:flex-row sm:items-center justify-between gap-6 anim-fade-in-up" style={{ animationDelay: '0ms' }}>
+          <div className="glass rounded-[28px] sm:rounded-[32px] px-4 py-5 sm:px-8 sm:py-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 sm:gap-6 anim-fade-in-up" style={{ animationDelay: '0ms' }}>
             <div>
               <p className="text-xs uppercase tracking-widest mb-2" style={{ color: 'var(--muted)', letterSpacing: '.16em' }}>
                 整体状态
@@ -210,7 +213,7 @@ export default function Dashboard() {
                 {' · '}并发 {report.global_concurrency}/{report.provider_concurrency}
               </p>
             </div>
-            <div className="text-right shrink-0 flex flex-col gap-3 sm:gap-4">
+            <div className="sm:text-right shrink-0 flex flex-row sm:flex-col gap-6 sm:gap-4">
               <div>
                 <p className="text-xs uppercase tracking-widest mb-1" style={{ color: 'var(--muted)', letterSpacing: '.12em' }}>检测耗时</p>
                 <p className="text-3xl font-mono font-bold" style={{ color: 'var(--text)' }}>
@@ -353,6 +356,7 @@ export default function Dashboard() {
             <p className="text-sm font-mono mb-4" style={{ color: 'var(--error)', opacity: .7 }}>{error}</p>
             <Link
               to="/admin"
+              onClick={e => { e.preventDefault(); navTo('/admin') }}
               className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-colors cursor-pointer glass"
               style={{ color: 'var(--ok)', border: '1px solid rgba(56,217,150,.35)' }}
             >
@@ -365,6 +369,7 @@ export default function Dashboard() {
             <p className="mb-4">暂无数据</p>
             <Link
               to="/admin"
+              onClick={e => { e.preventDefault(); navTo('/admin') }}
               className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-colors cursor-pointer glass"
               style={{ color: 'var(--ok)', border: '1px solid rgba(56,217,150,.35)' }}
             >
@@ -375,7 +380,7 @@ export default function Dashboard() {
       </main>
 
       <footer className="max-w-[1180px] mx-auto px-4 py-6 flex items-center justify-center">
-        <p className="text-[11px] font-mono" style={{ color: 'var(--muted)', opacity: .5 }}>
+        <p className="text-xs font-mono" style={{ color: 'var(--muted)', opacity: .5 }}>
           © {new Date().getFullYear()}&nbsp;
           <a
             href="https://github.com/wututua/AI_Model_Connectivity"
