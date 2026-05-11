@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import {
-  Activity, ArrowLeft, Eye, EyeOff,
+  Activity, ArrowLeft, Eye, EyeOff, KeyRound,
   Loader2, LogOut, Moon, Sun, Monitor, Settings, FileJson, Database, Clock,
 } from 'lucide-react'
 import { api, getToken, setToken } from '../api'
@@ -17,12 +17,88 @@ import { ConfigTab } from './admin/ConfigTab'
 
 // ── Token Gate ──────────────────────────────────────────────────────────────
 
+function ChangeTokenForm({ onDone }: { onDone: () => void }) {
+  const [value, setValue] = useState('')
+  const [confirm, setConfirm] = useState('')
+  const [showA, setShowA] = useState(false)
+  const [showB, setShowB] = useState(false)
+  const [err, setErr] = useState('')
+  const [loading, setLoading] = useState(false)
+
+  const submit = async () => {
+    const t = value.trim()
+    if (t.length < 6) { setErr('密钥至少 6 位'); return }
+    if (t !== confirm.trim()) { setErr('两次输入不一致'); return }
+    setLoading(true); setErr('')
+    try {
+      await api.changeToken(t)
+      setToken(t)
+      onDone()
+    } catch (e) {
+      setErr(`修改失败：${(e as Error).message}`)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const PasswordInput = ({ val, setVal, show, setShow, placeholder, autoFocus }: {
+    val: string; setVal: (v: string) => void
+    show: boolean; setShow: (v: boolean) => void
+    placeholder: string; autoFocus?: boolean
+  }) => (
+    <div className="relative">
+      <input
+        type={show ? 'text' : 'password'}
+        value={val}
+        onChange={e => { setVal(e.target.value); setErr('') }}
+        onKeyDown={e => e.key === 'Enter' && !loading && submit()}
+        placeholder={placeholder}
+        className={`${inputCls} pr-9`}
+        autoFocus={autoFocus}
+      />
+      <button onClick={() => setShow(!show)}
+        className="absolute right-2.5 top-1/2 -translate-y-1/2 cursor-pointer transition-colors"
+        style={{ color: 'var(--muted)' }}
+        onMouseEnter={e => (e.currentTarget.style.color = 'var(--text)')}
+        onMouseLeave={e => (e.currentTarget.style.color = 'var(--muted)')}
+      >
+        {show ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+      </button>
+    </div>
+  )
+
+  return (
+    <div className="min-h-screen flex items-center justify-center p-4">
+      <div className="w-full max-w-sm">
+        <div className="glass rounded-[28px] p-8">
+          <div className="flex items-center gap-2 mb-2">
+            <KeyRound className="w-5 h-5" style={{ color: 'var(--slow)' }} />
+            <span className="font-semibold" style={{ color: 'var(--text)' }}>首次登录，请修改密钥</span>
+          </div>
+          <p className="text-xs mb-6" style={{ color: 'var(--muted)' }}>
+            检测到当前密钥为系统自动生成，请立即设置一个新密钥后再使用管理面板。
+          </p>
+          <div className="space-y-3 mb-3">
+            <PasswordInput val={value} setVal={setValue} show={showA} setShow={setShowA} placeholder="新密钥（至少 6 位）" autoFocus />
+            <PasswordInput val={confirm} setVal={setConfirm} show={showB} setShow={setShowB} placeholder="再次输入新密钥" />
+          </div>
+          {err && <p className="text-xs mb-3" style={{ color: 'var(--error)' }}>{err}</p>}
+          <Btn variant="primary" onClick={submit} loading={loading} className="w-full justify-center">
+            确认修改并进入
+          </Btn>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function TokenGate({ onEnter }: { onEnter: () => void }) {
   const [value, setValue] = useState('')
   const [show, setShow] = useState(false)
   const [err, setErr] = useState('')
   const [loading, setLoading] = useState(false)
   const [tokenRequired, setTokenRequired] = useState(false)
+  const [firstUse, setFirstUse] = useState(false)
   const navTo = useNavTransition()
 
   const submit = async () => {
@@ -35,8 +111,12 @@ function TokenGate({ onEnter }: { onEnter: () => void }) {
     setErr('')
     setToken(token)
     try {
-      await api.detection()
-      onEnter()
+      const state = await api.detection()
+      if (state.first_use) {
+        setFirstUse(true)
+      } else {
+        onEnter()
+      }
     } catch (e) {
       setToken('')
       const msg = (e as Error).message ?? ''
@@ -49,6 +129,10 @@ function TokenGate({ onEnter }: { onEnter: () => void }) {
     } finally {
       setLoading(false)
     }
+  }
+
+  if (firstUse) {
+    return <ChangeTokenForm onDone={onEnter} />
   }
 
   return (

@@ -315,6 +315,23 @@ func (s *SQLiteStore) SaveRuntimeConfig(ctx context.Context, value config.Runtim
 	return err
 }
 
+func (s *SQLiteStore) GetKV(ctx context.Context, key string) (string, bool, error) {
+	var value string
+	err := s.db.QueryRowContext(ctx, `SELECT value_json FROM runtime_config WHERE key = ?`, key).Scan(&value)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	return value, err == nil, err
+}
+
+func (s *SQLiteStore) SetKV(ctx context.Context, key, value string) error {
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO runtime_config (key, value_json, updated_at) VALUES (?, ?, ?)
+		 ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json, updated_at = excluded.updated_at`,
+		key, value, time.Now().Format(time.RFC3339))
+	return err
+}
+
 func (s *SQLiteStore) CreateCheckTask(ctx context.Context, task CheckTask) (int64, error) {
 	result, err := s.db.ExecContext(ctx, `INSERT INTO check_tasks (kind, status, provider_id, started_at) VALUES (?, ?, ?, ?)`, task.Kind, task.Status, task.ProviderID, task.StartedAt)
 	if err != nil {

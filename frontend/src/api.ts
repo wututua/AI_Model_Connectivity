@@ -48,6 +48,8 @@ export const api = {
 
   detection: (): Promise<RunningState> =>
     request<RunningState>('GET', '/api/admin/detection'),
+  changeToken: (token: string): Promise<void> =>
+    request('POST', '/api/admin/token', { token }),
   startDetection: (): Promise<unknown> =>
     request('POST', '/api/admin/detection/start'),
   stopDetection: (): Promise<unknown> =>
