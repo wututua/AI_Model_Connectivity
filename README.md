@@ -55,9 +55,23 @@ curl -X POST -H "Authorization: Bearer <your-token>" http://127.0.0.1:8080/api/a
 |--------|------|
 | 检测控制 | 查看运行状态、手动触发检测、停止检测；Token 消耗估算 |
 | Provider | 新增、编辑、删除、单独重跑 Provider |
-| 设置 | 修改检测参数、历史配置、告警通知 |
+| 设置 | 修改检测参数、历史配置、告警通知、**激活主题切换** |
 | 任务历史 | 分页查看历史检测任务及结果 |
 | 配置管理 | 导出/导入 JSON 配置、热加载 `.env` |
+
+## 主题系统
+
+仪表盘和登录页支持多套前端主题，仅管理员可切换：
+
+| 主题 ID | 风格 | 覆盖范围 |
+|---------|------|----------|
+| `default` | 玻璃拟态深色 + 系统/浅/深三态切换 | 全部页面（仪表盘 + 完整管理面板） |
+| `argon` | Argon Design System 亮色 + 渐变 | 仪表盘 + 登录页；登录后引导切回 default |
+
+**切换方式**：在 default 主题的 **设置 → 激活主题** 下拉选择，保存后刷新生效。
+也可通过环境变量 `ACTIVE_THEME=argon` 在启动时指定，或调用 `PUT /api/admin/settings`。
+
+每个主题是独立的 Vite 项目：未构建的主题在选择器中显示 `（未构建）`，运行时会自动回退到 default。
 
 ## 部署
 
@@ -97,26 +111,60 @@ docker run -d \
 ### 源码运行
 
 ```bash
-# 首次运行前需要构建前端
-cd frontend && npm install && npm run build && cd ..
+# 首次运行前需要构建前端（两个主题都需要构建）
+make build-frontend
+
+# 或单独构建某个主题
+make build-theme-default
+make build-theme-argon
 
 go run ./cmd/cg          # 持续服务模式
 go run ./cmd/cg check    # 只运行一次检测后退出
+```
+
+不用 `make` 也可以直接 `npm`：
+
+```bash
+cd frontend/themes/default && npm ci && npm run build && cd ../../..
+cd frontend/themes/argon   && npm ci && npm run build && cd ../../..
 ```
 
 ### 前端开发模式
 
 ```bash
 # 终端 1：启动后端
-go run ./cmd/cg
+make dev-backend          # 或 go run ./cmd/cg
 
-# 终端 2：启动前端开发服务器（热更新，代理到 :8080）
-cd frontend && npm run dev
+# 终端 2：启动 default 主题前端（:5173，代理到后端 :8080）
+make dev-frontend
+
+# 或启动 Argon 主题前端（:5174，代理到后端 :8080）
+make dev-argon
 ```
 
-访问 [http://127.0.0.1:5173](http://127.0.0.1:5173) 即可。修改 `frontend/src/` 下的文件后浏览器自动刷新。
+访问对应端口即可：default 在 [http://127.0.0.1:5173](http://127.0.0.1:5173)，argon 在 [http://127.0.0.1:5174](http://127.0.0.1:5174)。修改源码后浏览器自动刷新。
 
-开发完成后执行 `npm run build` 将产物写入 `web/`，Go 服务端直接提供。
+开发完成后执行 `make build-frontend` 将产物写入 `web/themes/<id>/`，Go 服务端直接提供。
+
+### 前端目录结构
+
+```
+frontend/themes/
+├── default/         # 默认深色主题（玻璃拟态、暗背景）
+│   ├── src/
+│   ├── package.json
+│   └── vite.config.ts
+└── argon/           # Argon Design System 主题（亮色、渐变、卡片）
+    ├── src/
+    ├── package.json
+    └── vite.config.ts
+
+web/themes/          # 构建产物（运行时根据 active_theme 选择）
+├── default/
+└── argon/
+```
+
+每个主题都是独立的 Vite 项目，互不影响。新增主题只需复制目录、改 `vite.config.ts` 的 `outDir`、在 `Makefile` 的 `THEMES` 加上 ID 即可。
 
 ## 配置
 
@@ -133,6 +181,7 @@ cd frontend && npm run dev
 | `DATABASE_PATH` | `DATA_DIR/cg.sqlite` | SQLite 路径，留空取默认值 |
 | `DASHBOARD_TITLE` | `模型连通性` | 页面标题 |
 | `ADMIN_TOKEN` | 自动生成 | 保护管理接口；未设置时自动生成随机密钥；公开监听时**强烈建议手动设置** |
+| `ACTIVE_THEME` | `default` | 激活的前端主题 ID（对应 `web/themes/<id>/`），运行时可在管理面板覆盖 |
 
 #### 管理密钥说明
 
@@ -271,8 +320,9 @@ xinference  bailian  volcengine
 | `POST` | `/api/admin/detection/stop` | 停止当前检测 |
 | `POST` | `/api/admin/check` | 触发一次完整检测 |
 | `POST` | `/api/admin/token` | 修改管理密钥 `{"token":"new-token"}` |
+| `GET` | `/api/admin/themes` | 列出 `web/themes/` 下已构建的主题及当前激活主题 |
 | `GET` | `/api/admin/config` | 查看当前配置（不含密钥） |
-| `PUT` | `/api/admin/settings` | 修改阈值、检测参数、自动检测间隔 |
+| `PUT` | `/api/admin/settings` | 修改阈值、检测参数、自动检测间隔、激活主题 |
 | `GET` | `/api/admin/providers` | 查看 Provider 列表（不含 API Key） |
 | `POST` | `/api/admin/providers` | 新增 Provider |
 | `PUT` | `/api/admin/providers/{id}` | 修改 Provider；不传 `api_key` 时保留旧值 |
@@ -287,13 +337,16 @@ xinference  bailian  volcengine
 ## 数据文件
 
 ```
-web/index.html
-web/assets/app.js
-web/assets/index.css
+web/themes/default/index.html
+web/themes/default/assets/app.js
+web/themes/default/assets/index.css
+web/themes/argon/index.html
+web/themes/argon/assets/app.js
+web/themes/argon/assets/index.css
 data/cg.sqlite
 ```
 
-`web/` 目录由 Vite 构建生成，发布包内已包含预构建产物，无需手动构建即可运行。
+`web/themes/<id>/` 目录由各主题的 Vite 构建生成，发布包内已包含预构建产物，无需手动构建即可运行。SPA handler 根据当前激活主题选择目录，缺失时自动回退到 `default`。
 
 历史检测结果、最新报告、告警状态和管理密钥均保存在 SQLite。首次启动时若存在旧版 JSON 文件（`data/latest_report.json`、`data/probe_history.json`、`data/notify_state.txt`），会自动迁移到 SQLite，旧文件不会被删除。
 
