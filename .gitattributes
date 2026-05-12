@@ -1,0 +1,8 @@
+# GitHub linguist overrides — keep repo language stats focused on the Go backend.
+# Frontend is a standalone Vite build that happens to live alongside the backend;
+# vendoring it tells linguist to exclude it from the repo's primary-language bar
+# without affecting diffs, blame, or PR reviews.
+frontend/** linguist-vendored=true
+
+# web/ is the Vite build output committed for embedded release packaging.
+web/**      linguist-generated=true
