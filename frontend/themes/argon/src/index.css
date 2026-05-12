@@ -1,0 +1,195 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Argon Design System tokens ──────────────────────────────────────── */
+:root {
+  --argon-primary:    #5e72e4;
+  --argon-info:       #11cdef;
+  --argon-success:    #2dce89;
+  --argon-warning:    #fb6340;
+  --argon-danger:     #f5365c;
+  --argon-default:    #172b4d;
+  --argon-heading:    #32325d;
+  --argon-text:       #525f7f;
+  --argon-muted:      #8898aa;
+  --argon-border:     #e9ecef;
+  --argon-bg:         #f8f9fe;
+  --argon-card:       #ffffff;
+  --argon-card-soft:  #f6f9fc;
+}
+
+@layer base {
+  *, *::before, *::after { box-sizing: border-box; }
+
+  html { color-scheme: light; }
+
+  body {
+    background: var(--argon-bg);
+    color: var(--argon-text);
+    font-family: 'Open Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-size: 14px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    min-height: 100vh;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    color: var(--argon-heading);
+    font-weight: 600;
+  }
+}
+
+@layer components {
+  /* Argon button base */
+  .argon-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.625rem 1.25rem;
+    border-radius: 0.375rem;
+    font-size: 0.875rem;
+    font-weight: 600;
+    line-height: 1.5;
+    transition: all 0.15s ease-in-out;
+    box-shadow: 0 4px 6px rgba(50,50,93,.11), 0 1px 3px rgba(0,0,0,.08);
+    border: 0;
+    cursor: pointer;
+  }
+  .argon-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 7px 14px rgba(50,50,93,.1), 0 3px 6px rgba(0,0,0,.08);
+  }
+  .argon-btn:active { transform: translateY(0); }
+  .argon-btn:disabled { opacity: .65; cursor: not-allowed; transform: none; }
+
+  .argon-btn-primary {
+    background: linear-gradient(87deg, #5e72e4 0, #825ee4 100%);
+    color: #fff;
+  }
+  .argon-btn-secondary {
+    background: #fff;
+    color: #212529;
+    box-shadow: 0 1px 3px rgba(0,0,0,.05);
+  }
+  .argon-btn-success {
+    background: linear-gradient(87deg, #2dce89 0, #2dcecc 100%);
+    color: #fff;
+  }
+  .argon-btn-danger {
+    background: linear-gradient(87deg, #f5365c 0, #f56036 100%);
+    color: #fff;
+  }
+
+  /* Argon card */
+  .argon-card {
+    background: var(--argon-card);
+    border-radius: 0.5rem;
+    box-shadow: 0 0 2rem 0 rgba(136,152,170,.15);
+    border: 0;
+  }
+  .argon-card-header {
+    padding: 1.25rem 1.5rem;
+    border-bottom: 1px solid var(--argon-border);
+    background: transparent;
+  }
+  .argon-card-body { padding: 1.5rem; }
+
+  /* Argon input */
+  .argon-input {
+    display: block;
+    width: 100%;
+    padding: 0.625rem 0.75rem;
+    font-size: 0.875rem;
+    line-height: 1.5;
+    color: #495057;
+    background-color: #fff;
+    background-clip: padding-box;
+    border: 1px solid #cad1d7;
+    border-radius: 0.375rem;
+    box-shadow: 0 3px 2px rgba(233,236,239,.05);
+    transition: border-color .15s ease-in-out, box-shadow .15s ease-in-out;
+  }
+  .argon-input:focus {
+    color: #8898aa;
+    background-color: #fff;
+    border-color: rgba(50,151,211,.25);
+    outline: 0;
+    box-shadow: 0 3px 9px rgba(50,50,93,.0), 3px 4px 8px rgba(94,114,228,.1);
+  }
+
+  /* Argon hero gradient header */
+  .argon-hero {
+    background: linear-gradient(135deg, #172b4d 0%, #1a174d 100%);
+    color: #fff;
+    position: relative;
+    overflow: hidden;
+  }
+  .argon-hero::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background:
+      radial-gradient(ellipse at top left,  rgba(94,114,228,.25) 0%, transparent 50%),
+      radial-gradient(ellipse at bottom right, rgba(130,94,228,.25) 0%, transparent 50%);
+  }
+
+  /* Argon badge */
+  .argon-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.35rem 0.625rem;
+    font-size: 0.65rem;
+    font-weight: 700;
+    line-height: 1;
+    text-transform: uppercase;
+    letter-spacing: 0.025em;
+    border-radius: 0.375rem;
+    text-align: center;
+    white-space: nowrap;
+    vertical-align: baseline;
+  }
+  .argon-badge-success { background: #b0eed3; color: #0b6e4f; }
+  .argon-badge-warning { background: #fee6db; color: #c9501c; }
+  .argon-badge-danger  { background: #fdd1da; color: #c11a40; }
+  .argon-badge-info    { background: #aaedf9; color: #08607a; }
+  .argon-badge-default { background: #e9ecef; color: #525f7f; }
+
+  /* Argon status dot */
+  .argon-dot {
+    display: inline-block;
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 9999px;
+    flex-shrink: 0;
+  }
+  .argon-dot-success { background: var(--argon-success); }
+  .argon-dot-warning { background: var(--argon-warning); }
+  .argon-dot-danger  { background: var(--argon-danger); }
+  .argon-dot-muted   { background: var(--argon-muted); }
+}
+
+@layer utilities {
+  .text-argon-gradient {
+    background: linear-gradient(87deg, #5e72e4 0, #825ee4 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: transparent;
+  }
+}
+
+/* Subtle animations */
+@keyframes argon-fade-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: none; }
+}
+.anim-argon-in {
+  animation: argon-fade-in .35s cubic-bezier(.25,.46,.45,.94) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .anim-argon-in { animation: none; }
+}

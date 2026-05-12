@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -202,6 +203,16 @@ func (a *application) AdminToken() string {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	return a.adminToken
+}
+
+func (a *application) ActiveTheme() string {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	theme := strings.TrimSpace(a.cfg.ActiveTheme)
+	if theme == "" {
+		return "default"
+	}
+	return theme
 }
 
 func (a *application) ChangeAdminToken(ctx context.Context, newToken string) error {

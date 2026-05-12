@@ -9,11 +9,14 @@ export function SettingsTab() {
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useAutoMsg()
+  const [themes, setThemes] = useState<{ id: string; built: boolean }[]>([])
 
   useEffect(() => {
     setLoading(true)
-    api.config()
-      .then(c => setForm(normalizeSettings(c.settings)))
+    Promise.all([
+      api.config().then(c => setForm(normalizeSettings(c.settings))),
+      api.themes().then(t => setThemes(t.themes)).catch(() => {}),
+    ])
       .catch(e => setMsg(`加载失败：${(e as Error).message}`))
       .finally(() => setLoading(false))
   }, [])
@@ -95,6 +98,20 @@ export function SettingsTab() {
         <h3 className="text-xs font-medium uppercase tracking-widest mb-3" style={{ color: 'var(--muted)', letterSpacing: '.12em' }}>基础</h3>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {textInput('dashboard_title', '仪表盘标题')}
+          <Field label="激活主题" hint="切换全站激活的前端主题；未构建的主题需要先构建产物（web/themes/<id>/）才能使用">
+            <select
+              className={inputCls}
+              value={form.active_theme || 'default'}
+              onChange={e => set('active_theme', e.target.value)}
+            >
+              {themes.length === 0 && <option value={form.active_theme || 'default'}>{form.active_theme || 'default'}</option>}
+              {themes.map(t => (
+                <option key={t.id} value={t.id}>
+                  {t.id}{t.built ? '' : '（未构建）'}
+                </option>
+              ))}
+            </select>
+          </Field>
           <Field label="主题模式" hint="已由前端接管（localStorage），此字段不再生效">
             <input className={`${inputCls} opacity-40 cursor-not-allowed`} value={form.theme_mode} readOnly tabIndex={-1} />
           </Field>

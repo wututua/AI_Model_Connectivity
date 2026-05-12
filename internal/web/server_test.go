@@ -48,6 +48,7 @@ func (stubAdmin) GetTask(context.Context, int64) (storage.CheckTask, error) {
 }
 func (s stubAdmin) AdminToken() string                                  { return s.token }
 func (stubAdmin) ChangeAdminToken(context.Context, string) error        { return nil }
+func (stubAdmin) ActiveTheme() string                                   { return "default" }
 
 func newTestServer(t *testing.T) (*Server, *storage.SQLiteStore) {
 	t.Helper()

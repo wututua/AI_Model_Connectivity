@@ -91,4 +91,7 @@ export const api = {
     request<AdminConfig>('POST', '/api/admin/config/import', data),
   reloadConfig: (): Promise<AdminConfig> =>
     request<AdminConfig>('POST', '/api/admin/config/reload'),
+
+  themes: (): Promise<{ active: string; themes: { id: string; built: boolean }[] }> =>
+    request('GET', '/api/admin/themes'),
 }

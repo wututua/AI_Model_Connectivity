@@ -1,10 +1,18 @@
-# ── Stage 1: 前端构建 ──────────────────────────────────────────────────
-FROM node:20-slim AS frontend-builder
-WORKDIR /app/frontend
-COPY frontend/package*.json ./
-RUN npm ci
-COPY frontend/ ./
-RUN npm run build
+# ── Stage 1: 前端构建（所有主题） ──────────────────────────────────────
+FROM node:22-slim AS frontend-builder
+WORKDIR /app
+
+# default 主题
+COPY frontend/themes/default/package*.json ./frontend/themes/default/
+RUN cd frontend/themes/default && npm ci
+COPY frontend/themes/default ./frontend/themes/default
+RUN cd frontend/themes/default && npm run build
+
+# argon 主题
+COPY frontend/themes/argon/package*.json ./frontend/themes/argon/
+RUN cd frontend/themes/argon && npm ci
+COPY frontend/themes/argon ./frontend/themes/argon
+RUN cd frontend/themes/argon && npm run build
 
 # ── Stage 2: 后端构建 ──────────────────────────────────────────────────
 FROM golang:1.25-alpine AS backend-builder
@@ -12,7 +20,7 @@ WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-COPY --from=frontend-builder /app/frontend/dist ./web
+COPY --from=frontend-builder /app/web ./web
 RUN CGO_ENABLED=0 go build \
     -trimpath \
     -ldflags="-s -w" \

@@ -27,6 +27,7 @@ type AdminController interface {
 	RunningState() RunningState
 	AdminToken() string
 	ChangeAdminToken(context.Context, string) error
+	ActiveTheme() string
 	AdminConfig(context.Context) (config.AdminConfig, error)
 	UpdateSettings(context.Context, config.RuntimeSettings) (config.AdminConfig, error)
 	UpsertProvider(context.Context, string, config.ProviderUpdate) (config.SafeProviderConfig, error)
@@ -117,7 +118,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/admin/tasks", s.adminTasks)
 	mux.HandleFunc("/api/admin/tasks/", s.adminTaskItem)
 	mux.HandleFunc("/api/admin/token", s.adminChangeToken)
-	mux.Handle("/", spaHandler(s.cfg.WebDir))
+	mux.HandleFunc("/api/admin/themes", s.adminThemes)
+	mux.Handle("/", spaHandler(s.cfg.WebDir, s.admin.ActiveTheme))
 	return mux
 }
 
@@ -466,25 +468,84 @@ func (s *Server) HTTPServer() *http.Server {
 	}
 }
 
-// spaHandler serves static files from webDir; falls back to index.html for
-// any path that has no file extension and doesn't start with /api/, so that
-// the React SPA handles client-side routing (e.g. /admin).
-func spaHandler(webDir string) http.Handler {
-	fs := http.FileServer(http.Dir(webDir))
+// spaHandler serves static files from the active theme directory under
+// webDir/themes/<active>/.  If the active theme directory doesn't exist
+// on disk, falls back to webDir/themes/default/.  As a last resort (for
+// legacy single-theme layouts) it serves directly from webDir.
+//
+// For any path that has no file extension and doesn't start with /api/,
+// the React SPA's index.html is served so client-side routing works.
+func spaHandler(webDir string, activeTheme func() string) http.Handler {
+	resolveDir := func() string {
+		active := strings.TrimSpace(activeTheme())
+		if active == "" {
+			active = "default"
+		}
+		candidates := []string{
+			filepath.Join(webDir, "themes", active),
+			filepath.Join(webDir, "themes", "default"),
+			webDir,
+		}
+		for _, dir := range candidates {
+			if _, err := os.Stat(filepath.Join(dir, "index.html")); err == nil {
+				return dir
+			}
+		}
+		return webDir
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/api/") {
 			http.NotFound(w, r)
 			return
 		}
-		// If the file exists on disk, serve it directly (assets, index.html, etc.).
-		fpath := filepath.Join(webDir, filepath.Clean(r.URL.Path))
-		if _, err := os.Stat(fpath); err == nil {
-			fs.ServeHTTP(w, r)
+		dir := resolveDir()
+		fpath := filepath.Join(dir, filepath.Clean(r.URL.Path))
+		if _, err := os.Stat(fpath); err == nil && !strings.HasSuffix(fpath, string(os.PathSeparator)) {
+			http.FileServer(http.Dir(dir)).ServeHTTP(w, r)
 			return
 		}
-		// SPA fallback: let the React router handle the path.
-		http.ServeFile(w, r, filepath.Join(webDir, "index.html"))
+		http.ServeFile(w, r, filepath.Join(dir, "index.html"))
 	})
+}
+
+// adminThemes lists themes available under webDir/themes/ (each subdirectory
+// containing an index.html is considered a built theme).
+func (s *Server) adminThemes(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdmin(w, r) {
+		return
+	}
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w)
+		return
+	}
+	themesDir := filepath.Join(s.cfg.WebDir, "themes")
+	entries, err := os.ReadDir(themesDir)
+	if err != nil && !os.IsNotExist(err) {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
+	type themeInfo struct {
+		ID    string `json:"id"`
+		Built bool   `json:"built"`
+	}
+	themes := []themeInfo{}
+	seen := map[string]bool{}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		_, err := os.Stat(filepath.Join(themesDir, name, "index.html"))
+		themes = append(themes, themeInfo{ID: name, Built: err == nil})
+		seen[name] = true
+	}
+	// Ensure built-in theme IDs always show up, even if not yet built.
+	for _, id := range []string{"default", "argon"} {
+		if !seen[id] {
+			themes = append(themes, themeInfo{ID: id, Built: false})
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"active": s.admin.ActiveTheme(), "themes": themes})
 }
 
 func isPublicBindHost(host string) bool {

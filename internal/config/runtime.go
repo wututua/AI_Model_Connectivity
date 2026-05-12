@@ -24,6 +24,7 @@ type RuntimeSettings struct {
 	MaxHistoryRecords         int      `json:"max_history_records"`
 	ShowErrorDetail           bool     `json:"show_error_detail"`
 	ThemeMode                 string   `json:"theme_mode"`
+	ActiveTheme               string   `json:"active_theme"`
 	DayModeStartHour          int      `json:"day_mode_start_hour"`
 	DayModeEndHour            int      `json:"day_mode_end_hour"`
 	AutoCheckIntervalMinHours float64  `json:"auto_check_interval_min_hours"`
@@ -98,6 +99,7 @@ func SettingsFromConfig(cfg Config) RuntimeSettings {
 		MaxHistoryRecords:         cfg.MaxHistoryRecords,
 		ShowErrorDetail:           cfg.ShowErrorDetail,
 		ThemeMode:                 cfg.ThemeMode,
+		ActiveTheme:               cfg.ActiveTheme,
 		DayModeStartHour:          cfg.DayModeStartHour,
 		DayModeEndHour:            cfg.DayModeEndHour,
 		AutoCheckIntervalMinHours: cfg.AutoCheckIntervalMinHours,
@@ -140,6 +142,10 @@ func ApplyRuntimeSettings(cfg Config, settings RuntimeSettings) Config {
 	cfg.MaxHistoryRecords = max(1, settings.MaxHistoryRecords)
 	cfg.ShowErrorDetail = settings.ShowErrorDetail
 	cfg.ThemeMode = settings.ThemeMode
+	cfg.ActiveTheme = strings.TrimSpace(settings.ActiveTheme)
+	if cfg.ActiveTheme == "" {
+		cfg.ActiveTheme = "default"
+	}
 	cfg.DayModeStartHour = clamp(settings.DayModeStartHour, 0, 23)
 	cfg.DayModeEndHour = clamp(settings.DayModeEndHour, 0, 23)
 	cfg.AutoCheckIntervalMinHours = settings.AutoCheckIntervalMinHours
