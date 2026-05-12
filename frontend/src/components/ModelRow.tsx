@@ -85,7 +85,14 @@ export function ModelRow({ result, showError, compact }: { result: ModelResult; 
         )}
 
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-2 text-[11px] font-mono" style={{ color: 'var(--muted)', opacity: .75 }}>
-          <span>24h均值 {result.avg_latency_24h}</span>
+          <span title={result.latency_samples_24h > 0
+            ? `24h 内 ${result.latency_samples_24h} 次有效采样\nP50: ${result.p50_latency_24h}\navg: ${result.avg_latency_24h}\nP95: ${result.p95_latency_24h}\nP99: ${result.p99_latency_24h}`
+            : '24h 内无有效采样'}>
+            24h avg {result.avg_latency_24h}
+            {result.latency_samples_24h >= 3 && (
+              <span className="ml-1 opacity-70">· P95 {result.p95_latency_24h}</span>
+            )}
+          </span>
           <span className="hidden sm:inline">{result.weekly_success_text}</span>
           <span>可用率 {result.availability}</span>
         </div>

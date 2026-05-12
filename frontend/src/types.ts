@@ -18,6 +18,10 @@ export interface ModelResult {
   svg_path_area: string
   time_labels: string[]
   avg_latency_24h: string
+  p50_latency_24h: string
+  p95_latency_24h: string
+  p99_latency_24h: string
+  latency_samples_24h: number
   weekly_success_text: string
   availability: string
 }
