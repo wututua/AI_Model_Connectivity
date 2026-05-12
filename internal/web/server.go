@@ -2,6 +2,8 @@ package web
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,6 +17,7 @@ import (
 	"time"
 
 	"cg/internal/config"
+	"cg/internal/metrics"
 	"cg/internal/report"
 	"cg/internal/storage"
 )
@@ -27,6 +30,8 @@ type AdminController interface {
 	RunningState() RunningState
 	AdminToken() string
 	ChangeAdminToken(context.Context, string) error
+	ViewToken() string
+	ChangeViewToken(context.Context, string) error
 	AdminConfig(context.Context) (config.AdminConfig, error)
 	UpdateSettings(context.Context, config.RuntimeSettings) (config.AdminConfig, error)
 	UpsertProvider(context.Context, string, config.ProviderUpdate) (config.SafeProviderConfig, error)
@@ -84,11 +89,12 @@ func (b *Broker) Publish(value report.Report) {
 }
 
 type Server struct {
-	cfg    config.Config
-	store  *storage.SQLiteStore
-	check  CheckFunc
-	broker *Broker
-	admin  AdminController
+	cfg     config.Config
+	store   *storage.SQLiteStore
+	check   CheckFunc
+	broker  *Broker
+	admin   AdminController
+	metrics *metrics.Metrics
 }
 
 func NewServer(cfg config.Config, store *storage.SQLiteStore, check CheckFunc, broker *Broker, admin AdminController) *Server {
@@ -96,6 +102,12 @@ func NewServer(cfg config.Config, store *storage.SQLiteStore, check CheckFunc, b
 		broker = NewBroker()
 	}
 	return &Server{cfg: cfg, store: store, check: check, broker: broker, admin: admin}
+}
+
+// SetMetrics wires a metrics collector and exposes /metrics.  Optional —
+// callers that don't care about Prometheus simply skip this.
+func (s *Server) SetMetrics(m *metrics.Metrics) {
+	s.metrics = m
 }
 
 func (s *Server) Handler() http.Handler {
@@ -115,8 +127,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/admin/providers", s.adminProviders)
 	mux.HandleFunc("/api/admin/providers/", s.adminProviderItem)
 	mux.HandleFunc("/api/admin/tasks", s.adminTasks)
+	mux.HandleFunc("/api/admin/billing", s.adminBilling)
+	mux.HandleFunc("/metrics", s.metricsHandler)
 	mux.HandleFunc("/api/admin/tasks/", s.adminTaskItem)
 	mux.HandleFunc("/api/admin/token", s.adminChangeToken)
+	mux.HandleFunc("/api/admin/view-token", s.adminViewToken)
 	mux.Handle("/", spaHandler(s.cfg.WebDir))
 	return mux
 }
@@ -198,7 +213,7 @@ func (s *Server) checkNow(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) adminDetection(w http.ResponseWriter, r *http.Request) {
-	if !s.requireAdmin(w, r) {
+	if !s.requireAuth(w, r) {
 		return
 	}
 	if r.Method != http.MethodGet {
@@ -238,7 +253,7 @@ func (s *Server) adminDetectionStop(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) adminConfig(w http.ResponseWriter, r *http.Request) {
-	if !s.requireAdmin(w, r) {
+	if !s.requireAuth(w, r) {
 		return
 	}
 	if r.Method != http.MethodGet {
@@ -266,11 +281,11 @@ func (s *Server) adminSettings(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) adminProviders(w http.ResponseWriter, r *http.Request) {
-	if !s.requireAdmin(w, r) {
-		return
-	}
 	switch r.Method {
 	case http.MethodGet:
+		if !s.requireAuth(w, r) {
+			return
+		}
 		value, err := s.admin.AdminConfig(r.Context())
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err)
@@ -278,6 +293,9 @@ func (s *Server) adminProviders(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, http.StatusOK, value.Providers)
 	case http.MethodPost:
+		if !s.requireAdmin(w, r) {
+			return
+		}
 		var value config.ProviderUpdate
 		if !decodeJSON(w, r, &value) {
 			return
@@ -330,7 +348,7 @@ func (s *Server) adminProviderItem(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) adminConfigExport(w http.ResponseWriter, r *http.Request) {
-	if !s.requireAdmin(w, r) {
+	if !s.requireAuth(w, r) {
 		return
 	}
 	if r.Method != http.MethodGet {
@@ -381,7 +399,7 @@ func (s *Server) checkAfterReload() {
 }
 
 func (s *Server) adminTasks(w http.ResponseWriter, r *http.Request) {
-	if !s.requireAdmin(w, r) {
+	if !s.requireAuth(w, r) {
 		return
 	}
 	if r.Method != http.MethodGet {
@@ -394,8 +412,46 @@ func (s *Server) adminTasks(w http.ResponseWriter, r *http.Request) {
 	writeResult(w, tasks, err)
 }
 
+// metricsHandler exposes Prometheus metrics behind the admin token, so
+// scrape configs need an `Authorization: Bearer <ADMIN_TOKEN>` header.
+// This matches the existing security posture — no plaintext leak of
+// provider IDs / model names to unauthenticated callers.  When metrics
+// aren't wired (SetMetrics never called) we return 404 to make the
+// feature explicitly opt-in.
+func (s *Server) metricsHandler(w http.ResponseWriter, r *http.Request) {
+	if s.metrics == nil {
+		http.NotFound(w, r)
+		return
+	}
+	// Scrape clients (Prometheus, OpenTelemetry collectors) typically use a
+	// dedicated read-only credential — view token is the right scope.
+	if !s.requireAuth(w, r) {
+		return
+	}
+	s.metrics.Handler().ServeHTTP(w, r)
+}
+
+func (s *Server) adminBilling(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAuth(w, r) {
+		return
+	}
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w)
+		return
+	}
+	days, _ := strconv.Atoi(r.URL.Query().Get("days"))
+	if days <= 0 {
+		days = 30
+	}
+	if days > 365 {
+		days = 365
+	}
+	summary, err := s.store.LoadBillingSummary(r.Context(), days)
+	writeResult(w, summary, err)
+}
+
 func (s *Server) adminTaskItem(w http.ResponseWriter, r *http.Request) {
-	if !s.requireAdmin(w, r) {
+	if !s.requireAuth(w, r) {
 		return
 	}
 	if r.Method != http.MethodGet {
@@ -409,6 +465,24 @@ func (s *Server) adminTaskItem(w http.ResponseWriter, r *http.Request) {
 	}
 	value, err := s.admin.GetTask(r.Context(), id)
 	writeResult(w, value, err)
+}
+
+// requireAuth allows either the admin token or the read-only view token.
+// Used for GET endpoints that should be shareable without granting
+// mutation rights.  Behaves like requireAdmin otherwise.
+func (s *Server) requireAuth(w http.ResponseWriter, r *http.Request) bool {
+	adminTok := s.admin.AdminToken()
+	viewTok := s.admin.ViewToken()
+	provided := r.Header.Get("Authorization")
+	matches := func(t string) bool {
+		return t != "" && provided == "Bearer "+t
+	}
+	if matches(adminTok) || matches(viewTok) {
+		return true
+	}
+	// Fall through to the strict admin path so the loopback + empty-token
+	// development shortcut still applies.
+	return s.requireAdmin(w, r)
 }
 
 func (s *Server) requireAdmin(w http.ResponseWriter, r *http.Request) bool {
@@ -444,6 +518,58 @@ func (s *Server) adminChangeToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// adminViewToken serves CRUD over the read-only share token.
+// GET returns the current token (admin only — exposing it via view token
+// itself would defeat the read-only boundary).  POST sets a new value
+// (empty body auto-generates a 16-char token).  DELETE revokes it.
+func (s *Server) adminViewToken(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdmin(w, r) {
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "token": s.admin.ViewToken()})
+	case http.MethodPost:
+		var body struct {
+			Token string `json:"token"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		token := strings.TrimSpace(body.Token)
+		if token == "" {
+			token = randomToken(16)
+		}
+		if err := s.admin.ChangeViewToken(r.Context(), token); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "token": token})
+	case http.MethodDelete:
+		if err := s.admin.ChangeViewToken(r.Context(), ""); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	default:
+		methodNotAllowed(w)
+	}
+}
+
+// randomToken returns a URL-safe base64 token with the given byte length
+// of entropy.  Uses crypto/rand so tokens aren't guessable from system time.
+func randomToken(bytes int) string {
+	if bytes <= 0 {
+		bytes = 16
+	}
+	buf := make([]byte, bytes)
+	if _, err := rand.Read(buf); err != nil {
+		// rand.Read on the standard library only fails when the OS RNG
+		// itself is broken; in that case fall back to a timestamp so we
+		// still hand the caller something usable rather than panicking.
+		return fmt.Sprintf("vt-%d", time.Now().UnixNano())
+	}
+	return base64.RawURLEncoding.EncodeToString(buf)
 }
 
 func (s *Server) writeCheckError(w http.ResponseWriter, err error) {

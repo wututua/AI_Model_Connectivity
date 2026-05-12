@@ -18,6 +18,10 @@ export interface ModelResult {
   svg_path_area: string
   time_labels: string[]
   avg_latency_24h: string
+  p50_latency_24h: string
+  p95_latency_24h: string
+  p99_latency_24h: string
+  latency_samples_24h: number
   weekly_success_text: string
   availability: string
 }
@@ -156,4 +160,35 @@ export interface ConfigExport {
 export interface ConfigImport {
   settings: RuntimeSettings
   providers: ProviderUpdate[]
+}
+
+export interface BillingItem {
+  provider_id: string
+  provider_name: string
+  provider_type: string
+  model: string
+  prompt_tokens: number
+  completion_tokens: number
+  total_tokens: number
+  probe_count: number
+}
+
+export interface BillingDaily {
+  day: string
+  prompt_tokens: number
+  completion_tokens: number
+  total_tokens: number
+  probe_count: number
+}
+
+export interface BillingSummary {
+  range_days: number
+  range_start: string
+  range_end: string
+  total_prompt_tokens: number
+  total_completion_tokens: number
+  total_tokens: number
+  total_probe_count: number
+  per_model: BillingItem[]
+  daily: BillingDaily[]
 }

@@ -3,6 +3,7 @@ package report
 import (
 	"fmt"
 	"math"
+	"sort"
 	"strings"
 	"time"
 
@@ -25,6 +26,10 @@ type ModelResult struct {
 	SVGPathArea        string   `json:"svg_path_area"`
 	TimeLabels         []string `json:"time_labels"`
 	AvgLatency24h      string   `json:"avg_latency_24h"`
+	P50Latency24h      string   `json:"p50_latency_24h"`
+	P95Latency24h      string   `json:"p95_latency_24h"`
+	P99Latency24h      string   `json:"p99_latency_24h"`
+	LatencySamples24h  int      `json:"latency_samples_24h"`
 	WeeklySuccessCount int      `json:"weekly_success_count"`
 	WeeklyTotalCount   int      `json:"weekly_total_count"`
 	WeeklySuccessText  string   `json:"weekly_success_text"`
@@ -107,10 +112,18 @@ func Build(cfg config.Config, results []probe.Result, providerErrors []probe.Pro
 				validLatencies = append(validLatencies, record.LatencyMS)
 			}
 		}
+		model.LatencySamples24h = len(validLatencies)
 		if len(validLatencies) == 0 {
 			model.AvgLatency24h = "N/A"
+			model.P50Latency24h = "N/A"
+			model.P95Latency24h = "N/A"
+			model.P99Latency24h = "N/A"
 		} else {
+			sort.Ints(validLatencies)
 			model.AvgLatency24h = fmt.Sprintf("%d ms", average(validLatencies))
+			model.P50Latency24h = fmt.Sprintf("%d ms", percentile(validLatencies, 0.50))
+			model.P95Latency24h = fmt.Sprintf("%d ms", percentile(validLatencies, 0.95))
+			model.P99Latency24h = fmt.Sprintf("%d ms", percentile(validLatencies, 0.99))
 		}
 		windowRecords := recordsInDays(records, now, cfg.StatsWindowDays)
 		model.WeeklySuccessCount, model.WeeklyTotalCount = successTotalCounts(windowRecords)
@@ -366,6 +379,30 @@ func average(values []int) int {
 		sum += value
 	}
 	return sum / len(values)
+}
+
+// percentile expects a pre-sorted ascending slice and returns the value at
+// the given quantile p ∈ [0, 1] using Type-7 linear interpolation (numpy /
+// Excel PERCENTILE default).  Returns 0 on empty input.
+func percentile(sorted []int, p float64) int {
+	n := len(sorted)
+	if n == 0 {
+		return 0
+	}
+	if n == 1 || p <= 0 {
+		return sorted[0]
+	}
+	if p >= 1 {
+		return sorted[n-1]
+	}
+	pos := p * float64(n-1)
+	lo := int(math.Floor(pos))
+	hi := int(math.Ceil(pos))
+	if lo == hi {
+		return sorted[lo]
+	}
+	frac := pos - float64(lo)
+	return int(math.Round(float64(sorted[lo]) + frac*float64(sorted[hi]-sorted[lo])))
 }
 
 func statusLabel(status string) string {

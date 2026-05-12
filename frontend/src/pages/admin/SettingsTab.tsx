@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react'
-import { Save } from 'lucide-react'
+import { useState, useEffect, useCallback } from 'react'
+import { Save, Eye, EyeOff, RefreshCw, Trash2, Copy, Check } from 'lucide-react'
 import { api } from '../../api'
 import type { RuntimeSettings } from '../../types'
 import { useAutoMsg, Btn, Spinner, Field, inputCls, normalizeSettings } from './shared'
@@ -173,6 +173,103 @@ export function SettingsTab() {
           </Field>
         </div>
       </section>
+
+      <ViewTokenSection />
     </div>
+  )
+}
+
+function ViewTokenSection() {
+  const [token, setToken] = useState('')
+  const [show, setShow] = useState(false)
+  const [copied, setCopied] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+
+  const reload = useCallback(() => {
+    api.getViewToken()
+      .then(r => setToken(r.token ?? ''))
+      .catch(e => setErr((e as Error).message))
+  }, [])
+
+  useEffect(() => { reload() }, [reload])
+
+  const rotate = async () => {
+    setBusy(true); setErr('')
+    try {
+      const r = await api.rotateViewToken()
+      setToken(r.token)
+      setShow(true)
+    } catch (e) {
+      setErr((e as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const revoke = async () => {
+    setBusy(true); setErr('')
+    try {
+      await api.revokeViewToken()
+      setToken('')
+      setShow(false)
+    } catch (e) {
+      setErr((e as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const copy = async () => {
+    if (!token) return
+    await navigator.clipboard.writeText(token)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1500)
+  }
+
+  return (
+    <section className="glass rounded-[22px] p-5 space-y-3">
+      <h3 className="text-sm font-semibold" style={{ color: 'var(--text)' }}>只读分享密钥</h3>
+      <p className="text-xs" style={{ color: 'var(--muted)' }}>
+        生成一个只读密钥分享给团队成员或监控系统（Prometheus 抓取），持有者可访问 GET 接口和 <code className="font-mono">/metrics</code>，但无法修改任何配置。
+      </p>
+      {token ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative flex-1 min-w-[200px]">
+            <input
+              type={show ? 'text' : 'password'}
+              value={token}
+              readOnly
+              className={`${inputCls} pr-9 font-mono text-xs`}
+            />
+            <button
+              onClick={() => setShow(!show)}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 cursor-pointer transition-colors"
+              style={{ color: 'var(--muted)' }}
+              onMouseEnter={e => (e.currentTarget.style.color = 'var(--text)')}
+              onMouseLeave={e => (e.currentTarget.style.color = 'var(--muted)')}
+              aria-label={show ? '隐藏' : '显示'}
+            >
+              {show ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+            </button>
+          </div>
+          <Btn onClick={copy} variant="ghost">
+            {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+            {copied ? '已复制' : '复制'}
+          </Btn>
+          <Btn onClick={rotate} loading={busy} variant="ghost">
+            <RefreshCw className="w-3.5 h-3.5" />轮换
+          </Btn>
+          <Btn onClick={revoke} loading={busy} variant="ghost">
+            <Trash2 className="w-3.5 h-3.5" />撤销
+          </Btn>
+        </div>
+      ) : (
+        <Btn onClick={rotate} loading={busy} variant="primary">
+          <RefreshCw className="w-3.5 h-3.5" />生成只读密钥
+        </Btn>
+      )}
+      {err && <p className="text-xs" style={{ color: 'var(--error)' }}>{err}</p>}
+    </section>
   )
 }

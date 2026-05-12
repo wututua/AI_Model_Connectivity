@@ -1,5 +1,6 @@
 import type {
   AdminConfig,
+  BillingSummary,
   CheckTask,
   ConfigExport,
   ConfigImport,
@@ -54,6 +55,12 @@ export const api = {
     request<RunningState>('GET', '/api/admin/detection'),
   changeToken: (token: string): Promise<void> =>
     request('POST', '/api/admin/token', { token }),
+  getViewToken: (): Promise<{ ok: boolean; token: string }> =>
+    request('GET', '/api/admin/view-token'),
+  rotateViewToken: (token?: string): Promise<{ ok: boolean; token: string }> =>
+    request('POST', '/api/admin/view-token', token ? { token } : {}),
+  revokeViewToken: (): Promise<{ ok: boolean }> =>
+    request('DELETE', '/api/admin/view-token'),
   startDetection: (): Promise<unknown> =>
     request('POST', '/api/admin/detection/start'),
   stopDetection: (): Promise<unknown> =>
@@ -84,6 +91,9 @@ export const api = {
     if (params?.status) qs.set('status', params.status)
     return request<CheckTask[]>('GET', `/api/admin/tasks?${qs}`)
   },
+
+  billing: (days = 30): Promise<BillingSummary> =>
+    request<BillingSummary>('GET', `/api/admin/billing?days=${days}`),
 
   exportConfig: (): Promise<ConfigExport> =>
     request<ConfigExport>('GET', '/api/admin/config/export'),
