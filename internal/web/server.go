@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"cg/internal/config"
+	"cg/internal/metrics"
 	"cg/internal/report"
 	"cg/internal/storage"
 )
@@ -84,11 +85,12 @@ func (b *Broker) Publish(value report.Report) {
 }
 
 type Server struct {
-	cfg    config.Config
-	store  *storage.SQLiteStore
-	check  CheckFunc
-	broker *Broker
-	admin  AdminController
+	cfg     config.Config
+	store   *storage.SQLiteStore
+	check   CheckFunc
+	broker  *Broker
+	admin   AdminController
+	metrics *metrics.Metrics
 }
 
 func NewServer(cfg config.Config, store *storage.SQLiteStore, check CheckFunc, broker *Broker, admin AdminController) *Server {
@@ -96,6 +98,12 @@ func NewServer(cfg config.Config, store *storage.SQLiteStore, check CheckFunc, b
 		broker = NewBroker()
 	}
 	return &Server{cfg: cfg, store: store, check: check, broker: broker, admin: admin}
+}
+
+// SetMetrics wires a metrics collector and exposes /metrics.  Optional —
+// callers that don't care about Prometheus simply skip this.
+func (s *Server) SetMetrics(m *metrics.Metrics) {
+	s.metrics = m
 }
 
 func (s *Server) Handler() http.Handler {
@@ -116,6 +124,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/admin/providers/", s.adminProviderItem)
 	mux.HandleFunc("/api/admin/tasks", s.adminTasks)
 	mux.HandleFunc("/api/admin/billing", s.adminBilling)
+	mux.HandleFunc("/metrics", s.metricsHandler)
 	mux.HandleFunc("/api/admin/tasks/", s.adminTaskItem)
 	mux.HandleFunc("/api/admin/token", s.adminChangeToken)
 	mux.Handle("/", spaHandler(s.cfg.WebDir))
@@ -393,6 +402,23 @@ func (s *Server) adminTasks(w http.ResponseWriter, r *http.Request) {
 	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
 	tasks, err := s.admin.ListTasks(r.Context(), storage.TaskQuery{Limit: limit, Offset: offset, Status: r.URL.Query().Get("status"), ProviderID: r.URL.Query().Get("provider_id")})
 	writeResult(w, tasks, err)
+}
+
+// metricsHandler exposes Prometheus metrics behind the admin token, so
+// scrape configs need an `Authorization: Bearer <ADMIN_TOKEN>` header.
+// This matches the existing security posture — no plaintext leak of
+// provider IDs / model names to unauthenticated callers.  When metrics
+// aren't wired (SetMetrics never called) we return 404 to make the
+// feature explicitly opt-in.
+func (s *Server) metricsHandler(w http.ResponseWriter, r *http.Request) {
+	if s.metrics == nil {
+		http.NotFound(w, r)
+		return
+	}
+	if !s.requireAdmin(w, r) {
+		return
+	}
+	s.metrics.Handler().ServeHTTP(w, r)
 }
 
 func (s *Server) adminBilling(w http.ResponseWriter, r *http.Request) {

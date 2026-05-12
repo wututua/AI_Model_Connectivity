@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"cg/internal/config"
+	"cg/internal/metrics"
 	"cg/internal/notify"
 	"cg/internal/probe"
 	"cg/internal/report"
@@ -55,7 +56,7 @@ func main() {
 	}
 
 	broker := web.NewBroker()
-	app := &application{baseCfg: baseCfg, cfg: cfg, store: store, broker: broker, schedulerWake: make(chan struct{}, 1)}
+	app := &application{baseCfg: baseCfg, cfg: cfg, store: store, broker: broker, metrics: metrics.New(), schedulerWake: make(chan struct{}, 1)}
 
 	// Resolve effective admin token: env var > stored > auto-generate
 	adminToken := baseCfg.AdminToken
@@ -108,7 +109,9 @@ func main() {
 	}
 	go app.scheduler(ctx)
 
-	server := web.NewServer(cfg, store, app.check, broker, app).HTTPServer()
+	srv := web.NewServer(cfg, store, app.check, broker, app)
+	srv.SetMetrics(app.metrics)
+	server := srv.HTTPServer()
 	serverErr := make(chan error, 1)
 	go func() {
 		serverErr <- server.ListenAndServe()
@@ -144,6 +147,7 @@ type application struct {
 	cfg            config.Config
 	store          *storage.SQLiteStore
 	broker         *web.Broker
+	metrics        *metrics.Metrics
 	schedulerWake  chan struct{}
 	mu             sync.RWMutex
 	running        bool
@@ -424,6 +428,9 @@ func (a *application) checkWithOptions(ctx context.Context, options checkOptions
 	}); err != nil {
 		slog.Error("finish check task failed", "err", err)
 	}
+	if a.metrics != nil {
+		a.metrics.RecordCheck(options.Kind, status, finished.Sub(started).Seconds())
+	}
 	a.finishRunState()
 	cancel()
 	return value, runErr
@@ -464,6 +471,11 @@ func (a *application) runCheck(ctx context.Context, options checkOptions) (repor
 		}
 	}
 	value, _ := report.Build(cfg, results, providerErrors, history, started)
+	if a.metrics != nil {
+		for _, result := range results {
+			a.metrics.RecordProbe(result)
+		}
+	}
 	if cfg.EnableHistory {
 		if err := a.store.AppendResults(ctx, results, time.Now()); err != nil {
 			slog.Error("save history failed", "err", err)
