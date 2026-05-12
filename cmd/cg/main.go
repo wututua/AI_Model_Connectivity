@@ -77,6 +77,9 @@ func main() {
 	}
 	app.adminToken = adminToken
 	app.adminFirstUse = adminFirstUse
+	if viewTok, found, _ := store.GetKV(context.Background(), "admin_view_token"); found {
+		app.viewToken = viewTok
+	}
 	args := os.Args[1:]
 	if len(args) > 0 {
 		switch args[0] {
@@ -157,6 +160,7 @@ type application struct {
 	taskProviderID string
 	adminToken     string
 	adminFirstUse  bool
+	viewToken      string
 }
 
 type checkOptions struct {
@@ -218,6 +222,22 @@ func (a *application) ChangeAdminToken(ctx context.Context, newToken string) err
 	a.mu.Lock()
 	a.adminToken = newToken
 	a.adminFirstUse = false
+	a.mu.Unlock()
+	return nil
+}
+
+func (a *application) ViewToken() string {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.viewToken
+}
+
+func (a *application) ChangeViewToken(ctx context.Context, newToken string) error {
+	if err := a.store.SetKV(ctx, "admin_view_token", newToken); err != nil {
+		return err
+	}
+	a.mu.Lock()
+	a.viewToken = newToken
 	a.mu.Unlock()
 	return nil
 }

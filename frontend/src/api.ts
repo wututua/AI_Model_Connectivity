@@ -55,6 +55,12 @@ export const api = {
     request<RunningState>('GET', '/api/admin/detection'),
   changeToken: (token: string): Promise<void> =>
     request('POST', '/api/admin/token', { token }),
+  getViewToken: (): Promise<{ ok: boolean; token: string }> =>
+    request('GET', '/api/admin/view-token'),
+  rotateViewToken: (token?: string): Promise<{ ok: boolean; token: string }> =>
+    request('POST', '/api/admin/view-token', token ? { token } : {}),
+  revokeViewToken: (): Promise<{ ok: boolean }> =>
+    request('DELETE', '/api/admin/view-token'),
   startDetection: (): Promise<unknown> =>
     request('POST', '/api/admin/detection/start'),
   stopDetection: (): Promise<unknown> =>
