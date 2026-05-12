@@ -1,5 +1,6 @@
 import type {
   AdminConfig,
+  BillingSummary,
   CheckTask,
   ConfigExport,
   ConfigImport,
@@ -84,6 +85,9 @@ export const api = {
     if (params?.status) qs.set('status', params.status)
     return request<CheckTask[]>('GET', `/api/admin/tasks?${qs}`)
   },
+
+  billing: (days = 30): Promise<BillingSummary> =>
+    request<BillingSummary>('GET', `/api/admin/billing?days=${days}`),
 
   exportConfig: (): Promise<ConfigExport> =>
     request<ConfigExport>('GET', '/api/admin/config/export'),

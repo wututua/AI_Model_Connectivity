@@ -115,6 +115,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/admin/providers", s.adminProviders)
 	mux.HandleFunc("/api/admin/providers/", s.adminProviderItem)
 	mux.HandleFunc("/api/admin/tasks", s.adminTasks)
+	mux.HandleFunc("/api/admin/billing", s.adminBilling)
 	mux.HandleFunc("/api/admin/tasks/", s.adminTaskItem)
 	mux.HandleFunc("/api/admin/token", s.adminChangeToken)
 	mux.Handle("/", spaHandler(s.cfg.WebDir))
@@ -392,6 +393,25 @@ func (s *Server) adminTasks(w http.ResponseWriter, r *http.Request) {
 	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
 	tasks, err := s.admin.ListTasks(r.Context(), storage.TaskQuery{Limit: limit, Offset: offset, Status: r.URL.Query().Get("status"), ProviderID: r.URL.Query().Get("provider_id")})
 	writeResult(w, tasks, err)
+}
+
+func (s *Server) adminBilling(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdmin(w, r) {
+		return
+	}
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w)
+		return
+	}
+	days, _ := strconv.Atoi(r.URL.Query().Get("days"))
+	if days <= 0 {
+		days = 30
+	}
+	if days > 365 {
+		days = 365
+	}
+	summary, err := s.store.LoadBillingSummary(r.Context(), days)
+	writeResult(w, summary, err)
 }
 
 func (s *Server) adminTaskItem(w http.ResponseWriter, r *http.Request) {

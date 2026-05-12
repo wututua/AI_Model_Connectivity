@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import {
   Activity, ArrowLeft, Eye, EyeOff, KeyRound,
-  Loader2, LogOut, Moon, Sun, Monitor, Settings, FileJson, Database, Clock,
+  Loader2, LogOut, Moon, Sun, Monitor, Settings, FileJson, Database, Clock, Coins,
 } from 'lucide-react'
 import { api, getToken, setToken } from '../api'
 import { useTheme } from '../hooks/useTheme'
@@ -14,6 +14,7 @@ import { ProvidersTab } from './admin/ProvidersTab'
 import { SettingsTab } from './admin/SettingsTab'
 import { TasksTab } from './admin/TasksTab'
 import { ConfigTab } from './admin/ConfigTab'
+import { BillingTab } from './admin/BillingTab'
 
 // ── Token Gate ──────────────────────────────────────────────────────────────
 
@@ -195,13 +196,14 @@ function TokenGate({ onEnter }: { onEnter: () => void }) {
 
 // ── Admin Shell ────────────────────────────────────────────────────────────────
 
-type Tab = 'overview' | 'providers' | 'settings' | 'tasks' | 'config'
+type Tab = 'overview' | 'providers' | 'settings' | 'tasks' | 'billing' | 'config'
 
 const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: 'overview',  label: '检测控制', icon: <Activity className="w-4 h-4" /> },
   { id: 'providers', label: 'Provider',  icon: <Database className="w-4 h-4" /> },
   { id: 'settings',  label: '设置',      icon: <Settings className="w-4 h-4" /> },
   { id: 'tasks',     label: '任务历史',  icon: <Clock className="w-4 h-4" /> },
+  { id: 'billing',   label: 'Token 消耗', icon: <Coins className="w-4 h-4" /> },
   { id: 'config',    label: '配置管理',  icon: <FileJson className="w-4 h-4" /> },
 ]
 
@@ -332,6 +334,7 @@ export default function Admin() {
             {tab === 'providers' && <ProvidersTab />}
             {tab === 'settings'  && <SettingsTab />}
             {tab === 'tasks'     && <TasksTab />}
+            {tab === 'billing'   && <BillingTab />}
             {tab === 'config'    && <ConfigTab />}
           </main>
         </div>

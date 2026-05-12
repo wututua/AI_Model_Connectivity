@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -65,6 +66,42 @@ type TaskQuery struct {
 	ProviderID string
 }
 
+// BillingItem aggregates token consumption for a single (provider, model)
+// pair over the requested time range.
+type BillingItem struct {
+	ProviderID       string `json:"provider_id"`
+	ProviderName     string `json:"provider_name"`
+	ProviderType     string `json:"provider_type"`
+	Model            string `json:"model"`
+	PromptTokens     int64  `json:"prompt_tokens"`
+	CompletionTokens int64  `json:"completion_tokens"`
+	TotalTokens      int64  `json:"total_tokens"`
+	ProbeCount       int64  `json:"probe_count"`
+}
+
+// BillingDaily is per-day total token consumption (UTC day boundary based
+// on the leading 10 chars of RFC3339).
+type BillingDaily struct {
+	Day              string `json:"day"`
+	PromptTokens     int64  `json:"prompt_tokens"`
+	CompletionTokens int64  `json:"completion_tokens"`
+	TotalTokens      int64  `json:"total_tokens"`
+	ProbeCount       int64  `json:"probe_count"`
+}
+
+// BillingSummary is the rolled-up token-consumption view for the dashboard.
+type BillingSummary struct {
+	RangeDays             int            `json:"range_days"`
+	RangeStart            string         `json:"range_start"`
+	RangeEnd              string         `json:"range_end"`
+	TotalPromptTokens     int64          `json:"total_prompt_tokens"`
+	TotalCompletionTokens int64          `json:"total_completion_tokens"`
+	TotalTokens           int64          `json:"total_tokens"`
+	TotalProbeCount       int64          `json:"total_probe_count"`
+	PerModel              []BillingItem  `json:"per_model"`
+	Daily                 []BillingDaily `json:"daily"`
+}
+
 func NewSQLite(ctx context.Context, databasePath, dataDir string) (*SQLiteStore, error) {
 	if databasePath == "" {
 		databasePath = filepath.Join(dataDir, "cg.sqlite")
@@ -118,7 +155,10 @@ func (s *SQLiteStore) init(ctx context.Context) error {
 			error_type TEXT NOT NULL DEFAULT '',
 			error_message TEXT NOT NULL DEFAULT '',
 			response_preview TEXT NOT NULL DEFAULT '',
-			history_key TEXT NOT NULL
+			history_key TEXT NOT NULL,
+			prompt_tokens INTEGER NOT NULL DEFAULT 0,
+			completion_tokens INTEGER NOT NULL DEFAULT 0,
+			total_tokens INTEGER NOT NULL DEFAULT 0
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_probe_results_history_checked ON probe_results(history_key, checked_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_probe_results_checked ON probe_results(checked_at DESC)`,
@@ -161,7 +201,41 @@ func (s *SQLiteStore) init(ctx context.Context) error {
 			return err
 		}
 	}
+	// Migrate existing installs that predate the token-tracking columns.
+	// SQLite has no ADD COLUMN IF NOT EXISTS, so check via PRAGMA first.
+	for _, col := range []string{"prompt_tokens", "completion_tokens", "total_tokens"} {
+		exists, err := columnExists(ctx, s.db, "probe_results", col)
+		if err != nil {
+			return err
+		}
+		if !exists {
+			if _, err := s.db.ExecContext(ctx, fmt.Sprintf(`ALTER TABLE probe_results ADD COLUMN %s INTEGER NOT NULL DEFAULT 0`, col)); err != nil {
+				return err
+			}
+		}
+	}
 	return nil
+}
+
+func columnExists(ctx context.Context, db *sql.DB, table, column string) (bool, error) {
+	rows, err := db.QueryContext(ctx, fmt.Sprintf(`PRAGMA table_info(%s)`, table))
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, ctype string
+		var notnull, pk int
+		var dflt sql.NullString
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			return false, err
+		}
+		if name == column {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
 }
 
 func (s *SQLiteStore) LoadHistory(ctx context.Context, limitPerKey int, statsWindowDays int) (map[string][]report.HistoryRecord, error) {
@@ -208,7 +282,7 @@ func (s *SQLiteStore) AppendResults(ctx context.Context, results []probe.Result,
 	}
 	defer tx.Rollback()
 
-	stmt, err := tx.PrepareContext(ctx, `INSERT INTO probe_results (provider, provider_type, provider_name, model, result, latency_ms, checked_at, error_type, error_message, response_preview, history_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`) //nolint:lll
+	stmt, err := tx.PrepareContext(ctx, `INSERT INTO probe_results (provider, provider_type, provider_name, model, result, latency_ms, checked_at, error_type, error_message, response_preview, history_key, prompt_tokens, completion_tokens, total_tokens) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`) //nolint:lll
 	if err != nil {
 		return err
 	}
@@ -216,7 +290,7 @@ func (s *SQLiteStore) AppendResults(ctx context.Context, results []probe.Result,
 
 	checked := checkedAt.Format(time.RFC3339)
 	for _, result := range results {
-		if _, err := stmt.ExecContext(ctx, result.ProviderID, result.ProviderType, result.ProviderName, result.Model, result.Status, result.LatencyMS, checked, errorType(result), result.Error, result.ResponsePreview, result.HistoryKey); err != nil {
+		if _, err := stmt.ExecContext(ctx, result.ProviderID, result.ProviderType, result.ProviderName, result.Model, result.Status, result.LatencyMS, checked, errorType(result), result.Error, result.ResponsePreview, result.HistoryKey, result.PromptTokens, result.CompletionTokens, result.TotalTokens); err != nil {
 			return err
 		}
 	}
@@ -330,6 +404,78 @@ func (s *SQLiteStore) SetKV(ctx context.Context, key, value string) error {
 		 ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json, updated_at = excluded.updated_at`,
 		key, value, time.Now().Format(time.RFC3339))
 	return err
+}
+
+// LoadBillingSummary aggregates token consumption over the last `days` days.
+// Errored probes can still report partial usage (some providers charge for
+// prompt tokens even on completion failure), so all rows in the window are
+// summed regardless of result status.
+func (s *SQLiteStore) LoadBillingSummary(ctx context.Context, days int) (BillingSummary, error) {
+	if days <= 0 {
+		days = 30
+	}
+	now := time.Now()
+	cutoff := now.Add(-time.Duration(days) * 24 * time.Hour)
+	summary := BillingSummary{
+		RangeDays:  days,
+		RangeStart: cutoff.Format(time.RFC3339),
+		RangeEnd:   now.Format(time.RFC3339),
+		PerModel:   []BillingItem{},
+		Daily:      []BillingDaily{},
+	}
+	cutoffStr := cutoff.Format(time.RFC3339)
+
+	// Per (provider, model) aggregate.
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT provider, COALESCE(NULLIF(provider_name,''), provider) AS provider_name,
+		       COALESCE(provider_type, '') AS provider_type, model,
+		       SUM(prompt_tokens), SUM(completion_tokens), SUM(total_tokens),
+		       COUNT(*)
+		FROM probe_results
+		WHERE checked_at >= ?
+		GROUP BY provider, model
+		ORDER BY SUM(total_tokens) DESC, provider, model`, cutoffStr)
+	if err != nil {
+		return summary, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var item BillingItem
+		if err := rows.Scan(&item.ProviderID, &item.ProviderName, &item.ProviderType, &item.Model,
+			&item.PromptTokens, &item.CompletionTokens, &item.TotalTokens, &item.ProbeCount); err != nil {
+			return summary, err
+		}
+		summary.PerModel = append(summary.PerModel, item)
+		summary.TotalPromptTokens += item.PromptTokens
+		summary.TotalCompletionTokens += item.CompletionTokens
+		summary.TotalTokens += item.TotalTokens
+		summary.TotalProbeCount += item.ProbeCount
+	}
+	if err := rows.Err(); err != nil {
+		return summary, err
+	}
+
+	// Per-day timeline. Relies on RFC3339 timestamps starting with YYYY-MM-DD.
+	dayRows, err := s.db.QueryContext(ctx, `
+		SELECT substr(checked_at, 1, 10) AS day,
+		       SUM(prompt_tokens), SUM(completion_tokens), SUM(total_tokens),
+		       COUNT(*)
+		FROM probe_results
+		WHERE checked_at >= ?
+		GROUP BY day
+		ORDER BY day ASC`, cutoffStr)
+	if err != nil {
+		return summary, err
+	}
+	defer dayRows.Close()
+	for dayRows.Next() {
+		var d BillingDaily
+		if err := dayRows.Scan(&d.Day, &d.PromptTokens, &d.CompletionTokens, &d.TotalTokens, &d.ProbeCount); err != nil {
+			return summary, err
+		}
+		summary.Daily = append(summary.Daily, d)
+	}
+	return summary, dayRows.Err()
 }
 
 func (s *SQLiteStore) CreateCheckTask(ctx context.Context, task CheckTask) (int64, error) {

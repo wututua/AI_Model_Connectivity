@@ -161,3 +161,34 @@ export interface ConfigImport {
   settings: RuntimeSettings
   providers: ProviderUpdate[]
 }
+
+export interface BillingItem {
+  provider_id: string
+  provider_name: string
+  provider_type: string
+  model: string
+  prompt_tokens: number
+  completion_tokens: number
+  total_tokens: number
+  probe_count: number
+}
+
+export interface BillingDaily {
+  day: string
+  prompt_tokens: number
+  completion_tokens: number
+  total_tokens: number
+  probe_count: number
+}
+
+export interface BillingSummary {
+  range_days: number
+  range_start: string
+  range_end: string
+  total_prompt_tokens: number
+  total_completion_tokens: number
+  total_tokens: number
+  total_probe_count: number
+  per_model: BillingItem[]
+  daily: BillingDaily[]
+}

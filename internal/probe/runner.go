@@ -38,6 +38,9 @@ type Result struct {
 	ResponsePreview      string `json:"response_preview"`
 	Error                string `json:"error"`
 	HistoryKey           string `json:"history_key"`
+	PromptTokens         int    `json:"prompt_tokens"`
+	CompletionTokens     int    `json:"completion_tokens"`
+	TotalTokens          int    `json:"total_tokens"`
 }
 
 type ProviderError struct {
@@ -137,14 +140,14 @@ func (r *Runner) probeTargets(ctx context.Context, targets []Target) []Result {
 			case globalLimit <- struct{}{}:
 				defer func() { <-globalLimit }()
 			case <-ctx.Done():
-				results[index] = resultPayload(target, "error", 0, "", shortError(ctx.Err()))
+				results[index] = resultPayload(target, "error", 0, "", shortError(ctx.Err()), provider.Usage{})
 				return
 			}
 			select {
 			case providerLimits[target.ProviderID] <- struct{}{}:
 				defer func() { <-providerLimits[target.ProviderID] }()
 			case <-ctx.Done():
-				results[index] = resultPayload(target, "error", 0, "", shortError(ctx.Err()))
+				results[index] = resultPayload(target, "error", 0, "", shortError(ctx.Err()), provider.Usage{})
 				return
 			}
 			results[index] = r.probeOne(ctx, target)
@@ -158,22 +161,22 @@ func (r *Runner) probeOne(ctx context.Context, target Target) Result {
 	started := time.Now()
 	probeCtx, cancel := context.WithTimeout(ctx, durationSeconds(r.cfg.TimeoutSeconds))
 	defer cancel()
-	text, err := target.Provider.Chat(probeCtx, target.Model, r.cfg.ProbeSystemPrompt, r.cfg.ProbePrompt)
+	text, usage, err := target.Provider.Chat(probeCtx, target.Model, r.cfg.ProbeSystemPrompt, r.cfg.ProbePrompt)
 	latency := int(time.Since(started).Milliseconds())
 	if err != nil {
 		if errors.Is(probeCtx.Err(), context.DeadlineExceeded) {
-			return resultPayload(target, "error", latency, "", fmt.Sprintf("timeout after %gs", r.cfg.TimeoutSeconds))
+			return resultPayload(target, "error", latency, "", fmt.Sprintf("timeout after %gs", r.cfg.TimeoutSeconds), provider.Usage{})
 		}
-		return resultPayload(target, "error", latency, "", shortError(err))
+		return resultPayload(target, "error", latency, "", shortError(err), provider.Usage{})
 	}
 	status := "ok"
 	if latency >= r.cfg.SlowThresholdMS {
 		status = "slow"
 	}
-	return resultPayload(target, status, latency, truncate(text, 80), "")
+	return resultPayload(target, status, latency, truncate(text, 80), "", usage)
 }
 
-func resultPayload(target Target, status string, latency int, preview, errText string) Result {
+func resultPayload(target Target, status string, latency int, preview, errText string, usage provider.Usage) Result {
 	return Result{
 		ProviderID:           target.ProviderID,
 		ProviderGroupID:      target.ProviderID,
@@ -190,6 +193,9 @@ func resultPayload(target Target, status string, latency int, preview, errText s
 		ResponsePreview:      preview,
 		Error:                errText,
 		HistoryKey:           target.ProviderID + "::" + target.Model,
+		PromptTokens:         usage.PromptTokens,
+		CompletionTokens:     usage.CompletionTokens,
+		TotalTokens:          usage.TotalTokens,
 	}
 }
 

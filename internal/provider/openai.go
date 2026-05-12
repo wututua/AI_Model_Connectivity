@@ -48,6 +48,11 @@ type chatResponse struct {
 			Content string `json:"content"`
 		} `json:"message"`
 	} `json:"choices"`
+	Usage *struct {
+		PromptTokens     int `json:"prompt_tokens"`
+		CompletionTokens int `json:"completion_tokens"`
+		TotalTokens      int `json:"total_tokens"`
+	} `json:"usage"`
 	Error *struct {
 		Message string `json:"message"`
 		Type    string `json:"type"`
@@ -116,9 +121,9 @@ func (p *OpenAICompatible) Models(ctx context.Context) ([]string, error) {
 	return models, nil
 }
 
-func (p *OpenAICompatible) Chat(ctx context.Context, model, systemPrompt, prompt string) (string, error) {
+func (p *OpenAICompatible) Chat(ctx context.Context, model, systemPrompt, prompt string) (string, Usage, error) {
 	if p.cfg.BaseURL == "" {
-		return "", fmt.Errorf("base url is empty")
+		return "", Usage{}, fmt.Errorf("base url is empty")
 	}
 	payload := chatRequest{
 		Model: model,
@@ -131,37 +136,46 @@ func (p *OpenAICompatible) Chat(ctx context.Context, model, systemPrompt, prompt
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
-		return "", err
+		return "", Usage{}, err
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.cfg.BaseURL+"/chat/completions", bytes.NewReader(body))
 	if err != nil {
-		return "", err
+		return "", Usage{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	p.authorize(req)
 
 	resp, err := p.client.Do(req)
 	if err != nil {
-		return "", err
+		return "", Usage{}, err
 	}
 	defer resp.Body.Close()
 
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
-		return "", err
+		return "", Usage{}, err
 	}
 	var parsed chatResponse
 	if err := json.Unmarshal(respBody, &parsed); err != nil {
-		return "", fmt.Errorf("parse chat response: %w", err)
+		return "", Usage{}, fmt.Errorf("parse chat response: %w", err)
 	}
 	if resp.StatusCode >= 400 {
-		return "", responseError(resp.StatusCode, parsed.Error, string(respBody))
+		return "", Usage{}, responseError(resp.StatusCode, parsed.Error, string(respBody))
 	}
 	if len(parsed.Choices) == 0 {
-		return "", fmt.Errorf("empty choices")
+		return "", Usage{}, fmt.Errorf("empty choices")
 	}
-	return stripThinkingTags(parsed.Choices[0].Message.Content), nil
+	usage := Usage{}
+	if parsed.Usage != nil {
+		usage.PromptTokens = parsed.Usage.PromptTokens
+		usage.CompletionTokens = parsed.Usage.CompletionTokens
+		usage.TotalTokens = parsed.Usage.TotalTokens
+		if usage.TotalTokens == 0 && (usage.PromptTokens > 0 || usage.CompletionTokens > 0) {
+			usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
+		}
+	}
+	return stripThinkingTags(parsed.Choices[0].Message.Content), usage, nil
 }
 
 func (p *OpenAICompatible) authorize(req *http.Request) {
