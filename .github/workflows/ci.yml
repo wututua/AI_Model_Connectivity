@@ -27,8 +27,12 @@ jobs:
         run: go test -v -race ./...
 
   test-frontend:
-    name: TypeScript check
+    name: TypeScript check (${{ matrix.theme }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        theme: [default, argon]
     steps:
       - uses: actions/checkout@v4
 
@@ -37,12 +41,12 @@ jobs:
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: frontend/package-lock.json
+          cache-dependency-path: frontend/themes/${{ matrix.theme }}/package-lock.json
 
       - name: Install dependencies
-        working-directory: frontend
+        working-directory: frontend/themes/${{ matrix.theme }}
         run: npm ci
 
       - name: TypeScript check
-        working-directory: frontend
+        working-directory: frontend/themes/${{ matrix.theme }}
         run: npx tsc --noEmit
