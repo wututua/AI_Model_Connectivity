@@ -66,7 +66,7 @@ curl -X POST -H "Authorization: Bearer <your-token>" http://127.0.0.1:8080/api/a
 | 主题 ID | 风格 | 完整度 |
 |---------|------|--------|
 | `default` | 玻璃拟态深色 + 系统/浅/深三态切换 | 仪表盘 + 完整管理面板 |
-| `argon`（开发中） | Argon Design System 亮色 + 渐变 | 仪表盘 + 登录页；管理面板内部仍在开发，引导切回 default |
+| `argon`（开发中） | Argon Design System 亮色 + 渐变 | 仪表盘 + 登录页；登录成功后自动把 `admin_theme` 切回 `default` 打开完整管理面板 |
 
 **切换方式**：在 default 主题的 **设置** 标签页中：
 

@@ -1,9 +1,20 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import {
-  ArrowLeft, Eye, EyeOff, KeyRound, Loader2, ShieldCheck, Palette,
+  ArrowLeft, Eye, EyeOff, KeyRound, Loader2, ShieldCheck, AlertTriangle,
 } from 'lucide-react'
 import { api, getToken, setToken } from '../api'
+
+// Argon does not implement the inner admin panel (Provider / Settings /
+// Tasks / Config tabs).  Once authentication succeeds we transparently
+// switch admin_theme to "default" so the server renders the full admin
+// UI from the default theme on the next reload.  This is a one-shot
+// hand-off: the admin can flip admin_theme back to argon via the default
+// theme's settings page if they want to see the Argon login again.
+async function handoffToDefaultAdmin() {
+  await api.updateAdminTheme('default')
+  window.location.reload()
+}
 
 // ── Password input (module-scoped so identity is stable across renders) ──
 
@@ -208,79 +219,59 @@ function TokenGate({ onEnter }: { onEnter: () => void }) {
   )
 }
 
-// ── Authed placeholder (Argon doesn't bundle the inner admin) ───────────
+// ── Hand-off screen: shown briefly while we swap admin_theme to default ──
 
-function AuthedPlaceholder({ onLogout }: { onLogout: () => void }) {
-  const [switching, setSwitching] = useState(false)
+function HandingOff({ onRetry, onLogout }: { onRetry: () => void; onLogout: () => void }) {
   const [err, setErr] = useState('')
+  const [retrying, setRetrying] = useState(false)
+  const triggeredRef = useRef(false)
 
-  const switchToDefault = async () => {
-    setSwitching(true); setErr('')
-    try {
-      await api.updateAdminTheme('default')
-      window.location.reload()
-    } catch (e) {
-      setErr(`切换失败：${(e as Error).message}`)
-      setSwitching(false)
+  useEffect(() => {
+    if (triggeredRef.current) return
+    triggeredRef.current = true
+    handoffToDefaultAdmin().catch(e => setErr((e as Error).message))
+  }, [])
+
+  const retry = async () => {
+    setRetrying(true); setErr('')
+    try { await handoffToDefaultAdmin() }
+    catch (e) {
+      setErr((e as Error).message)
+      setRetrying(false)
+      onRetry()
     }
   }
 
+  if (!err) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center gap-3" style={{ color: 'var(--argon-muted)' }}>
+        <Loader2 className="w-7 h-7 animate-spin" style={{ color: 'var(--argon-primary)' }} />
+        <p className="text-sm">正在打开管理面板…</p>
+      </div>
+    )
+  }
+
   return (
-    <div className="min-h-screen">
-      <header className="argon-hero pt-12 pb-32 px-6">
-        <div className="max-w-7xl mx-auto relative z-10">
-          <Link
-            to="/"
-            className="inline-flex items-center gap-1.5 text-white/80 hover:text-white text-sm transition-colors mb-8"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            返回仪表盘
-          </Link>
-          <h1 className="text-3xl font-bold text-white mb-2">已登录</h1>
-          <p className="text-white/70 max-w-2xl">
-            Argon 主题尚在开发中：仅实现了登录入口和仪表盘。完整的管理面板（Provider、设置、任务历史、配置导入导出）目前由 default 主题提供。前后台主题相互独立，此处的切换不会影响仪表盘主题。
-          </p>
-        </div>
-      </header>
-
-      <main className="max-w-2xl mx-auto px-6 -mt-24 relative z-10 pb-12 space-y-4">
-        <div className="argon-card anim-argon-in">
-          <div className="argon-card-body p-8">
-            <div className="flex items-start gap-3 mb-6">
-              <div className="w-12 h-12 rounded-lg flex items-center justify-center shrink-0" style={{ background: 'rgba(94,114,228,.12)', color: 'var(--argon-primary)' }}>
-                <Palette className="w-6 h-6" />
-              </div>
-              <div>
-                <h2 className="text-lg font-semibold mb-1" style={{ color: 'var(--argon-heading)' }}>
-                  切换管理面板到 default 主题
-                </h2>
-                <p className="text-sm" style={{ color: 'var(--argon-text)' }}>
-                  点击下方按钮会把 <strong>管理面板</strong> 的主题切换为 default，
-                  仪表盘主题保持不变。浏览器随后自动刷新，你将看到带有完整 Provider 管理、任务历史和配置导入导出的管理面板。
-                </p>
-              </div>
-            </div>
-
-            {err && (
-              <p className="text-xs mb-3 px-3 py-2 rounded" style={{ color: 'var(--argon-danger)', background: 'rgba(245,54,92,.08)' }}>
-                {err}
-              </p>
-            )}
-
-            <div className="flex flex-wrap gap-3">
-              <button onClick={switchToDefault} disabled={switching} className="argon-btn argon-btn-primary">
-                {switching ? <Loader2 className="w-4 h-4 animate-spin" /> : <Palette className="w-4 h-4" />}
-                {switching ? '切换中…' : '切换管理面板到 default'}
-              </button>
-              <button onClick={onLogout} className="argon-btn argon-btn-secondary">退出登录</button>
-            </div>
+    <div className="min-h-screen flex items-center justify-center p-4">
+      <div className="argon-card max-w-md w-full anim-argon-in">
+        <div className="argon-card-body p-8 text-center">
+          <div className="w-12 h-12 rounded-lg flex items-center justify-center mx-auto mb-4" style={{ background: 'rgba(245,54,92,.12)', color: 'var(--argon-danger)' }}>
+            <AlertTriangle className="w-6 h-6" />
           </div>
+          <h2 className="text-base font-semibold mb-2" style={{ color: 'var(--argon-heading)' }}>无法打开管理面板</h2>
+          <p className="text-sm mb-4 break-all" style={{ color: 'var(--argon-text)' }}>{err}</p>
+          <div className="flex gap-2 justify-center">
+            <button onClick={retry} disabled={retrying} className="argon-btn argon-btn-primary">
+              {retrying ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+              {retrying ? '重试中…' : '重试'}
+            </button>
+            <button onClick={onLogout} className="argon-btn argon-btn-secondary">退出登录</button>
+          </div>
+          <Link to="/" className="block text-xs mt-4" style={{ color: 'var(--argon-muted)' }}>
+            <ArrowLeft className="inline w-3 h-3 mr-1" />返回仪表盘
+          </Link>
         </div>
-
-        <p className="text-center text-xs pt-2" style={{ color: 'var(--argon-muted)' }}>
-          提示：在 default 主题的「设置 → 管理面板主题」可随时切回 Argon。
-        </p>
-      </main>
+      </div>
     </div>
   )
 }
@@ -309,5 +300,6 @@ export default function Admin() {
 
   if (!authed) return <TokenGate onEnter={() => setAuthed(true)} />
 
-  return <AuthedPlaceholder onLogout={() => { setToken(''); setAuthed(false) }} />
+  const logout = () => { setToken(''); setAuthed(false) }
+  return <HandingOff onRetry={() => { /* HandingOff re-renders error UI */ }} onLogout={logout} />
 }
