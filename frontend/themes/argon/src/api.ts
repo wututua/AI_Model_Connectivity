@@ -45,5 +45,10 @@ export const api = {
     const cfg = await request<{ settings: Record<string, unknown> }>('GET', '/api/admin/config')
     await request('PUT', '/api/admin/settings', { ...cfg.settings, admin_theme: theme })
   },
+  themes: (): Promise<{
+    dashboard_theme: string
+    admin_theme: string
+    themes: { id: string; built: boolean }[]
+  }> => request('GET', '/api/admin/themes'),
 }
 

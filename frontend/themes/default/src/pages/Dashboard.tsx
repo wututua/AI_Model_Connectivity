@@ -1,11 +1,9 @@
 import { useEffect, useState, useCallback, useMemo } from 'react'
-import { Link } from 'react-router-dom'
 import { Activity, Settings, RefreshCw, Zap, CheckCircle, AlertTriangle, XCircle, Clock, Sun, Moon, Monitor, Search, X, ArrowUpDown, LayoutDashboard, List } from 'lucide-react'
 import type { Report, ProviderReport } from '../types'
 import { api } from '../api'
 import { useTheme } from '../hooks/useTheme'
 import { useScrollNav } from '../hooks/useScrollNav'
-import { useNavTransition } from '../hooks/useNavTransition'
 import { relativeTime, statusClass } from '../utils/status'
 import { StatusPill } from '../components/StatusPill'
 import { ProviderCard } from '../components/ProviderCard'
@@ -24,7 +22,6 @@ export default function Dashboard() {
   const [viewMode, setViewMode] = useState<'detailed' | 'compact'>('detailed')
   const { theme, toggle: toggleTheme } = useTheme()
   const navVisible = useScrollNav()
-  const navTo = useNavTransition()
 
   const fetchReport = useCallback(() =>
     api.status()
@@ -174,17 +171,18 @@ export default function Dashboard() {
             >
               {theme === 'dark' ? <Moon className="w-4 h-4" /> : theme === 'light' ? <Sun className="w-4 h-4" /> : <Monitor className="w-4 h-4" />}
             </button>
-            <Link
-              to="/admin"
-              onClick={e => { e.preventDefault(); navTo('/admin') }}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm transition-colors cursor-pointer glass ml-1"
+            {/* Hard navigation: /admin route's theme is decided server-side by admin_theme,
+                bypassing React Router so the server picks the right theme. */}
+            <a
+              href="/admin"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm transition-colors cursor-pointer glass ml-1 no-underline"
               style={navBtnStyle}
               onMouseEnter={navBtnHover}
               onMouseLeave={navBtnLeave}
             >
               <Settings className="w-3.5 h-3.5" />
               管理
-            </Link>
+            </a>
           </div>
         </div>
       </nav>
@@ -360,27 +358,25 @@ export default function Dashboard() {
             <XCircle className="w-12 h-12 mb-4" style={{ color: 'var(--error)', opacity: .5 }} />
             <p className="text-lg mb-2">无法获取状态</p>
             <p className="text-sm font-mono mb-4" style={{ color: 'var(--error)', opacity: .7 }}>{error}</p>
-            <Link
-              to="/admin"
-              onClick={e => { e.preventDefault(); navTo('/admin') }}
-              className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-colors cursor-pointer glass"
+            <a
+              href="/admin"
+              className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-colors cursor-pointer glass no-underline"
               style={{ color: 'var(--ok)', border: '1px solid rgba(56,217,150,.35)' }}
             >
               <Settings className="w-4 h-4" />前往管理面板触发检测
-            </Link>
+            </a>
           </div>
         ) : (
           <div className="flex flex-col items-center justify-center py-24" style={{ color: 'var(--muted)' }}>
             <Activity className="w-12 h-12 mb-4" />
             <p className="mb-4">暂无数据</p>
-            <Link
-              to="/admin"
-              onClick={e => { e.preventDefault(); navTo('/admin') }}
-              className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-colors cursor-pointer glass"
+            <a
+              href="/admin"
+              className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-colors cursor-pointer glass no-underline"
               style={{ color: 'var(--ok)', border: '1px solid rgba(56,217,150,.35)' }}
             >
               <Settings className="w-4 h-4" />前往管理面板触发检测
-            </Link>
+            </a>
           </div>
         )}
       </main>

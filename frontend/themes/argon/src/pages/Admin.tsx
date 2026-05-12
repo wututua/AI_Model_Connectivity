@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef } from 'react'
-import { Link } from 'react-router-dom'
 import {
   ArrowLeft, Eye, EyeOff, KeyRound, Loader2, ShieldCheck, AlertTriangle,
 } from 'lucide-react'
@@ -11,7 +10,32 @@ import { api, getToken, setToken } from '../api'
 // UI from the default theme on the next reload.  This is a one-shot
 // hand-off: the admin can flip admin_theme back to argon via the default
 // theme's settings page if they want to see the Argon login again.
+//
+// Safeguards against an accidental redirect loop:
+//   1. If admin_theme is already "default", skip the PUT and just reload —
+//      the server will serve the default theme next time, and Argon's
+//      Admin won't run again.  No state mutation needed.
+//   2. A sessionStorage attempt counter caps the number of PUT calls per
+//      browser session.  If the third attempt is needed (i.e. the previous
+//      two PUTs didn't take effect), we surface an explicit error instead
+//      of spinning forever.
+const HANDOFF_ATTEMPT_KEY = 'argon_admin_handoff_attempts'
+
 async function handoffToDefaultAdmin() {
+  const status = await api.themes()
+  if (status.admin_theme === 'default') {
+    // admin_theme is already default; Argon is being served for some
+    // residual reason (cache, stale React Router nav).  Just reload and
+    // let the server hand control to the default theme.
+    sessionStorage.removeItem(HANDOFF_ATTEMPT_KEY)
+    window.location.reload()
+    return
+  }
+  const attempts = parseInt(sessionStorage.getItem(HANDOFF_ATTEMPT_KEY) ?? '0', 10)
+  if (attempts >= 2) {
+    throw new Error('管理面板主题切换未生效，请通过 default 主题的「设置 → 管理面板主题」手动切换')
+  }
+  sessionStorage.setItem(HANDOFF_ATTEMPT_KEY, String(attempts + 1))
   await api.updateAdminTheme('default')
   window.location.reload()
 }
@@ -62,13 +86,13 @@ function LoginFrame({ title, subtitle, children }: {
     <div className="min-h-screen">
       <header className="argon-hero pt-12 pb-32 px-6">
         <div className="max-w-7xl mx-auto relative z-10">
-          <Link
-            to="/"
-            className="inline-flex items-center gap-1.5 text-white/80 hover:text-white text-sm transition-colors mb-8"
+          <a
+            href="/"
+            className="inline-flex items-center gap-1.5 text-white/80 hover:text-white text-sm transition-colors mb-8 no-underline"
           >
             <ArrowLeft className="w-4 h-4" />
             返回仪表盘
-          </Link>
+          </a>
           <h1 className="text-3xl font-bold text-white mb-2">{title}</h1>
           <p className="text-white/70 max-w-xl">{subtitle}</p>
         </div>
@@ -267,9 +291,9 @@ function HandingOff({ onRetry, onLogout }: { onRetry: () => void; onLogout: () =
             </button>
             <button onClick={onLogout} className="argon-btn argon-btn-secondary">退出登录</button>
           </div>
-          <Link to="/" className="block text-xs mt-4" style={{ color: 'var(--argon-muted)' }}>
+          <a href="/" className="block text-xs mt-4 no-underline" style={{ color: 'var(--argon-muted)' }}>
             <ArrowLeft className="inline w-3 h-3 mr-1" />返回仪表盘
-          </Link>
+          </a>
         </div>
       </div>
     </div>

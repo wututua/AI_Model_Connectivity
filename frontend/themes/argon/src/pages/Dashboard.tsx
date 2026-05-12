@@ -1,5 +1,4 @@
 import { useEffect, useState, useCallback } from 'react'
-import { Link } from 'react-router-dom'
 import {
   Activity, RefreshCw, Settings, CheckCircle2, AlertTriangle, XCircle,
   Server, Zap, Clock,
@@ -152,12 +151,14 @@ export default function Dashboard() {
               >
                 <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
               </button>
-              <Link
-                to="/admin"
-                className="argon-btn argon-btn-secondary !text-[#32325d]"
+              {/* Hard navigation: the admin route's theme is decided server-side
+                  by admin_theme, not the dashboard SPA's React Router. */}
+              <a
+                href="/admin"
+                className="argon-btn argon-btn-secondary !text-[#32325d] no-underline"
               >
                 <Settings className="w-4 h-4" />管理
-              </Link>
+              </a>
             </div>
           </div>
 
@@ -194,9 +195,9 @@ export default function Dashboard() {
                 <div className="flex-1">
                   <p className="font-semibold mb-1" style={{ color: 'var(--argon-heading)' }}>无法获取状态</p>
                   <p className="text-sm font-mono break-all" style={{ color: 'var(--argon-text)' }}>{error}</p>
-                  <Link to="/admin" className="argon-btn argon-btn-primary mt-4">
+                  <a href="/admin" className="argon-btn argon-btn-primary mt-4 no-underline">
                     <Settings className="w-4 h-4" />前往管理面板触发检测
-                  </Link>
+                  </a>
                 </div>
               </div>
             </div>
@@ -254,9 +255,9 @@ export default function Dashboard() {
             <div className="argon-card-body text-center py-16">
               <Activity className="w-12 h-12 mx-auto mb-3" style={{ color: 'var(--argon-muted)', opacity: .5 }} />
               <p className="mb-4" style={{ color: 'var(--argon-text)' }}>暂无数据</p>
-              <Link to="/admin" className="argon-btn argon-btn-primary">
+              <a href="/admin" className="argon-btn argon-btn-primary no-underline">
                 <Settings className="w-4 h-4" />前往管理面板触发检测
-              </Link>
+              </a>
             </div>
           </div>
         )}
