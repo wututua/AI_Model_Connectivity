@@ -12,28 +12,44 @@
 - 仪表盘展示每次历史检测的圆形 LED 状态灯及每个模型的当前检测状态指示灯
 - Web 管理面板：在浏览器中动态增删 Provider、调整检测参数、查看任务历史、导入导出配置；内置 Token 消耗估算
 - 支持 Telegram、Discord、Bark、企业微信、钉钉和通用 Webhook 告警通知
+- **无配置启动**：不需要 `.env` 文件，首次运行自动生成 10 位管理密钥，管理面板引导修改
 
 ## 快速开始
 
 ```bash
-cp .env.example .env
-# 编辑 .env，至少填写一个 Provider
 go run ./cmd/cg
 ```
 
 打开 [http://127.0.0.1:8080](http://127.0.0.1:8080) 查看仪表盘，点击右上角 **管理** 进入管理面板。
 
+**首次启动**时若未设置 `ADMIN_TOKEN`，服务会自动生成一个随机密钥并打印到终端：
+
+```
+╔══════════════════════════════════════════╗
+║  Auto-generated ADMIN_TOKEN: aB3xZ9mK2p  ║
+║  Please change it on first login         ║
+╚══════════════════════════════════════════╝
+```
+
+首次进入管理面板时，系统会强制要求修改密钥（至少 6 位），修改完成后自动进入。
+
+若需要自定义 Provider，复制并编辑配置文件后再启动：
+
+```bash
+cp .env.example .env
+# 编辑 .env，填写 Provider 信息
+go run ./cmd/cg
+```
+
 首次启动若仪表盘为空，先手动触发一次检测：
 
 ```bash
-curl -X POST http://127.0.0.1:8080/api/admin/check
+curl -X POST -H "Authorization: Bearer <your-token>" http://127.0.0.1:8080/api/admin/check
 ```
 
 ## 管理面板
 
 访问 [http://127.0.0.1:8080/admin](http://127.0.0.1:8080/admin) 打开管理面板。
-
-若已设置 `ADMIN_TOKEN`，进入时需要输入 Token；本地监听（`127.0.0.1`）且未设置 Token 时，可直接进入。
 
 | 标签页 | 功能 |
 |--------|------|
@@ -48,8 +64,35 @@ curl -X POST http://127.0.0.1:8080/api/admin/check
 ### 二进制部署
 
 1. 从 [Releases](../../releases) 下载对应平台的压缩包并解压（内含预构建的 `web/` 目录）
-2. 复制并编辑配置文件：`cp .env.example .env`
-3. 启动服务：`./model-connectivity`（Windows 运行 `model-connectivity.exe`）
+2. 直接启动：`./model-connectivity`（Windows 运行 `model-connectivity.exe`）
+3. 首次启动时终端会打印自动生成的管理密钥，进入管理面板后强制修改
+
+可选：复制 `.env.example` 为 `.env` 并填写 Provider 信息，配置自动检测间隔和告警。
+
+### Docker
+
+```bash
+docker run -d \
+  -p 8080:8080 \
+  -v $(pwd)/data:/app/data \
+  --name model-connectivity \
+  ghcr.io/wututua/ai_model_connectivity:latest
+```
+
+或通过环境变量传入配置：
+
+```bash
+docker run -d \
+  -p 8080:8080 \
+  -v $(pwd)/data:/app/data \
+  -e ADMIN_TOKEN=your-token \
+  -e PROVIDER_1_ID=openai \
+  -e PROVIDER_1_BASE_URL=https://api.openai.com/v1 \
+  -e PROVIDER_1_API_KEY=sk-xxx \
+  -e PROVIDER_1_MODELS=gpt-4o-mini \
+  --name model-connectivity \
+  ghcr.io/wututua/ai_model_connectivity:latest
+```
 
 ### 源码运行
 
@@ -77,7 +120,7 @@ cd frontend && npm run dev
 
 ## 配置
 
-所有配置通过 `.env` 文件或环境变量设置。后台 API 修改的参数写入 SQLite，重启后继续生效；`.env` 仍作为初始配置来源。
+所有配置通过 `.env` 文件或环境变量设置，`.env` 不存在时也可正常启动。后台 API 修改的参数写入 SQLite，重启后继续生效；`.env` 仍作为初始配置来源。
 
 ### 服务
 
@@ -89,7 +132,13 @@ cd frontend && npm run dev
 | `DATA_DIR` | `data` | 数据目录 |
 | `DATABASE_PATH` | `DATA_DIR/cg.sqlite` | SQLite 路径，留空取默认值 |
 | `DASHBOARD_TITLE` | `模型连通性` | 页面标题 |
-| `ADMIN_TOKEN` | — | 保护管理接口；公开监听时**必须设置** |
+| `ADMIN_TOKEN` | 自动生成 | 保护管理接口；未设置时自动生成随机密钥；公开监听时**强烈建议手动设置** |
+
+#### 管理密钥说明
+
+- **未设置 `ADMIN_TOKEN`**：服务启动时自动生成一个 10 位随机密钥（大小写字母 + 数字），打印到终端，并持久化到 SQLite。首次进入管理面板时会强制要求修改。
+- **已设置 `ADMIN_TOKEN`**：直接使用环境变量中的值，不触发首次修改流程。
+- **公开部署**（监听 `0.0.0.0` / `::`）：**必须**通过环境变量显式设置 `ADMIN_TOKEN`，自动生成的密钥不足以保障公开暴露的安全。
 
 ### 探测
 
@@ -102,10 +151,10 @@ cd frontend && npm run dev
 | `PROVIDER_CONCURRENCY` | `1` | 单 Provider 最大并发数 |
 | `MAX_MODELS_PER_PROVIDER` | `0` | 每个 Provider 最多检测模型数，`0` 不限制 |
 | `SKIP_MODELS` | — | 跳过的模型，支持 `model`、`provider/model`、`provider::model`，逗号分隔 |
-| `PROBE_PROMPT` | `只回复 OK 两个字母。` | 探测用提示词 |
-| `PROBE_SYSTEM_PROMPT` | `你是一个模型连通性探针。请只回复 OK，不要解释。` | 探测用系统提示词 |
+| `PROBE_PROMPT` | `ping` | 探测用提示词 |
+| `PROBE_SYSTEM_PROMPT` | `No thinking. Respond only with exactly: pang. No extra words.` | 探测用系统提示词 |
 
-> **推理模型兼容**：对于 DeepSeek-R1、QwQ 等会在响应中输出 `<think>…</think>` 或 `<thinking>…</thinking>` 思考过程的模型，后端会在解析时自动剥离这些标签，仅保留实际回复内容用于状态判断和预览展示。
+> **推理模型兼容**：对于 DeepSeek-R1、QwQ 等会在响应中输出 `<think>…</think>` 或 `<thinking>…</thinking>` 思考过程的模型，后端会在解析时自动剥离这些标签，仅保留实际回复内容用于状态判断。系统提示词默认已要求禁止思考输出，减少 token 消耗。
 
 ### 历史与展示
 
@@ -217,10 +266,11 @@ xinference  bailian  volcengine
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| `POST` | `/api/admin/check` | 触发一次完整检测 |
 | `GET` | `/api/admin/detection` | 查看检测运行状态和自动检测配置 |
 | `POST` | `/api/admin/detection/start` | 开始检测 |
 | `POST` | `/api/admin/detection/stop` | 停止当前检测 |
+| `POST` | `/api/admin/check` | 触发一次完整检测 |
+| `POST` | `/api/admin/token` | 修改管理密钥 `{"token":"new-token"}` |
 | `GET` | `/api/admin/config` | 查看当前配置（不含密钥） |
 | `PUT` | `/api/admin/settings` | 修改阈值、检测参数、自动检测间隔 |
 | `GET` | `/api/admin/providers` | 查看 Provider 列表（不含 API Key） |
@@ -245,12 +295,13 @@ data/cg.sqlite
 
 `web/` 目录由 Vite 构建生成，发布包内已包含预构建产物，无需手动构建即可运行。
 
-历史检测结果、最新报告和告警状态保存在 SQLite。首次启动时若存在旧版 JSON 文件（`data/latest_report.json`、`data/probe_history.json`、`data/notify_state.txt`），会自动迁移到 SQLite，旧文件不会被删除。
+历史检测结果、最新报告、告警状态和管理密钥均保存在 SQLite。首次启动时若存在旧版 JSON 文件（`data/latest_report.json`、`data/probe_history.json`、`data/notify_state.txt`），会自动迁移到 SQLite，旧文件不会被删除。
 
 ## 安全提示
 
-- 该项目会真实调用模型接口并消耗 token，建议适当拉长检测间隔。
-- **公开部署（监听 `0.0.0.0` / `::`）时必须设置 `ADMIN_TOKEN`**，否则任何人均可触发检测或修改配置。
+- 该项目会真实调用模型接口并消耗 token，建议使用最小化探测提示词（默认已优化），并适当拉长检测间隔。
+- **公开部署（监听 `0.0.0.0` / `::`）时必须通过 `ADMIN_TOKEN` 环境变量显式设置密钥**，否则任何人均可触发检测或修改配置。自动生成的密钥仅适合本地使用场景。
+- 管理面板首次登录后强制要求修改密钥，后续密钥持久化存储在 SQLite，重启后无需重新配置。
 
 ## License
 
