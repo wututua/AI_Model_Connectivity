@@ -11,8 +11,12 @@ permissions:
 
 jobs:
   build-frontend:
-    name: Build frontend
+    name: Build frontend (${{ matrix.theme }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        theme: [default, argon]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -20,21 +24,23 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
-          cache-dependency-path: frontend/package-lock.json
+          cache-dependency-path: frontend/themes/${{ matrix.theme }}/package-lock.json
 
       - name: Install dependencies
-        run: npm ci --prefix frontend
+        working-directory: frontend/themes/${{ matrix.theme }}
+        run: npm ci
 
       - name: Build
-        run: npm run build --prefix frontend
+        working-directory: frontend/themes/${{ matrix.theme }}
+        run: npm run build
 
       - name: Upload web artifact
         uses: actions/upload-artifact@v4
         with:
-          name: web-dist
-          path: web/
+          name: web-theme-${{ matrix.theme }}
+          path: web/themes/${{ matrix.theme }}/
 
   build:
     name: Build ${{ matrix.goos }}-${{ matrix.goarch }}
@@ -66,16 +72,27 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Download frontend
+      - name: Download all theme builds
         uses: actions/download-artifact@v4
         with:
-          name: web-dist
-          path: web/
+          path: web/themes/
+          pattern: 'web-theme-*'
+
+      - name: Restore theme directory layout
+        run: |
+          # download-artifact extracts each artifact into a subdirectory named
+          # after the artifact: web/themes/web-theme-default/... and
+          # web/themes/web-theme-argon/...  Rename them back to the real ids.
+          for d in web/themes/web-theme-*; do
+            id="${d##*/web-theme-}"
+            mv "$d" "web/themes/$id"
+          done
+          ls -la web/themes/
 
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.22'
+          go-version-file: go.mod
           cache: true
 
       - name: Test

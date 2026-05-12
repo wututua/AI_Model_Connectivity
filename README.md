@@ -55,23 +55,36 @@ curl -X POST -H "Authorization: Bearer <your-token>" http://127.0.0.1:8080/api/a
 |--------|------|
 | 检测控制 | 查看运行状态、手动触发检测、停止检测；Token 消耗估算 |
 | Provider | 新增、编辑、删除、单独重跑 Provider |
-| 设置 | 修改检测参数、历史配置、告警通知、**激活主题切换** |
+| 设置 | 修改检测参数、历史配置、告警通知、**仪表盘 / 管理面板主题切换** |
 | 任务历史 | 分页查看历史检测任务及结果 |
 | 配置管理 | 导出/导入 JSON 配置、热加载 `.env` |
 
 ## 主题系统
 
-仪表盘和登录页支持多套前端主题，仅管理员可切换：
+仪表盘和管理面板分别使用各自的前端主题，**前后台主题相互独立、互不干扰**，仅管理员可切换：
 
-| 主题 ID | 风格 | 覆盖范围 |
-|---------|------|----------|
-| `default` | 玻璃拟态深色 + 系统/浅/深三态切换 | 全部页面（仪表盘 + 完整管理面板） |
-| `argon` | Argon Design System 亮色 + 渐变 | 仪表盘 + 登录页；登录后引导切回 default |
+| 主题 ID | 风格 | 完整度 |
+|---------|------|--------|
+| `default` | 玻璃拟态深色 + 系统/浅/深三态切换 | 仪表盘 + 完整管理面板 |
+| `argon`（开发中） | Argon Design System 亮色 + 渐变 | 仪表盘 + 登录页；管理面板内部仍在开发，引导切回 default |
 
-**切换方式**：在 default 主题的 **设置 → 激活主题** 下拉选择，保存后刷新生效。
-也可通过环境变量 `ACTIVE_THEME=argon` 在启动时指定，或调用 `PUT /api/admin/settings`。
+**切换方式**：在 default 主题的 **设置** 标签页中：
 
-每个主题是独立的 Vite 项目：未构建的主题在选择器中显示 `（未构建）`，运行时会自动回退到 default。
+- 「仪表盘主题」下拉控制公开仪表盘（`/`）使用的主题
+- 「管理面板主题」下拉控制管理面板（`/admin`）使用的主题
+
+两个字段独立保存，例如可以让仪表盘用 `argon`、管理面板留 `default`。
+
+也可通过环境变量启动时指定：
+
+```env
+DASHBOARD_THEME=argon
+ADMIN_THEME=default
+# 或简写：两个都设成同一个主题
+ACTIVE_THEME=argon
+```
+
+`DASHBOARD_THEME` 和 `ADMIN_THEME` 优先于 `ACTIVE_THEME`。未构建的主题在选择器中显示 `（未构建）`，运行时会自动回退到 `default`。
 
 ## 部署
 
@@ -159,7 +172,7 @@ frontend/themes/
     ├── package.json
     └── vite.config.ts
 
-web/themes/          # 构建产物（运行时根据 active_theme 选择）
+web/themes/          # 构建产物（运行时按 dashboard_theme / admin_theme 选择）
 ├── default/
 └── argon/
 ```
@@ -181,7 +194,9 @@ web/themes/          # 构建产物（运行时根据 active_theme 选择）
 | `DATABASE_PATH` | `DATA_DIR/cg.sqlite` | SQLite 路径，留空取默认值 |
 | `DASHBOARD_TITLE` | `模型连通性` | 页面标题 |
 | `ADMIN_TOKEN` | 自动生成 | 保护管理接口；未设置时自动生成随机密钥；公开监听时**强烈建议手动设置** |
-| `ACTIVE_THEME` | `default` | 激活的前端主题 ID（对应 `web/themes/<id>/`），运行时可在管理面板覆盖 |
+| `DASHBOARD_THEME` | `default` | 仪表盘（`/`）使用的主题 ID，运行时可在管理面板覆盖 |
+| `ADMIN_THEME` | `default` | 管理面板（`/admin`）使用的主题 ID，运行时可在管理面板覆盖 |
+| `ACTIVE_THEME` | — | 同时设置以上两项的简写，仅在 `DASHBOARD_THEME` / `ADMIN_THEME` 未指定时生效 |
 
 #### 管理密钥说明
 
@@ -320,9 +335,9 @@ xinference  bailian  volcengine
 | `POST` | `/api/admin/detection/stop` | 停止当前检测 |
 | `POST` | `/api/admin/check` | 触发一次完整检测 |
 | `POST` | `/api/admin/token` | 修改管理密钥 `{"token":"new-token"}` |
-| `GET` | `/api/admin/themes` | 列出 `web/themes/` 下已构建的主题及当前激活主题 |
+| `GET` | `/api/admin/themes` | 列出 `web/themes/` 下已构建的主题，返回 `{dashboard_theme, admin_theme, themes}` |
 | `GET` | `/api/admin/config` | 查看当前配置（不含密钥） |
-| `PUT` | `/api/admin/settings` | 修改阈值、检测参数、自动检测间隔、激活主题 |
+| `PUT` | `/api/admin/settings` | 修改阈值、检测参数、自动检测间隔、`dashboard_theme` / `admin_theme` |
 | `GET` | `/api/admin/providers` | 查看 Provider 列表（不含 API Key） |
 | `POST` | `/api/admin/providers` | 新增 Provider |
 | `PUT` | `/api/admin/providers/{id}` | 修改 Provider；不传 `api_key` 时保留旧值 |
@@ -346,7 +361,7 @@ web/themes/argon/assets/index.css
 data/cg.sqlite
 ```
 
-`web/themes/<id>/` 目录由各主题的 Vite 构建生成，发布包内已包含预构建产物，无需手动构建即可运行。SPA handler 根据当前激活主题选择目录，缺失时自动回退到 `default`。
+`web/themes/<id>/` 目录由各主题的 Vite 构建生成，发布包内已包含预构建产物，无需手动构建即可运行。SPA handler 按请求路径分别选择主题：`/admin*` 使用 `admin_theme`，其他路径使用 `dashboard_theme`；目标主题缺失时自动回退到 `default`。
 
 历史检测结果、最新报告、告警状态和管理密钥均保存在 SQLite。首次启动时若存在旧版 JSON 文件（`data/latest_report.json`、`data/probe_history.json`、`data/notify_state.txt`），会自动迁移到 SQLite，旧文件不会被删除。
 
