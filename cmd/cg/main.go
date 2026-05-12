@@ -56,6 +56,26 @@ func main() {
 
 	broker := web.NewBroker()
 	app := &application{baseCfg: baseCfg, cfg: cfg, store: store, broker: broker, schedulerWake: make(chan struct{}, 1)}
+
+	// Resolve effective admin token: env var > stored > auto-generate
+	adminToken := baseCfg.AdminToken
+	adminFirstUse := false
+	if adminToken == "" {
+		stored, found, _ := store.GetKV(context.Background(), "admin_stored_token")
+		if found && stored != "" {
+			adminToken = stored
+			firstUseVal, _, _ := store.GetKV(context.Background(), "admin_token_first_use")
+			adminFirstUse = firstUseVal == "true"
+		} else {
+			adminToken = generateAdminToken()
+			adminFirstUse = true
+			_ = store.SetKV(context.Background(), "admin_stored_token", adminToken)
+			_ = store.SetKV(context.Background(), "admin_token_first_use", "true")
+			fmt.Printf("\n╔══════════════════════════════════════════╗\n║  Auto-generated ADMIN_TOKEN: %-10s  ║\n║  Please change it on first login         ║\n╚══════════════════════════════════════════╝\n\n", adminToken)
+		}
+	}
+	app.adminToken = adminToken
+	app.adminFirstUse = adminFirstUse
 	args := os.Args[1:]
 	if len(args) > 0 {
 		switch args[0] {
@@ -125,12 +145,14 @@ type application struct {
 	store          *storage.SQLiteStore
 	broker         *web.Broker
 	schedulerWake  chan struct{}
-	mu             sync.Mutex
+	mu             sync.RWMutex
 	running        bool
 	runCancel      context.CancelFunc
 	taskID         int64
 	taskKind       string
 	taskProviderID string
+	adminToken     string
+	adminFirstUse  bool
 }
 
 type checkOptions struct {
@@ -158,8 +180,8 @@ func (a *application) StopCheck() bool {
 }
 
 func (a *application) RunningState() web.RunningState {
-	a.mu.Lock()
-	defer a.mu.Unlock()
+	a.mu.RLock()
+	defer a.mu.RUnlock()
 	cfg := a.cfg
 	return web.RunningState{
 		Running:                   a.running,
@@ -168,11 +190,32 @@ func (a *application) RunningState() web.RunningState {
 		ProviderID:                a.taskProviderID,
 		AutoCheckIntervalMinHours: cfg.AutoCheckIntervalMinHours,
 		AutoCheckIntervalMaxHours: cfg.AutoCheckIntervalMaxHours,
+		FirstUse:                  a.adminFirstUse,
 	}
 }
 
 func (a *application) AdminConfig(context.Context) (config.AdminConfig, error) {
 	return config.AdminConfigFromConfig(a.currentConfig()), nil
+}
+
+func (a *application) AdminToken() string {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.adminToken
+}
+
+func (a *application) ChangeAdminToken(ctx context.Context, newToken string) error {
+	if err := a.store.SetKV(ctx, "admin_stored_token", newToken); err != nil {
+		return err
+	}
+	if err := a.store.SetKV(ctx, "admin_token_first_use", "false"); err != nil {
+		return err
+	}
+	a.mu.Lock()
+	a.adminToken = newToken
+	a.adminFirstUse = false
+	a.mu.Unlock()
+	return nil
 }
 
 func (a *application) UpdateSettings(ctx context.Context, settings config.RuntimeSettings) (config.AdminConfig, error) {
@@ -297,8 +340,8 @@ func (a *application) GetTask(ctx context.Context, id int64) (storage.CheckTask,
 }
 
 func (a *application) currentConfig() config.Config {
-	a.mu.Lock()
-	defer a.mu.Unlock()
+	a.mu.RLock()
+	defer a.mu.RUnlock()
 	return a.cfg
 }
 
@@ -505,4 +548,22 @@ func intervalRange(cfg config.Config) (float64, float64, bool) {
 		minHours, maxHours = maxHours, minHours
 	}
 	return minHours, maxHours, maxHours > 0
+}
+
+// generateAdminToken returns a random 10-character token containing at least
+// one lowercase letter, one uppercase letter, and one digit.
+func generateAdminToken() string {
+	const lower = "abcdefghijklmnopqrstuvwxyz"
+	const upper = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+	const digit = "0123456789"
+	const all = lower + upper + digit
+	b := make([]byte, 10)
+	b[0] = lower[rand.Intn(len(lower))]
+	b[1] = upper[rand.Intn(len(upper))]
+	b[2] = digit[rand.Intn(len(digit))]
+	for i := 3; i < 10; i++ {
+		b[i] = all[rand.Intn(len(all))]
+	}
+	rand.Shuffle(len(b), func(i, j int) { b[i], b[j] = b[j], b[i] })
+	return string(b)
 }

@@ -76,6 +76,11 @@ func NewSQLite(ctx context.Context, databasePath, dataDir string) (*SQLiteStore,
 	if err != nil {
 		return nil, err
 	}
+	// SQLite is single-writer; cap connections to 1 to avoid "database is locked".
+	// WAL mode still allows concurrent readers within the same connection pool.
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+	db.SetConnMaxLifetime(0)
 	store := &SQLiteStore{db: db, dataDir: dataDir}
 	if err := store.init(ctx); err != nil {
 		db.Close()
@@ -97,6 +102,10 @@ func (s *SQLiteStore) init(ctx context.Context) error {
 		`PRAGMA journal_mode = WAL`,
 		`PRAGMA busy_timeout = 5000`,
 		`PRAGMA foreign_keys = ON`,
+		`PRAGMA synchronous = NORMAL`,
+		`PRAGMA cache_size = -64000`,
+		`PRAGMA temp_store = MEMORY`,
+		`PRAGMA mmap_size = 30000000`,
 		`CREATE TABLE IF NOT EXISTS probe_results (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			provider TEXT NOT NULL,
@@ -145,6 +154,7 @@ func (s *SQLiteStore) init(ctx context.Context) error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_check_tasks_started ON check_tasks(started_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_check_tasks_status ON check_tasks(status)`,
+		`CREATE INDEX IF NOT EXISTS idx_check_tasks_status_provider ON check_tasks(status, provider_id)`,
 	}
 	for _, statement := range statements {
 		if _, err := s.db.ExecContext(ctx, statement); err != nil {
@@ -302,6 +312,23 @@ func (s *SQLiteStore) SaveRuntimeConfig(ctx context.Context, value config.Runtim
 		return err
 	}
 	_, err = s.db.ExecContext(ctx, `INSERT INTO runtime_config (key, value_json, updated_at) VALUES ('runtime', ?, ?) ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json, updated_at = excluded.updated_at`, string(data), time.Now().Format(time.RFC3339))
+	return err
+}
+
+func (s *SQLiteStore) GetKV(ctx context.Context, key string) (string, bool, error) {
+	var value string
+	err := s.db.QueryRowContext(ctx, `SELECT value_json FROM runtime_config WHERE key = ?`, key).Scan(&value)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	return value, err == nil, err
+}
+
+func (s *SQLiteStore) SetKV(ctx context.Context, key, value string) error {
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO runtime_config (key, value_json, updated_at) VALUES (?, ?, ?)
+		 ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json, updated_at = excluded.updated_at`,
+		key, value, time.Now().Format(time.RFC3339))
 	return err
 }
 

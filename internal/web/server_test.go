@@ -14,7 +14,7 @@ import (
 )
 
 // stubAdmin satisfies AdminController with no-op implementations.
-type stubAdmin struct{}
+type stubAdmin struct{ token string }
 
 func (stubAdmin) CheckProvider(context.Context, string) (report.Report, error) {
 	return report.Report{}, nil
@@ -46,6 +46,8 @@ func (stubAdmin) ListTasks(context.Context, storage.TaskQuery) ([]storage.CheckT
 func (stubAdmin) GetTask(context.Context, int64) (storage.CheckTask, error) {
 	return storage.CheckTask{}, nil
 }
+func (s stubAdmin) AdminToken() string                                  { return s.token }
+func (stubAdmin) ChangeAdminToken(context.Context, string) error        { return nil }
 
 func newTestServer(t *testing.T) (*Server, *storage.SQLiteStore) {
 	t.Helper()
@@ -58,7 +60,7 @@ func newTestServer(t *testing.T) (*Server, *storage.SQLiteStore) {
 	cfg := config.Config{AdminToken: "secret", AppHost: "127.0.0.1", AppPort: 8080}
 	srv := NewServer(cfg, store, func(context.Context) (report.Report, error) {
 		return report.Report{}, nil
-	}, nil, stubAdmin{})
+	}, nil, stubAdmin{token: "secret"})
 	return srv, store
 }
 

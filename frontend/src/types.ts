@@ -71,6 +71,7 @@ export interface RunningState {
   provider_id: string
   auto_check_interval_min_hours: number
   auto_check_interval_max_hours: number
+  first_use: boolean
 }
 
 export interface RuntimeSettings {

@@ -25,6 +25,8 @@ type AdminController interface {
 	CheckProvider(context.Context, string) (report.Report, error)
 	StopCheck() bool
 	RunningState() RunningState
+	AdminToken() string
+	ChangeAdminToken(context.Context, string) error
 	AdminConfig(context.Context) (config.AdminConfig, error)
 	UpdateSettings(context.Context, config.RuntimeSettings) (config.AdminConfig, error)
 	UpsertProvider(context.Context, string, config.ProviderUpdate) (config.SafeProviderConfig, error)
@@ -43,6 +45,7 @@ type RunningState struct {
 	ProviderID                string  `json:"provider_id"`
 	AutoCheckIntervalMinHours float64 `json:"auto_check_interval_min_hours"`
 	AutoCheckIntervalMaxHours float64 `json:"auto_check_interval_max_hours"`
+	FirstUse                  bool    `json:"first_use"`
 }
 
 var ErrCheckAlreadyRunning = errors.New("check already running")
@@ -113,6 +116,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/admin/providers/", s.adminProviderItem)
 	mux.HandleFunc("/api/admin/tasks", s.adminTasks)
 	mux.HandleFunc("/api/admin/tasks/", s.adminTaskItem)
+	mux.HandleFunc("/api/admin/token", s.adminChangeToken)
 	mux.Handle("/", spaHandler(s.cfg.WebDir))
 	return mux
 }
@@ -152,15 +156,23 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 		writeSSE(w, flusher, value)
 	}
 
-	keepAlive := time.NewTicker(25 * time.Second)
+	keepAlive := time.NewTimer(25 * time.Second)
 	defer keepAlive.Stop()
 	for {
 		select {
 		case value := <-ch:
 			writeSSE(w, flusher, value)
+			if !keepAlive.Stop() {
+				select {
+				case <-keepAlive.C:
+				default:
+				}
+			}
+			keepAlive.Reset(25 * time.Second)
 		case <-keepAlive.C:
 			_, _ = fmt.Fprint(w, ": keep-alive\n\n")
 			flusher.Flush()
+			keepAlive.Reset(25 * time.Second)
 		case <-r.Context().Done():
 			return
 		}
@@ -400,15 +412,38 @@ func (s *Server) adminTaskItem(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) requireAdmin(w http.ResponseWriter, r *http.Request) bool {
-	if s.cfg.AdminToken != "" && r.Header.Get("Authorization") != "Bearer "+s.cfg.AdminToken {
+	token := s.admin.AdminToken()
+	if token != "" && r.Header.Get("Authorization") != "Bearer "+token {
 		writeJSON(w, http.StatusUnauthorized, map[string]any{"ok": false, "error": "unauthorized"})
 		return false
 	}
-	if s.cfg.AdminToken == "" && isPublicBindHost(s.cfg.AppHost) {
+	if token == "" && isPublicBindHost(s.cfg.AppHost) {
 		writeJSON(w, http.StatusForbidden, map[string]any{"ok": false, "error": "ADMIN_TOKEN is required for admin APIs when APP_HOST is public"})
 		return false
 	}
 	return true
+}
+
+func (s *Server) adminChangeToken(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdmin(w, r) {
+		return
+	}
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w)
+		return
+	}
+	var body struct {
+		Token string `json:"token"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || strings.TrimSpace(body.Token) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "token cannot be empty"})
+		return
+	}
+	if err := s.admin.ChangeAdminToken(r.Context(), body.Token); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (s *Server) writeCheckError(w http.ResponseWriter, err error) {

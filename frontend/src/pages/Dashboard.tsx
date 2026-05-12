@@ -206,7 +206,7 @@ export default function Dashboard() {
                 >
                   {report.overall_status}
                 </span>
-                <StatusPill status={report.overall_class} label={report.overall_class.toUpperCase()} large />
+                <StatusPill status={report.overall_class} label={(report.overall_class ?? '').toUpperCase()} large />
               </div>
               <p className="text-sm mt-3" style={{ color: 'var(--muted)' }}>
                 更新于 <span title={report.generated_at}>{relativeTime(report.generated_at).text}</span>
