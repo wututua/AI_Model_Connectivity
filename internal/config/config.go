@@ -32,7 +32,8 @@ type Config struct {
 	MaxHistoryRecords         int
 	ShowErrorDetail           bool
 	ThemeMode                 string
-	ActiveTheme               string
+	DashboardTheme            string
+	AdminTheme                string
 	DayModeStartHour          int
 	DayModeEndHour            int
 	AutoCheckIntervalMinHours float64
@@ -102,7 +103,10 @@ func Load(path string) (Config, error) {
 	cfg.MaxHistoryRecords = max(1, getInt(values, "MAX_HISTORY_RECORDS", cfg.MaxHistoryRecords))
 	cfg.ShowErrorDetail = getBool(values, "SHOW_ERROR_DETAIL", cfg.ShowErrorDetail)
 	cfg.ThemeMode = getString(values, "THEME_MODE", cfg.ThemeMode)
-	cfg.ActiveTheme = getString(values, "ACTIVE_THEME", cfg.ActiveTheme)
+	// ACTIVE_THEME is a fallback default for both dashboard and admin themes.
+	fallback := getString(values, "ACTIVE_THEME", "default")
+	cfg.DashboardTheme = getString(values, "DASHBOARD_THEME", fallback)
+	cfg.AdminTheme = getString(values, "ADMIN_THEME", fallback)
 	cfg.DayModeStartHour = clamp(getInt(values, "DAY_MODE_START_HOUR", cfg.DayModeStartHour), 0, 23)
 	cfg.DayModeEndHour = clamp(getInt(values, "DAY_MODE_END_HOUR", cfg.DayModeEndHour), 0, 23)
 	cfg.AutoCheckIntervalMinHours = getFloat(values, "AUTO_CHECK_INTERVAL_MIN_HOURS", cfg.AutoCheckIntervalMinHours)
@@ -142,7 +146,8 @@ func defaults() Config {
 		MaxHistoryRecords:         500,
 		ShowErrorDetail:           true,
 		ThemeMode:                 "auto",
-		ActiveTheme:               "default",
+		DashboardTheme:            "default",
+		AdminTheme:                "default",
 		DayModeStartHour:          8,
 		DayModeEndHour:            18,
 		AutoCheckIntervalMinHours: 0,

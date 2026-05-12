@@ -97,7 +97,8 @@ export function fmtNum(n: number): string {
 export function normalizeSettings(s: RuntimeSettings): RuntimeSettings {
   return {
     ...s,
-    active_theme: s.active_theme ?? 'default',
+    dashboard_theme: s.dashboard_theme ?? 'default',
+    admin_theme: s.admin_theme ?? 'default',
     skip_models: s.skip_models ?? [],
     notify_providers: s.notify_providers ?? [],
     notify_models: s.notify_models ?? [],

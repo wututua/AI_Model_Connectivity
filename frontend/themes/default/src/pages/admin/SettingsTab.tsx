@@ -98,16 +98,30 @@ export function SettingsTab() {
         <h3 className="text-xs font-medium uppercase tracking-widest mb-3" style={{ color: 'var(--muted)', letterSpacing: '.12em' }}>基础</h3>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {textInput('dashboard_title', '仪表盘标题')}
-          <Field label="激活主题" hint="切换全站激活的前端主题；未构建的主题需要先构建产物（web/themes/<id>/）才能使用">
+          <Field label="仪表盘主题" hint="公开仪表盘（/）使用的主题；前后台主题独立，互不干扰">
             <select
               className={inputCls}
-              value={form.active_theme || 'default'}
-              onChange={e => set('active_theme', e.target.value)}
+              value={form.dashboard_theme || 'default'}
+              onChange={e => set('dashboard_theme', e.target.value)}
             >
-              {themes.length === 0 && <option value={form.active_theme || 'default'}>{form.active_theme || 'default'}</option>}
+              {themes.length === 0 && <option value={form.dashboard_theme || 'default'}>{form.dashboard_theme || 'default'}</option>}
               {themes.map(t => (
                 <option key={t.id} value={t.id}>
-                  {t.id}{t.built ? '' : '（未构建）'}
+                  {t.id}{t.id === 'argon' ? '（开发中）' : ''}{t.built ? '' : '（未构建）'}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="管理面板主题" hint="管理面板（/admin）使用的主题；前后台主题独立，互不干扰">
+            <select
+              className={inputCls}
+              value={form.admin_theme || 'default'}
+              onChange={e => set('admin_theme', e.target.value)}
+            >
+              {themes.length === 0 && <option value={form.admin_theme || 'default'}>{form.admin_theme || 'default'}</option>}
+              {themes.map(t => (
+                <option key={t.id} value={t.id}>
+                  {t.id}{t.id === 'argon' ? '（开发中）' : ''}{t.built ? '' : '（未构建）'}
                 </option>
               ))}
             </select>

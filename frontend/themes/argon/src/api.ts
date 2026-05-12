@@ -39,10 +39,11 @@ export const api = {
   detection: (): Promise<RunningState> => request<RunningState>('GET', '/api/admin/detection'),
   changeToken: (token: string): Promise<void> => request('POST', '/api/admin/token', { token }),
   // PUT /api/admin/settings is a full replace, so we GET first, mutate
-  // only active_theme, then PUT back.
-  updateActiveTheme: async (theme: string): Promise<void> => {
+  // only the admin_theme field, then PUT back.  Dashboard theme is
+  // intentionally not touched here — the two are independent.
+  updateAdminTheme: async (theme: string): Promise<void> => {
     const cfg = await request<{ settings: Record<string, unknown> }>('GET', '/api/admin/config')
-    await request('PUT', '/api/admin/settings', { ...cfg.settings, active_theme: theme })
+    await request('PUT', '/api/admin/settings', { ...cfg.settings, admin_theme: theme })
   },
 }
 

@@ -92,6 +92,10 @@ export const api = {
   reloadConfig: (): Promise<AdminConfig> =>
     request<AdminConfig>('POST', '/api/admin/config/reload'),
 
-  themes: (): Promise<{ active: string; themes: { id: string; built: boolean }[] }> =>
+  themes: (): Promise<{
+    dashboard_theme: string
+    admin_theme: string
+    themes: { id: string; built: boolean }[]
+  }> =>
     request('GET', '/api/admin/themes'),
 }

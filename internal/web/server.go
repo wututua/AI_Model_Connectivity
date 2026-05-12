@@ -27,7 +27,8 @@ type AdminController interface {
 	RunningState() RunningState
 	AdminToken() string
 	ChangeAdminToken(context.Context, string) error
-	ActiveTheme() string
+	DashboardTheme() string
+	AdminTheme() string
 	AdminConfig(context.Context) (config.AdminConfig, error)
 	UpdateSettings(context.Context, config.RuntimeSettings) (config.AdminConfig, error)
 	UpsertProvider(context.Context, string, config.ProviderUpdate) (config.SafeProviderConfig, error)
@@ -119,7 +120,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/admin/tasks/", s.adminTaskItem)
 	mux.HandleFunc("/api/admin/token", s.adminChangeToken)
 	mux.HandleFunc("/api/admin/themes", s.adminThemes)
-	mux.Handle("/", spaHandler(s.cfg.WebDir, s.admin.ActiveTheme))
+	mux.Handle("/", spaHandler(s.cfg.WebDir, s.admin.DashboardTheme, s.admin.AdminTheme))
 	return mux
 }
 
@@ -468,21 +469,22 @@ func (s *Server) HTTPServer() *http.Server {
 	}
 }
 
-// spaHandler serves static files from the active theme directory under
-// webDir/themes/<active>/.  If the active theme directory doesn't exist
-// on disk, falls back to webDir/themes/default/.  As a last resort (for
-// legacy single-theme layouts) it serves directly from webDir.
+// spaHandler serves static files from the appropriate theme directory.
+// /admin* paths use the admin theme; everything else uses the dashboard
+// theme.  If the requested theme directory doesn't exist on disk, falls
+// back to webDir/themes/default/, then to webDir itself (legacy single-
+// theme layouts).
 //
 // For any path that has no file extension and doesn't start with /api/,
 // the React SPA's index.html is served so client-side routing works.
-func spaHandler(webDir string, activeTheme func() string) http.Handler {
-	resolveDir := func() string {
-		active := strings.TrimSpace(activeTheme())
-		if active == "" {
-			active = "default"
+func spaHandler(webDir string, dashboardTheme, adminTheme func() string) http.Handler {
+	resolveDir := func(theme string) string {
+		theme = strings.TrimSpace(theme)
+		if theme == "" {
+			theme = "default"
 		}
 		candidates := []string{
-			filepath.Join(webDir, "themes", active),
+			filepath.Join(webDir, "themes", theme),
 			filepath.Join(webDir, "themes", "default"),
 			webDir,
 		}
@@ -498,7 +500,12 @@ func spaHandler(webDir string, activeTheme func() string) http.Handler {
 			http.NotFound(w, r)
 			return
 		}
-		dir := resolveDir()
+		// /admin and /admin/* render the admin theme; everything else uses dashboard.
+		theme := dashboardTheme()
+		if r.URL.Path == "/admin" || strings.HasPrefix(r.URL.Path, "/admin/") {
+			theme = adminTheme()
+		}
+		dir := resolveDir(theme)
 		fpath := filepath.Join(dir, filepath.Clean(r.URL.Path))
 		if _, err := os.Stat(fpath); err == nil && !strings.HasSuffix(fpath, string(os.PathSeparator)) {
 			http.FileServer(http.Dir(dir)).ServeHTTP(w, r)
@@ -545,7 +552,11 @@ func (s *Server) adminThemes(w http.ResponseWriter, r *http.Request) {
 			themes = append(themes, themeInfo{ID: id, Built: false})
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"active": s.admin.ActiveTheme(), "themes": themes})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"dashboard_theme": s.admin.DashboardTheme(),
+		"admin_theme":     s.admin.AdminTheme(),
+		"themes":          themes,
+	})
 }
 
 func isPublicBindHost(host string) bool {

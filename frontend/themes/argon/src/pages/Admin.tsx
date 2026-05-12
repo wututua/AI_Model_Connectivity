@@ -217,7 +217,7 @@ function AuthedPlaceholder({ onLogout }: { onLogout: () => void }) {
   const switchToDefault = async () => {
     setSwitching(true); setErr('')
     try {
-      await api.updateActiveTheme('default')
+      await api.updateAdminTheme('default')
       window.location.reload()
     } catch (e) {
       setErr(`切换失败：${(e as Error).message}`)
@@ -238,7 +238,7 @@ function AuthedPlaceholder({ onLogout }: { onLogout: () => void }) {
           </Link>
           <h1 className="text-3xl font-bold text-white mb-2">已登录</h1>
           <p className="text-white/70 max-w-2xl">
-            Argon 主题已实现登录入口和仪表盘，但完整的管理面板（Provider、设置、任务历史、配置导入导出）仅在 default 主题中提供。
+            Argon 主题尚在开发中：仅实现了登录入口和仪表盘。完整的管理面板（Provider、设置、任务历史、配置导入导出）目前由 default 主题提供。前后台主题相互独立，此处的切换不会影响仪表盘主题。
           </p>
         </div>
       </header>
@@ -252,11 +252,11 @@ function AuthedPlaceholder({ onLogout }: { onLogout: () => void }) {
               </div>
               <div>
                 <h2 className="text-lg font-semibold mb-1" style={{ color: 'var(--argon-heading)' }}>
-                  切换到 default 主题访问完整管理面板
+                  切换管理面板到 default 主题
                 </h2>
                 <p className="text-sm" style={{ color: 'var(--argon-text)' }}>
-                  点击下方按钮会把全站激活主题切换为 default，浏览器随后自动刷新，
-                  你将看到带有完整 Provider 管理、任务历史和配置导入导出的管理面板。
+                  点击下方按钮会把 <strong>管理面板</strong> 的主题切换为 default，
+                  仪表盘主题保持不变。浏览器随后自动刷新，你将看到带有完整 Provider 管理、任务历史和配置导入导出的管理面板。
                 </p>
               </div>
             </div>
@@ -270,7 +270,7 @@ function AuthedPlaceholder({ onLogout }: { onLogout: () => void }) {
             <div className="flex flex-wrap gap-3">
               <button onClick={switchToDefault} disabled={switching} className="argon-btn argon-btn-primary">
                 {switching ? <Loader2 className="w-4 h-4 animate-spin" /> : <Palette className="w-4 h-4" />}
-                {switching ? '切换中…' : '切换到 default 主题'}
+                {switching ? '切换中…' : '切换管理面板到 default'}
               </button>
               <button onClick={onLogout} className="argon-btn argon-btn-secondary">退出登录</button>
             </div>
@@ -278,7 +278,7 @@ function AuthedPlaceholder({ onLogout }: { onLogout: () => void }) {
         </div>
 
         <p className="text-center text-xs pt-2" style={{ color: 'var(--argon-muted)' }}>
-          提示：在 default 主题的「设置 → 激活主题」可随时切回 Argon。
+          提示：在 default 主题的「设置 → 管理面板主题」可随时切回 Argon。
         </p>
       </main>
     </div>

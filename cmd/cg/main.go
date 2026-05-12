@@ -205,10 +205,20 @@ func (a *application) AdminToken() string {
 	return a.adminToken
 }
 
-func (a *application) ActiveTheme() string {
+func (a *application) DashboardTheme() string {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
-	theme := strings.TrimSpace(a.cfg.ActiveTheme)
+	theme := strings.TrimSpace(a.cfg.DashboardTheme)
+	if theme == "" {
+		return "default"
+	}
+	return theme
+}
+
+func (a *application) AdminTheme() string {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	theme := strings.TrimSpace(a.cfg.AdminTheme)
 	if theme == "" {
 		return "default"
 	}

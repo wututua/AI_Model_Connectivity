@@ -90,7 +90,8 @@ export interface RuntimeSettings {
   max_history_records: number
   show_error_detail: boolean
   theme_mode: string
-  active_theme: string
+  dashboard_theme: string
+  admin_theme: string
   day_mode_start_hour: number
   day_mode_end_hour: number
   auto_check_interval_min_hours: number
