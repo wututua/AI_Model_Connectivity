@@ -63,7 +63,7 @@ CNB 流水线目前发布二进制压缩包，不负责推送容器镜像。
 | 工作流 | 触发 | 作用 |
 |--------|------|------|
 | `ci.yml` | 非 `v*` tag 的 push、Pull Request | 运行 `go vet`、`go test -race` 和 TypeScript 检查 |
-| `release.yml` | `main`、Pull Request、手动运行、`v*` tag | 执行跨平台后端测试、前端构建、Compose/容器验证；标签发布 6 平台二进制，`main` 或标签推送 Docker Hub 多架构镜像 |
+| `release.yml` | `main`、手动运行、`v*` tag（以 GitHub 当前 workflow 为准） | 构建前端和 6 平台二进制；标签发布 GitHub Release，`main` 或标签推送 Docker Hub 多架构镜像。不同镜像同步时可能包含额外的测试/容器校验步骤 |
 
 Docker Hub 镜像名由仓库 Secret `DOCKERHUB_USERNAME` 决定，工作流目标为 `<DOCKERHUB_USERNAME>/model-connectivity`。文档不使用未经流水线配置的 GHCR 地址；本地部署可以直接用 `docker compose up -d --build` 从源码构建。
 

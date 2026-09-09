@@ -142,7 +142,7 @@ location /api/events {
 | 工作流 | 触发 | 内容 |
 |--------|------|------|
 | `ci.yml` | push / PR（排除 `v*` tag） | `go vet`、`go test -race`、前端 `tsc --noEmit` |
-| `release.yml` | tag `v*` / main / PR / 手动 | Windows+Linux 后端测试、Linux 竞态检测、前端构建、Compose 校验、容器启动与健康检查、`/api/admin/config` 鉴权验证；打 tag 时发布 Release，tag 或 `main` 推送 Docker Hub 多架构镜像 |
+| `release.yml` | tag `v*` / main / 手动 | 前端构建、6 平台二进制构建与测试；打 tag 时发布 Release，tag 或 `main` 推送 Docker Hub 多架构镜像。具体测试和容器校验步骤以对应仓库的 workflow 文件为准 |
 
 ## 9. 容量与性能建议
 
