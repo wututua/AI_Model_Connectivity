@@ -1,5 +1,7 @@
 # 运维与可观测
 
+> [项目主页](../README.md) · [文档索引](README.md) · [GitHub 仓库](https://github.com/wututua/AI_Model_Connectivity) · [CNB 仓库](https://cnb.cool/ligzs/AI_Model_Connectivity) · [仓库与发布](repositories.md)
+
 ## 1. 健康检查
 
 | 方式 | 说明 |
@@ -39,9 +41,9 @@ scrape_configs:
 ```yaml
 - alert: ModelConnectivityProbeFailing
   expr: increase(cg_probe_total{status="error"}[30m]) > 5
-- alert: ModelConnectivityStaleReport
-  expr: time() - max(cg_check_runs_total) > 0   # 更推荐直接监控 /api/status 的 generated_at
 ```
+
+`cg_check_runs_total` 是计数器，不包含最后报告时间，不能直接用于 stale-report 告警。报告过期检测应由外部探针读取 `/api/status` 的 `generated_at`，或根据部署计划监控长时间没有新增 `cg_check_runs_total` 的情况。
 
 ## 3. 日志
 

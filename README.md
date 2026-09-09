@@ -1,340 +1,149 @@
 <div align="center">
-  <img src="assets/gpt_uptime_v2.png" alt="AI Model Connectivity logo" width="180">
+  <img src="assets/gpt_uptime_v2.png" alt="AI Model Connectivity" width="160">
   <h1>AI Model Connectivity</h1>
-  <p>面向 OpenAI 兼容接口的轻量级模型可用性监控与管理平台</p>
+  <p>面向 OpenAI 兼容接口的轻量级、自托管模型可用性监控平台</p>
   <p>
-    <a href="https://github.com/wututua/AI_Model_Connectivity/actions/workflows/ci.yml">
-      <img src="https://github.com/wututua/AI_Model_Connectivity/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI">
-    </a>
-    <a href="https://go.dev/">
-      <img src="https://img.shields.io/badge/Go-1.25-00ADD8?logo=go&amp;logoColor=white" alt="Go 1.25">
-    </a>
-    <a href="https://react.dev/">
-      <img src="https://img.shields.io/badge/React-18.3-61DAFB?logo=react&amp;logoColor=20232A" alt="React 18.3">
-    </a>
-    <a href="LICENSE">
-      <img src="https://img.shields.io/github/license/wututua/AI_Model_Connectivity" alt="MIT License">
-    </a>
+    <a href="https://github.com/wututua/AI_Model_Connectivity/actions/workflows/ci.yml"><img src="https://github.com/wututua/AI_Model_Connectivity/actions/workflows/ci.yml/badge.svg?branch=main" alt="GitHub CI"></a>
+    <a href="https://cnb.cool/ligzs/AI_Model_Connectivity"><img src="https://img.shields.io/badge/CNB-镜像仓库-00B578" alt="CNB"></a>
+    <a href="https://go.dev/"><img src="https://img.shields.io/badge/Go-1.25-00ADD8?logo=go&amp;logoColor=white" alt="Go 1.25"></a>
+    <a href="https://react.dev/"><img src="https://img.shields.io/badge/React-18.3-61DAFB?logo=react&amp;logoColor=20232A" alt="React 18.3"></a>
+    <a href="LICENSE"><img src="https://img.shields.io/github/license/wututua/AI_Model_Connectivity" alt="MIT License"></a>
   </p>
   <p>
-    <a href="#快速开始">快速开始</a>
+    <a href="https://github.com/wututua/AI_Model_Connectivity">GitHub 仓库</a>
     <span> · </span>
-    <a href="#部署">部署</a>
+    <a href="https://cnb.cool/ligzs/AI_Model_Connectivity">CNB 仓库</a>
     <span> · </span>
-    <a href="docs/README.md">完整文档</a>
+    <a href="docs/README.md">项目文档</a>
+    <span> · </span>
+    <a href="https://github.com/wututua/AI_Model_Connectivity/releases">GitHub Releases</a>
+    <span> · </span>
+    <a href="https://cnb.cool/ligzs/AI_Model_Connectivity/-/releases">CNB Releases</a>
   </p>
 </div>
 
-> AI Model Connectivity（简称 CG）会定期探测多个 Provider 与模型，聚合可用率、延迟、历史状态和告警信息，并通过一个自托管 Web 界面集中展示。
+> 项目同时托管在 [GitHub](https://github.com/wututua/AI_Model_Connectivity) 和 [CNB](https://cnb.cool/ligzs/AI_Model_Connectivity)。GitHub 是上游源码仓库，CNB 提供国内访问友好的同步镜像、流水线和独立 Release；同一份 README 在两个仓库中都可以直接跳转到另一端。
 
-<details open>
-  <summary><strong>目录</strong></summary>
+AI Model Connectivity（简称 CG）会定期探测多个 Provider 及其模型，集中展示可用率、延迟、历史状态和 Token 用量，并在状态变化时发送告警。服务由单个 Go 进程、React 管理界面和本地 SQLite 组成，适合个人、团队或内网环境自托管。
 
-- [功能亮点](#功能亮点)
-- [技术栈](#技术栈)
+## 目录
+
+- [主要特性](#主要特性)
 - [快速开始](#快速开始)
-- [管理面板](#管理面板)
 - [部署](#部署)
-- [配置](#配置)
-- [Provider 配置](#provider-配置)
-- [API](#api)
-- [项目结构](#项目结构)
-- [安全提示](#安全提示)
-- [License](#license)
+- [配置 Provider](#配置-provider)
+- [管理与监控](#管理与监控)
+- [CNB 支持](#cnb-支持)
+- [项目文档](#项目文档)
+- [本地开发](#本地开发)
+- [安全说明](#安全说明)
+- [参与贡献](#参与贡献)
+- [许可证](#许可证)
 
-</details>
+## 主要特性
 
-## 功能亮点
-
-- 检测 `/v1/chat/completions` 和 `/v1/models` 接口
-- 支持多个 Provider 和多个模型，双层并发控制（全局 + 单 Provider）
-- 三态展示：正常、较慢、异常；记录历史、24h 平均延迟和统计窗口可用率
-- SSE 实时推送，仪表盘自动刷新；无实时推送时自动降级为指数退避轮询（30s → 60s → 120s）
-- 自动剥离响应中的 `<think>` / `<thinking>` 思考标签，兼容 DeepSeek-R1、QwQ 等推理模型
-- 仪表盘全局搜索 + 状态过滤（正常 / 较慢 / 异常），多维排序（状态 / 名称 / 延迟 / 模型数），简洁 / 详细卡片视图切换
-- 仪表盘展示每次历史检测的圆形 LED 状态灯、每个模型的当前检测状态指示灯及延迟曲线
-- React + TypeScript 前端，使用 shadcn/ui 源码组件、Radix UI、Tailwind CSS 和 Lucide 图标
-- Web 管理面板：在浏览器中动态增删 Provider、调整检测参数、查看任务历史与 Token 用量、导入导出配置
-- 每个 Provider 独立检测开关（`probe_enabled`）：可保留配置但暂停探测，不影响仪表盘展示
-- 支持 Telegram、Discord、Bark、企业微信、钉钉和通用 Webhook 告警通知
-- 天蓝色主视觉，健康、较慢、异常状态分别使用独立语义色；支持跟随系统 / 深色 / 浅色三态主题
-- **无配置启动**：不需要 `.env` 文件，首次运行自动生成密码学随机管理密钥，管理面板引导修改
-
-## 技术栈
-
-| 层级 | 技术 |
-|------|------|
-| 后端 | Go 1.25、SQLite、SSE |
-| 前端 | React 18、TypeScript、Vite |
-| UI | shadcn/ui、Radix UI、Tailwind CSS、Lucide |
-| 部署 | Docker、Docker Compose、跨平台二进制 |
-
-## 文档
-
-完整文档位于 [docs/](docs/README.md)：
-
-| 文档 | 内容 |
-|------|------|
-| [架构](docs/architecture.md) | 系统架构、目录结构、检测时序、状态模型 |
-| [配置](docs/configuration.md) | 全部环境变量、Provider 配置与校验规则 |
-| [API](docs/api.md) | 完整 HTTP API 参考（含示例与错误码） |
-| [前后端对接](docs/backend-api.md) | 前端视角的接口、SSE 与数据结构 |
-| [数据存储](docs/data-storage.md) | SQLite 表结构、统计口径、迁移与备份 |
-| [前端](docs/frontend.md) | 前端结构、页面组件与开发方式 |
-| [部署](docs/deployment.md) | Docker / Compose / 二进制 / 反向代理 / CI |
-| [安全](docs/security.md) | 认证授权、限流、SSRF 与凭据保护 |
-| [运维](docs/operations.md) | 指标、日志、告警与故障排查 |
-| [开发](docs/development.md) | 本地开发、测试与发布流程 |
+- **OpenAI 兼容探测**：检查 `/v1/models` 与 `/v1/chat/completions`，支持显式模型列表或自动发现。
+- **多 Provider 管理**：通过 Web 管理面板增删、编辑、暂停或单独重测 Provider，无需重启。
+- **可靠的并发控制**：全局与单 Provider 两级并发限制，避免集中探测触发上游限流。
+- **状态与趋势**：展示正常、较慢、异常、暂停四种状态，以及历史灯、24 小时延迟分位数和统计窗口可用率。
+- **实时更新**：优先使用 SSE 推送，连接失败时自动降级为 30、60、120 秒退避轮询。
+- **推理模型兼容**：自动剥离 `<think>` / `<thinking>` 内容，兼容 DeepSeek-R1、QwQ 等模型。
+- **告警通知**：支持 Telegram、Discord、Bark、企业微信、钉钉和通用 Webhook，提供恢复通知、冷却与 Provider/模型过滤。
+- **权限分离**：管理密钥拥有完整权限，只读分享密钥仅可查看状态、任务、用量和 Prometheus 指标。
+- **本地持久化**：使用纯 Go SQLite 驱动，无需部署外部数据库；支持旧版 JSON 数据自动迁移。
+- **轻量部署**：支持源码、跨平台二进制、Docker 和 Docker Compose；容器使用非 root 的 distroless 运行时。
 
 ## 快速开始
 
-### 1. 启动服务
+### 获取源码
+
+任选一个仓库克隆。CNB 镜像会定时从 GitHub 同步源码和标签。
+
+```bash
+# GitHub
+git clone https://github.com/wututua/AI_Model_Connectivity.git
+
+# 或 CNB
+git clone https://cnb.cool/ligzs/AI_Model_Connectivity.git
+
+cd AI_Model_Connectivity
+```
+
+### 启动服务
+
+需要 Go 1.25。仓库已包含构建后的前端资源，因此首次体验不需要安装 Node.js，也不要求预先创建 `.env`。
 
 ```bash
 go run ./cmd/cg
 ```
 
-启动后访问 [http://127.0.0.1:8080](http://127.0.0.1:8080) 查看仪表盘，访问 [http://127.0.0.1:8080/admin](http://127.0.0.1:8080/admin) 进入管理面板。
+启动后打开：
 
-### 2. 完成首次登录
+- 仪表盘：<http://127.0.0.1:8080>
+- 管理面板：<http://127.0.0.1:8080/admin>
+- 健康检查：<http://127.0.0.1:8080/health>
 
-若未设置 `ADMIN_TOKEN`，服务会在首次启动时生成一个随机管理密钥并打印到终端：
+未设置 `ADMIN_TOKEN` 时，服务会在首次启动时生成 24 字符的随机管理密钥并打印到终端。使用该密钥登录后，管理面板会要求立即修改。
 
 ```text
 Auto-generated ADMIN_TOKEN: aB3xZ9mK2p...
 Please change it on first login.
 ```
 
-首次进入管理面板时，系统会强制要求将密钥修改为至少 16 位的新密钥。
-
-### 3. 添加 Provider
-
-可以在管理面板的 **Provider** 标签页中直接添加，也可以复制配置模板后启动：
-
-```bash
-# macOS / Linux
-cp .env.example .env
-
-# Windows PowerShell
-Copy-Item .env.example .env
-```
-
-编辑 `.env`，填写 Provider 信息后重新启动：
-
-```bash
-go run ./cmd/cg
-```
-
-如果仪表盘暂时为空，可以手动触发一次检测：
-
-```bash
-curl -X POST -H "Authorization: Bearer <your-token>" http://127.0.0.1:8080/api/admin/check
-```
-
-## 管理面板
-
-访问 [http://127.0.0.1:8080/admin](http://127.0.0.1:8080/admin) 打开管理面板。
-
-| 页面 | 路径 | 功能 |
-|------|------|------|
-| 运行概览 | `/admin/overview` | 查看运行状态、手动触发或停止检测、最近检测摘要和 Token 消耗估算 |
-| Provider | `/admin/providers` | 搜索、新增、编辑、删除、暂停和单独重测 Provider |
-| 系统设置 | `/admin/settings` | 修改检测、历史、调度、告警和访问控制配置（仅管理员） |
-| 任务历史 | `/admin/tasks` | 筛选并分页查看检测任务及结果明细 |
-| Token 用量 | `/admin/billing` | 按时间范围查看汇总、每日趋势和模型用量 |
-| 配置管理 | `/admin/config` | 导出或导入 JSON 配置、热加载 `.env`（仅管理员） |
-
-后台路径可直接访问和刷新。使用只读分享密钥登录时，仅显示运行概览、Provider、任务历史和 Token 用量，并隐藏所有写操作。
+进入管理面板的 **Provider** 页面添加服务，然后在 **运行概览** 中触发第一次检测。
 
 ## 部署
 
-### 从源码构建 Docker 镜像
+### Docker Compose
+
+Docker Compose 会从当前源码构建镜像。容器监听公开地址，因此必须显式设置至少 16 字符的 `ADMIN_TOKEN`。
 
 ```bash
-# 构建镜像
-docker build -t model-connectivity .
+cp .env.example .env
+# 编辑 .env，至少填写 ADMIN_TOKEN；Provider 也可以稍后在管理面板添加
+docker compose up -d --build
+```
 
-# 运行（挂载数据目录和配置文件）
+Windows PowerShell：
+
+```powershell
+Copy-Item .env.example .env
+# 编辑 .env 后启动
+docker compose up -d --build
+```
+
+Linux 使用仓库中的绑定目录前，需要让容器账户可以写入：
+
+```bash
+mkdir -p data
+sudo chown 65532:65532 data
+sudo chmod 0700 data
+```
+
+### 本地构建镜像
+
+```bash
+docker build -t model-connectivity:local .
 docker run -d \
   --name model-connectivity \
   -p 8080:8080 \
-  -e ADMIN_TOKEN \
-  -v $(pwd)/data:/app/data \
-  -v $(pwd)/.env:/app/.env \
-  model-connectivity
+  -e ADMIN_TOKEN='replace-with-a-secret-at-least-16-characters' \
+  -v model-connectivity-data:/app/data \
+  model-connectivity:local
 ```
 
-镜像采用三阶段构建：Node 20 构建前端 → Go 编译后端 → distroless/static 最小运行时（非 root），最终镜像不含 shell 和包管理器。
+### 预编译二进制
 
-### 二进制部署
+发布流水线提供 Linux、Windows、macOS 的 amd64/arm64 压缩包，包内包含二进制、`.env.example`、README 和预构建的 `web/`：
 
-1. 从 [Releases](../../releases) 下载对应平台的压缩包并解压（内含预构建的 `web/` 目录）
-2. 直接启动：`./model-connectivity`（Windows 运行 `model-connectivity.exe`）
-3. 首次启动时终端会打印自动生成的管理密钥，进入管理面板后强制修改
+- [GitHub Releases](https://github.com/wututua/AI_Model_Connectivity/releases)
+- [CNB Releases](https://cnb.cool/ligzs/AI_Model_Connectivity/-/releases)
 
-可选：复制 `.env.example` 为 `.env` 并填写 Provider 信息，配置自动检测间隔和告警。
+解压后直接运行 `model-connectivity`，Windows 使用 `model-connectivity.exe`。完整的 Docker、systemd、反向代理、升级和回滚说明见 [部署指南](docs/deployment.md)。
 
-### 使用预构建镜像
+## 配置 Provider
 
-容器默认监听 `0.0.0.0`，启动前必须设置至少 16 字符的 `ADMIN_TOKEN`，例如通过 `.env` 或 `export ADMIN_TOKEN=...` 提供。Docker Compose 会在缺失密钥时直接报错。
-
-Linux 使用下列绑定目录前，先创建 `data` 并将其所有者设置为容器账户 `65532:65532`，权限设置为 `0700`。全新部署也可以使用命名卷 `-v model-connectivity-data:/app/data`；已有数据请继续使用原目录。
-
-```bash
-docker run -d \
-  -p 8080:8080 \
-  -v $(pwd)/data:/app/data \
-  -e ADMIN_TOKEN \
-  --name model-connectivity \
-  ghcr.io/wututua/ai_model_connectivity:latest
-```
-
-或通过环境变量传入配置：
-
-```bash
-docker run -d \
-  -p 8080:8080 \
-  -v $(pwd)/data:/app/data \
-  -e ADMIN_TOKEN \
-  -e PROVIDER_1_ID=openai \
-  -e PROVIDER_1_BASE_URL=https://api.openai.com/v1 \
-  -e PROVIDER_1_API_KEY=sk-xxx \
-  -e PROVIDER_1_MODELS=gpt-4o-mini \
-  --name model-connectivity \
-  ghcr.io/wututua/ai_model_connectivity:latest
-```
-
-### 源码运行
-
-```bash
-# 首次运行前需要构建前端
-cd frontend && npm install && npm run build && cd ..
-
-go run ./cmd/cg          # 持续服务模式
-go run ./cmd/cg check    # 只运行一次检测后退出
-```
-
-也可以使用 Makefile：
-
-```bash
-make dev-backend # 启动后端
-make build     # 完整构建（含前端）
-make test      # 运行全部测试
-make lint      # 运行 go vet
-```
-
-### 前端开发模式
-
-```bash
-# 终端 1：启动后端
-go run ./cmd/cg
-
-# 终端 2：启动前端开发服务器（热更新，代理到 :8080）
-cd frontend && npm run dev
-```
-
-访问 [http://127.0.0.1:5173](http://127.0.0.1:5173) 即可。修改 `frontend/src/` 下的文件后浏览器自动刷新。
-
-开发完成后执行 `npm run build` 将产物写入 `web/`，Go 服务端直接提供。
-
-## 配置
-
-所有配置通过 `.env` 文件或环境变量设置，`.env` 不存在时也可正常启动。后台 API 修改的参数写入 SQLite，重启后继续生效；`.env` 仍作为初始配置来源。
-
-### 服务
-
-| 变量 | 默认值 | 说明 |
-|------|--------|------|
-| `APP_HOST` | `127.0.0.1` | 监听地址 |
-| `APP_PORT` | `8080` | 监听端口 |
-| `WEB_DIR` | `web` | Web 静态文件目录 |
-| `DATA_DIR` | `data` | 数据目录 |
-| `DATABASE_PATH` | `DATA_DIR/cg.sqlite` | SQLite 路径，留空取默认值 |
-| `DASHBOARD_TITLE` | `模型连通性` | 页面标题 |
-| `ADMIN_TOKEN` | 自动生成 | 保护管理接口；未设置时自动生成至少 16 字符的随机密钥；公开监听时必须手动设置 |
-
-#### 管理密钥说明
-
-- **未设置 `ADMIN_TOKEN`**：服务启动时自动生成一个密码学随机密钥，打印到终端，并持久化到 SQLite。首次进入管理面板时会强制要求修改。
-- **已设置 `ADMIN_TOKEN`**：直接使用配置值，不触发首次修改流程。修改时需更新环境变量或 `.env` 并重启；网页接口会拒绝临时覆盖，避免重启后旧密钥重新生效。
-- **公开部署**（监听 `0.0.0.0` / `::`）：**必须**通过环境变量显式设置 `ADMIN_TOKEN`，自动生成的密钥不足以保障公开暴露的安全。
-- 管理密钥和只读分享密钥必须为 16–256 位无空格的可打印 ASCII 字符，且两者不能相同；撤销只读密钥后立即失效。只读登录仅展示状态、Provider、任务和用量，不显示写操作或敏感配置入口。
-
-非回环监听（包括局域网地址、通配地址和自定义主机名）必须显式配置管理密钥。`localhost`、`127.0.0.0/8` 和 `::1` 可以使用自动生成的密钥。
-
-### 探测
-
-| 变量 | 默认值 | 说明 |
-|------|--------|------|
-| `TIMEOUT_SECONDS` | `30` | 单模型检测超时（秒） |
-| `MODEL_LIST_TIMEOUT_SECONDS` | `20` | 获取模型列表超时（秒） |
-| `SLOW_THRESHOLD_MS` | `800` | 超过此延迟标记为"较慢"（毫秒） |
-| `CONCURRENCY` | `1` | 全局最大并发数；默认 `1` 表示所有模型严格逐个检测 |
-| `PROVIDER_CONCURRENCY` | `1` | 单 Provider 最大并发数 |
-| `MAX_MODELS_PER_PROVIDER` | `0` | 每个 Provider 最多检测模型数，`0` 不限制 |
-| `SKIP_MODELS` | — | 跳过的模型，支持 `model`、`provider/model`、`provider::model`，逗号分隔 |
-| `PROBE_PROMPT` | `ping` | 探测用提示词 |
-| `PROBE_SYSTEM_PROMPT` | `No thinking. Respond only with exactly: pang. No extra words.` | 探测用系统提示词 |
-
-> **推理模型兼容**：对于 DeepSeek-R1、QwQ 等会在响应中输出 `<think>…</think>` 或 `<thinking>…</thinking>` 思考过程的模型，后端会在解析时自动剥离这些标签，仅保留实际回复内容用于状态判断。系统提示词默认已要求禁止思考输出，减少 token 消耗。
-
-### 历史与展示
-
-| 变量 | 默认值 | 说明 |
-|------|--------|------|
-| `ENABLE_HISTORY` | `true` | 启用历史记录 |
-| `SHOW_CURVE_CHART` | `true` | 显示延迟曲线 |
-| `STATS_WINDOW_DAYS` | `7` | 统计窗口天数 |
-| `HISTORY_SIZE` | `30` | 历史条长度（仪表盘展示） |
-| `MAX_HISTORY_RECORDS` | `500` | 每个模型在数据库中最多保留的记录数；写入时执行清理 |
-| `SHOW_ERROR_DETAIL` | `true` | 显示错误详情 |
-| `THEME_MODE` | `auto` | 主题初始模式：`auto`、`dark`、`light`；前端可实时切换 |
-| `DAY_MODE_START_HOUR` | `8` | `auto` 主题下亮色模式起始小时（0–23） |
-| `DAY_MODE_END_HOUR` | `18` | `auto` 主题下亮色模式结束小时（0–23） |
-
-### 定时检测
-
-| 变量 | 默认值 | 说明 |
-|------|--------|------|
-| `AUTO_CHECK_INTERVAL_MIN_HOURS` | `0` | 最小检测间隔（小时），`0` 关闭定时检测 |
-| `AUTO_CHECK_INTERVAL_MAX_HOURS` | `0` | 最大检测间隔（小时） |
-| `AUTO_CHECK_RUN_ON_START` | `false` | 启动后立即执行一次检测 |
-
-实际检测间隔在 min–max 之间随机取值，可以错开多实例同时检测。建议适当拉长周期，减少不必要的 token 消耗：
-
-```env
-AUTO_CHECK_INTERVAL_MIN_HOURS=6
-AUTO_CHECK_INTERVAL_MAX_HOURS=12
-AUTO_CHECK_RUN_ON_START=true
-```
-
-### 告警通知
-
-| 变量 | 默认值 | 说明 |
-|------|--------|------|
-| `NOTIFY_PLATFORM` | `webhook` | 平台：`webhook`、`discord`、`bark`、`wecom`、`wechat_work`、`dingtalk`、`telegram` |
-| `NOTIFY_WEBHOOK_URL` | — | Webhook 地址（Discord、Bark、企业微信、钉钉及通用 Webhook 使用） |
-| `NOTIFY_TELEGRAM_BOT_TOKEN` | — | Telegram Bot Token |
-| `NOTIFY_TELEGRAM_CHAT_ID` | — | Telegram Chat ID |
-| `NOTIFY_ON_RECOVERY` | `true` | 从异常/较慢恢复正常时是否发送通知 |
-| `NOTIFY_COOLDOWN_MINUTES` | `0` | 告警冷却时间（分钟），`0` 关闭 |
-| `NOTIFY_PROVIDERS` | — | 只对指定 Provider 告警，支持 ID 或 Name，留空表示全部 |
-| `NOTIFY_MODELS` | — | 只对指定模型告警，支持 `model`、`provider/model`、`provider::model`，留空表示全部 |
-
-告警在筛选后的整体状态发生变化时触发；首次启动且状态正常时不发送通知。
-
-示例：
-
-```env
-NOTIFY_PLATFORM=dingtalk
-NOTIFY_WEBHOOK_URL=https://example.com/robot/send?access_token=xxx
-NOTIFY_ON_RECOVERY=true
-NOTIFY_COOLDOWN_MINUTES=30
-NOTIFY_PROVIDERS=openai-main,ollama-local
-NOTIFY_MODELS=openai-main/gpt-4o-mini,llama3.1
-```
-
-## Provider 配置
+推荐在管理面板中维护 Provider。也可以复制 `.env.example` 并使用环境变量初始化：
 
 ```env
 PROVIDER_1_ID=openai-main
@@ -345,133 +154,143 @@ PROVIDER_1_API_KEY=sk-xxx
 PROVIDER_1_MODELS=gpt-4o-mini,gpt-4.1-mini
 PROVIDER_1_ENABLED=true
 PROVIDER_1_PROBE_ENABLED=true
-
-PROVIDER_2_ID=ollama-local
-PROVIDER_2_NAME=Ollama
-PROVIDER_2_TYPE=ollama
-PROVIDER_2_BASE_URL=http://127.0.0.1:11434/v1
-PROVIDER_2_API_KEY=
-PROVIDER_2_MODELS=llama3.1
-PROVIDER_2_ENABLED=true
-PROVIDER_2_PROBE_ENABLED=true
 ```
 
-| 字段 | 说明 |
+`PROVIDER_N_MODELS` 留空时，服务会从 `{BASE_URL}/models` 自动发现模型。`ENABLED=false` 会完全隐藏并停用 Provider；`PROBE_ENABLED=false` 会保留展示但暂停探测。
+
+常用配置：
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `APP_HOST` | `127.0.0.1` | HTTP 监听地址 |
+| `APP_PORT` | `8080` | HTTP 监听端口 |
+| `ADMIN_TOKEN` | 本地自动生成 | 管理密钥；非回环监听时必须显式设置 |
+| `TIMEOUT_SECONDS` | `30` | 单模型探测超时 |
+| `SLOW_THRESHOLD_MS` | `800` | 较慢状态阈值 |
+| `CONCURRENCY` | `1` | 全局探测并发上限 |
+| `PROVIDER_CONCURRENCY` | `1` | 单 Provider 并发上限 |
+| `AUTO_CHECK_INTERVAL_MIN_HOURS` | `0` | 自动检测最短间隔，`0` 表示关闭 |
+| `AUTO_CHECK_INTERVAL_MAX_HOURS` | `0` | 自动检测最长间隔 |
+
+完整变量、校验规则和热加载语义见 [配置参考](docs/configuration.md)。
+
+## 管理与监控
+
+| 页面 | 路径 | 用途 |
+|------|------|------|
+| 运行概览 | `/admin/overview` | 查看运行状态，触发或停止检测 |
+| Provider | `/admin/providers` | 搜索、新增、编辑、暂停、删除和重测 Provider |
+| 系统设置 | `/admin/settings` | 修改探测、历史、调度、告警和访问控制配置 |
+| 任务历史 | `/admin/tasks` | 筛选检测任务并查看结果明细 |
+| Token 用量 | `/admin/billing` | 查看汇总、每日趋势和模型用量 |
+| 配置管理 | `/admin/config` | 导入导出 JSON 配置、热加载 `.env` |
+
+公开端点包括 `/health`、`/api/status` 和 `/api/events`。管理 API 使用 `Authorization: Bearer <token>`；Prometheus 指标位于 `/metrics`，接受管理密钥或只读分享密钥。接口细节见 [HTTP API 参考](docs/api.md)。
+
+## CNB 支持
+
+[CNB 仓库](https://cnb.cool/ligzs/AI_Model_Connectivity) 不只是代码镜像，仓库内的 [`.cnb.yml`](.cnb.yml) 还提供完整的云原生构建与发布流程：
+
+| 能力 | 当前行为 |
+|------|----------|
+| 国内镜像 | 每天北京时间 01:00、09:00、17:00 从 GitHub 拉取源码和标签 |
+| 构建缓存 | 复用 Go module 与 Go build 缓存卷，缩短重复构建时间 |
+| 自动测试 | 发布前在 Go 1.25 容器中运行全部单元测试 |
+| 前端构建 | 使用 Node 20 和 `npm ci` 生成可随二进制分发的 `web/` |
+| 并行跨平台构建 | 同时产出 Linux、Windows、macOS 的 amd64/arm64，共 6 个目标 |
+| 自动 Release | `tag_push` 或 `tag_deploy.release` 触发打包并发布 CNB Release |
+
+同步方向是 **GitHub → CNB**。若两个仓库短时间内显示的提交不同，请以 GitHub 的 `main` 为准，或等待下一次定时同步。完整说明见 [仓库与发布渠道](docs/repositories.md)。
+
+## 项目文档
+
+| 文档 | 内容 |
 |------|------|
-| `PROVIDER_N_ID` | 唯一标识，用于 API 和告警过滤 |
-| `PROVIDER_N_NAME` | 显示名称 |
-| `PROVIDER_N_TYPE` | 类型，用于自动匹配图标 |
-| `PROVIDER_N_BASE_URL` | API 根地址，须以 `http://` 或 `https://` 开头 |
-| `PROVIDER_N_API_KEY` | API Key，留空表示无需鉴权 |
-| `PROVIDER_N_MODELS` | 模型列表，逗号分隔；留空时自动请求 `{BASE_URL}/models` 获取 |
-| `PROVIDER_N_ENABLED` | `true` 启用，`false` 完全禁用（不展示、不探测） |
-| `PROVIDER_N_PROBE_ENABLED` | `true` 参与探测（默认），`false` 保留配置但不发送探测请求 |
+| [文档索引](docs/README.md) | 按使用者、运维者和开发者分类的阅读入口 |
+| [仓库与发布渠道](docs/repositories.md) | GitHub/CNB 地址、同步机制、流水线和 Release |
+| [系统架构](docs/architecture.md) | 模块边界、启动流程、检测时序和状态模型 |
+| [配置参考](docs/configuration.md) | 环境变量、Provider、校验与热加载 |
+| [HTTP API](docs/api.md) | 认证、错误码、端点和数据结构 |
+| [前后端对接](docs/backend-api.md) | 前端视角的 API、SSE 和类型契约 |
+| [数据存储](docs/data-storage.md) | SQLite 表、事务、统计、迁移和备份 |
+| [前端说明](docs/frontend.md) | React 结构、页面、主题和构建产物 |
+| [部署指南](docs/deployment.md) | Compose、二进制、systemd、反向代理和 CI |
+| [安全说明](docs/security.md) | 认证授权、SSRF、防泄漏和加固建议 |
+| [运维指南](docs/operations.md) | 健康检查、Prometheus、日志、告警和排障 |
+| [开发指南](docs/development.md) | 开发环境、测试约定和发布流程 |
 
-`ENABLED=false` 会将 Provider 从仪表盘和探测中完全移除；`PROBE_ENABLED=false`（`ENABLED=true`）则保留仪表盘展示但跳过探测，适合临时暂停某个 Provider 的检测而不删除配置。
+## 本地开发
 
-Provider ID 最长 128 字符，不允许路径分隔符、控制字符、`?`、`#`，也不能是 `.` 或 `..`。Provider Base URL 不允许用户信息、查询参数或片段，API Key 请使用独立字段；通知 Webhook 可以包含平台要求的查询参数。
+后端直接运行：
 
-Provider 也可以在管理面板的 **Provider** 标签页中通过界面增删，无需重启服务。
-
-Provider 图标根据 `PROVIDER_N_ID`、`PROVIDER_N_TYPE`、`PROVIDER_N_NAME` 自动匹配，优先级依次降低，支持前缀及按 `_`、`-`、空格拆分后的关键词匹配。`PROVIDER_N_TYPE` 支持以下内置图标键：
-
-```
-openai  azure  xai  anthropic  ollama  google  deepseek  modelscope  zhipu  nvidia
-siliconflow  moonshot  kimi  kimi-code  longcat  ppio  dify  coze  dashscope
-deerflow  fastgpt  lm_studio  fishaudio  minimax  minimax-token-plan  mimo
-302ai  microsoft  vllm  groq  aihubmix  openrouter  tokenpony  compshare
-xinference  bailian  volcengine
+```bash
+go run ./cmd/cg
 ```
 
-## API
+前端热更新需要 Node.js 20+：
 
-### 公开接口
+```bash
+cd frontend
+npm ci
+npm run dev
+```
 
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| `GET` | `/health` | 健康检查 |
-| `GET` | `/api/status` | 获取最新状态报告 |
-| `GET` | `/api/events` | SSE 实时推送 |
-| `GET` | `/` | Web 仪表盘 |
-| `GET` | `/admin` | Web 管理面板 |
+Vite 默认运行在 <http://127.0.0.1:5173>，并将 `/api` 和 `/health` 代理到 `http://localhost:8080`。
 
-### 管理接口
+提交前建议执行：
 
-管理员接口请求时携带：`Authorization: Bearer <ADMIN_TOKEN>`。只读接口也接受管理面板生成的分享密钥。
+```bash
+go vet ./...
+go test -race ./...
+cd frontend && npm run build
+```
 
-> 本地监听且未设置 `ADMIN_TOKEN` 时，使用终端打印的自动生成密钥登录，不能留空。
+## 技术栈
 
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| `GET` | `/api/admin/detection` | 查看检测运行状态和自动检测配置 |
-| `POST` | `/api/admin/detection/start` | 开始检测 |
-| `POST` | `/api/admin/detection/stop` | 停止当前检测 |
-| `POST` | `/api/admin/check` | 触发一次完整检测 |
-| `POST` | `/api/admin/token` | 修改管理密钥 `{"token":"new-token"}` |
-| `GET` | `/api/admin/config` | 查看当前配置（通知凭据只返回是否已设置；仅管理员） |
-| `PUT` | `/api/admin/settings` | 修改阈值、检测参数、自动检测间隔 |
-| `GET` | `/api/admin/providers` | 查看 Provider 列表（不含 API Key） |
-| `POST` | `/api/admin/providers` | 新增 Provider |
-| `PUT` | `/api/admin/providers/{id}` | 修改 Provider；不传 `api_key` 时保留旧值 |
-| `DELETE` | `/api/admin/providers/{id}` | 删除 Provider |
-| `POST` | `/api/admin/providers/{id}/rerun` | 单独重跑某个 Provider |
-| `GET` | `/api/admin/tasks` | 查看历史检测任务 |
-| `GET` | `/api/admin/tasks/{id}` | 查看任务详情 |
-| `GET` | `/api/admin/config/export` | 导出配置（不含 Provider/API/通知密钥；仅管理员） |
-| `POST` | `/api/admin/config/import` | 导入配置并保存到 SQLite |
-| `POST` | `/api/admin/config/reload` | 重新读取 `.env` 并热加载 |
-
-`GET /api/admin/detection`、`GET /api/admin/providers`、`GET /api/admin/tasks`、`GET /api/admin/tasks/{id}`、`GET /api/admin/billing` 和 `/metrics` 接受只读分享密钥；其他 `/api/admin/*` 接口只接受 `ADMIN_TOKEN`。`/api/admin/config` 与 `/api/admin/config/export` 即使使用管理员密钥，也不会返回 Provider API Key 或通知凭据明文。
-
-`/api/admin/detection` 通过 `read_only` 标识当前权限。有效只读密钥访问管理员专属接口返回 `403`，不会计入认证失败限流。
-
-管理 API 的 JSON 请求体上限为 1 MiB，超限返回 `413`，多个 JSON 值或格式错误返回 `400`。同一连接来源 IP 在一分钟内累计 10 次认证失败后返回 `429`，等待 `Retry-After` 指定的时间后重试。应用不信任客户端提供的 `X-Forwarded-For`；反向代理后的用户共享代理 IP 的限额，需要按真实 IP 限流时请在受信任代理上配置。
-
-超时必须是有限正数且不超过 86400 秒，自动检测间隔必须为有限非负数且不超过 8760 小时；并发数上限为 1024。停止检测后，未完成任务标记为 `canceled`，不更新最新报告、历史记录，也不触发告警。模型列表请求失败则会生成 `DEGRADED` 报告，并保留失败 Provider。
+| 层级 | 技术 |
+|------|------|
+| 后端 | Go 1.25、SQLite、SSE、Prometheus |
+| 前端 | React 18、TypeScript、Vite 5 |
+| UI | shadcn/ui、Radix UI、Tailwind CSS、Lucide |
+| 部署 | Docker、Docker Compose、distroless、跨平台二进制 |
+| CI/CD | GitHub Actions、CNB 云原生构建 |
 
 ## 项目结构
 
-| 路径 | 说明 |
-|------|------|
-| `cmd/cg/` | 服务入口与命令行操作 |
-| `internal/config/` | 环境变量、运行时配置与管理密钥 |
-| `internal/probe/` | Provider 和模型探测流程 |
-| `internal/provider/` | OpenAI 兼容 Provider 请求与图标匹配 |
-| `internal/storage/` | SQLite 数据存储、迁移与权限控制 |
-| `internal/web/` | HTTP API、SSE 与静态资源服务 |
-| `frontend/` | React 管理面板与仪表盘源码 |
-| `web/` | Vite 构建后的可发布前端资源 |
-| `docs/` | 架构、配置、API、部署与运维文档 |
-
-## 数据文件
-
-```
-web/index.html
-web/assets/app.js
-web/assets/index.css
-data/cg.sqlite
+```text
+cmd/cg/              程序入口与应用编排
+internal/config/     配置解析、运行时配置和校验
+internal/provider/   OpenAI 兼容 Provider 客户端
+internal/probe/      探测目标收集与并发执行
+internal/report/     报告、统计和延迟曲线
+internal/storage/    SQLite 持久化与迁移
+internal/notify/     状态告警与平台适配
+internal/metrics/    Prometheus 指标
+internal/web/        HTTP API、认证、SSE 和静态托管
+frontend/            React + TypeScript 源码
+web/                 已构建的前端静态资源
+docs/                项目文档
 ```
 
-`web/` 目录由 Vite 构建生成，发布包内已包含预构建产物，无需手动构建即可运行。
+## 安全说明
 
-历史检测结果、最新报告、告警状态和管理密钥均保存在 SQLite。首次启动时若存在旧版 JSON 文件（`data/latest_report.json`、`data/probe_history.json`、`data/notify_state.txt`），会自动迁移到 SQLite，旧文件不会被删除。
+- 非回环监听（包括 `0.0.0.0`、局域网地址和自定义主机名）必须显式配置 `ADMIN_TOKEN`，否则服务拒绝启动。
+- Provider API Key、自动生成的管理密钥和通知凭据保存在本地 SQLite 中，依赖文件权限保护，并未进行静态加密。
+- 配置导出和管理 API 不返回 API Key 或通知凭据明文。
+- 部署到公网时应使用 HTTPS 反向代理、限制管理入口并定期轮换密钥。
+- 探测会真实请求上游并消耗 Token，请根据模型数量合理设置检测周期与并发。
 
-Token 用量按 UTC 自然日单独汇总，统计区间含当天，最多保留 365 天；关闭历史记录或清理模型历史不会减少已记录用量。升级时仅能迁移数据库中仍存在的记录，之前已删除或取消检测产生的实际消耗无法还原，因此该统计不是供应商账单。历史、用量与最新报告通过同一事务保存。
+更多威胁模型和加固建议见 [安全说明](docs/security.md)。安全问题请不要公开披露敏感凭据或可直接利用的细节。
 
-热加载仅更新运行参数和 Provider。监听地址、静态资源/数据库路径或外部管理密钥变更需要重启。直连请求在实际连接时校验并使用解析后的 IP，禁止链路本地地址及自动重定向；使用 HTTP 代理时，应由可信代理执行相同目标地址策略。
+## 参与贡献
 
-数据库和已存在的 WAL、SHM、journal 文件在打开时收紧权限：Unix 使用 `0600`，Windows 使用受保护 ACL，只授予当前服务账户和 SYSTEM 访问权限。新建的数据目录在 Unix 使用 `0700`。这属于文件访问控制，不是数据库加密；服务账户仍可读取其中的凭据，备份文件应采用同等级权限或存入加密介质。
+1. 从 [GitHub 上游仓库](https://github.com/wututua/AI_Model_Connectivity) Fork 并创建功能分支。
+2. 保持改动聚焦，新增或修改行为时补充相应测试与文档。
+3. 提交前运行后端测试、静态检查和前端构建。
+4. 通过 GitHub Pull Request 提交改动；CNB 主要用于同步访问和自动发布。
 
-## 安全提示
+提交问题前请先搜索现有 [GitHub Issues](https://github.com/wututua/AI_Model_Connectivity/issues)，并附上版本、部署方式、复现步骤和已脱敏日志。
 
-- 该项目会真实调用模型接口并消耗 token，建议使用最小化探测提示词（默认已优化），并适当拉长检测间隔。
-- **公开部署必须显式配置至少 16 字符的 `ADMIN_TOKEN`**，否则服务拒绝启动。自动生成的密钥仅用于回环监听。
-- 管理面板首次登录后强制要求修改密钥，后续密钥持久化存储在 SQLite，重启后无需重新配置。
-- 只读分享密钥仅用于只读状态、任务、计费和指标接口，不能读取运行配置或导出配置。
-- Provider `base_url` 和通知 Webhook 会校验 scheme（须为 `http://` 或 `https://`）、主机和用户信息，并拦截链路本地地址；实际请求还会检查 DNS 结果且禁止跟随重定向，降低 SSRF 风险。
+## 许可证
 
-发布工作流在 Windows 和 Linux 上执行后端测试，并在 Linux 上执行竞态检测、前端构建、Compose 校验、容器认证及健康检查。容器验证通过后才构建发布二进制或推送镜像。
-
-## License
-
-[MIT](LICENSE)
+本项目基于 [MIT License](LICENSE) 开源。

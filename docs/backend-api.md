@@ -1,5 +1,7 @@
 # 前后端对接文档
 
+> [项目主页](../README.md) · [文档索引](README.md) · [GitHub 仓库](https://github.com/wututua/AI_Model_Connectivity) · [CNB 仓库](https://cnb.cool/ligzs/AI_Model_Connectivity) · [仓库与发布](repositories.md)
+
 本文档面向前端开发，汇总前端需要后端配合的全部内容：HTTP API、SSE 实时推送、认证机制、数据结构与错误约定。
 
 - 前端代码位置：`frontend/`（React + TypeScript + Vite），构建产物输出到 `web/`，由后端静态托管
@@ -48,7 +50,7 @@ Authorization: Bearer <token>
 ### 2.3 安全约束
 
 - **认证失败限流**：同一 IP 连续认证失败会被限流，返回 **429** 并带 `Retry-After` 头（秒）。
-- **公网绑定保护**：`APP_HOST` 为公网地址且未设置 `ADMIN_TOKEN` 时，管理接口返回 **403**。
+- **公网绑定保护**：`APP_HOST` 为非回环地址且未设置 `ADMIN_TOKEN` 时，进程会拒绝启动；管理接口仍保留 **403** 作为纵深防御。
 - **只读会话**：`GET /api/admin/detection` 返回 `read_only: true` 时，前端隐藏「设置」「导入导出」标签页（`Admin.tsx`）。
 
 ---

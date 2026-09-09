@@ -1,5 +1,7 @@
 # 部署指南
 
+> [项目主页](../README.md) · [文档索引](README.md) · [GitHub 仓库](https://github.com/wututua/AI_Model_Connectivity) · [CNB 仓库](https://cnb.cool/ligzs/AI_Model_Connectivity) · [仓库与发布](repositories.md)
+
 ## 1. 前置要求
 
 | 方式 | 要求 |
@@ -31,6 +33,12 @@ mkdir -p data && sudo chown 65532:65532 data && sudo chmod 0700 data
 
 ## 3. docker run
 
+先从当前源码构建本地镜像：
+
+```bash
+docker build -t model-connectivity:local .
+```
+
 ```bash
 docker run -d -p 8080:8080 \
   -e ADMIN_TOKEN \
@@ -40,14 +48,16 @@ docker run -d -p 8080:8080 \
   -e PROVIDER_1_MODELS=gpt-4o-mini \
   -v $(pwd)/data:/app/data \
   --name model-connectivity \
-  ghcr.io/wututua/ai_model_connectivity:latest
+  model-connectivity:local
 ```
 
 镜像三阶段构建：Node 20 构建前端 → Go 编译（CGO_ENABLED=0）→ `gcr.io/distroless/static-debian12:nonroot` 运行时（无 shell、非 root）。
 
+GitHub Actions 会把多架构镜像推送到 `<DOCKERHUB_USERNAME>/model-connectivity`，其中用户名来自仓库 Secret。项目流水线未配置 GHCR 发布，因此本文不使用旧的 `ghcr.io` 地址。
+
 ## 4. 二进制部署
 
-1. 从 Releases 下载对应平台压缩包并解压（内含 `model-connectivity`、`.env.example`、`README.md`、`web/`）。
+1. 从 [GitHub Releases](https://github.com/wututua/AI_Model_Connectivity/releases) 或 [CNB Releases](https://cnb.cool/ligzs/AI_Model_Connectivity/-/releases) 下载对应平台压缩包并解压（内含 `model-connectivity`、`.env.example`、`README.md`、`web/`）。
 2. `cp .env.example .env` 并填写 Provider 与 `ADMIN_TOKEN`。
 3. 启动：`./model-connectivity`（Windows：`model-connectivity.exe`）。
 
@@ -123,14 +133,16 @@ location /api/events {
 ### CNB（`.cnb.yml`）
 
 - `tag_push` 与 `tag_deploy.release` 触发：单元测试 → 构建前端 → 6 个平台交叉编译（linux/windows/darwin × amd64/arm64）→ 打包（tar.gz / zip）→ 发布 CNB Release。
-- `main` 分支每日 UTC 1/9/17 点从 GitHub 同步源码与 tag，tag 同步后自动触发发版。
+- `main` 分支每日 UTC 01:00、09:00、17:00（北京时间 09:00、17:00、次日 01:00）从 GitHub 同步源码与 tag，tag 同步后自动触发发版。
+- 后端构建复用 Go module/build 缓存，前端只构建一次并由各平台任务复用。
+- CNB 当前发布二进制压缩包，不推送容器镜像。完整的双仓库与触发关系见 [repositories.md](repositories.md)。
 
 ### GitHub Actions
 
 | 工作流 | 触发 | 内容 |
 |--------|------|------|
 | `ci.yml` | push / PR（排除 `v*` tag） | `go vet`、`go test -race`、前端 `tsc --noEmit` |
-| `release.yml` | tag `v*` / main / PR / 手动 | Windows+Linux 后端测试、Linux 竞态检测、前端构建、Compose 校验、容器启动与健康检查、`/api/admin/config` 鉴权验证；打 tag 时发布 Release 并推送多架构镜像 |
+| `release.yml` | tag `v*` / main / PR / 手动 | Windows+Linux 后端测试、Linux 竞态检测、前端构建、Compose 校验、容器启动与健康检查、`/api/admin/config` 鉴权验证；打 tag 时发布 Release，tag 或 `main` 推送 Docker Hub 多架构镜像 |
 
 ## 9. 容量与性能建议
 

@@ -1,8 +1,8 @@
 services:
   model-connectivity:
     build: .
-    # 或者直接使用预构建镜像（如果已推送到镜像仓库）：
-    # image: ghcr.io/wututua/ai_model_connectivity:latest
+    # GitHub Actions 会将预构建镜像发布到 Docker Hub；用户名由仓库 Secret 决定：
+    # image: <dockerhub-username>/model-connectivity:latest
     container_name: model-connectivity
     restart: unless-stopped
     ports:

@@ -1,5 +1,7 @@
 # 开发指南
 
+> [项目主页](../README.md) · [文档索引](README.md) · [GitHub 仓库](https://github.com/wututua/AI_Model_Connectivity) · [CNB 仓库](https://cnb.cool/ligzs/AI_Model_Connectivity) · [仓库与发布](repositories.md)
+
 ## 1. 环境
 
 - Go 1.25（见 `go.mod`，无 CGO 依赖）
@@ -88,6 +90,8 @@ cd frontend && npx tsc --noEmit && npm run build && cd ..
 
 ## 7. 发布
 
-- 打 `v*` tag 触发 GitHub Actions 与 CNB 流水线，产出 6 平台压缩包与多架构镜像。
-- CNB 仓库每日从 GitHub 同步源码与 tag，tag 同步后自动发版。
+- 在 GitHub 上游仓库推送 `v*` tag 后，GitHub Actions 立即产出 6 平台压缩包、发布 GitHub Release，并推送 Docker Hub 多架构镜像。
+- CNB 仓库每天北京时间 01:00、09:00、17:00 从 GitHub 同步源码与 tag；新 tag 同步到 CNB 后触发测试、6 平台构建和 CNB Release。
+- CNB 也支持 `tag_deploy.release` 发布环境事件，执行与 `tag_push` 相同的二进制发布流程。
 - 前端产物 `web/` 已提交到仓库，发布包内自带，无需用户本地构建。
+- 双仓库定位、触发器与产物说明见 [repositories.md](repositories.md)。

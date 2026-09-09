@@ -1,5 +1,7 @@
 # 安全说明
 
+> [项目主页](../README.md) · [文档索引](README.md) · [GitHub 仓库](https://github.com/wututua/AI_Model_Connectivity) · [CNB 仓库](https://cnb.cool/ligzs/AI_Model_Connectivity) · [仓库与发布](repositories.md)
+
 ## 1. 威胁模型
 
 服务会**真实调用**上游模型接口并持有 API Key，同时对外暴露管理 API。主要风险：管理接口被爆破、Provider/通知目标被用于 SSRF、数据库文件泄露凭据。

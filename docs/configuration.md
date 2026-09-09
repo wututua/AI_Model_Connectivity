@@ -1,7 +1,10 @@
 # 配置参考
 
-配置来源优先级：**真实环境变量 > `.env` 文件 > 代码默认值 > SQLite 运行时配置（仅运行时参数）**。
-`.env` 不存在也能启动；后台修改的参数写入 SQLite，重启后继续生效。
+> [项目主页](../README.md) · [文档索引](README.md) · [GitHub 仓库](https://github.com/wututua/AI_Model_Connectivity) · [CNB 仓库](https://cnb.cool/ligzs/AI_Model_Connectivity) · [仓库与发布](repositories.md)
+
+首次启动时，基础配置按 **真实环境变量 > `.env` 文件 > 代码默认值** 解析，然后把可管理的运行时设置和 Provider 写入 SQLite。后续启动时，SQLite 中的运行时设置和 Provider 会覆盖基础配置中的同名值。
+
+`.env` 不存在也能启动；后台修改的运行时参数写入 SQLite，重启后继续生效。需要让 `.env` 中的运行时参数重新进入 SQLite 时，应在管理面板执行热加载，而不是只重启进程。
 
 `.env` 语法（见 `internal/config/config.go` 的 `readEnvFile`）：
 
@@ -150,5 +153,7 @@ PROVIDER_1_PROBE_ENABLED=true
 | `POST /api/admin/config/reload` | 重读 `.env`；仅当 `.env` 有 Provider 时覆盖库内 Provider；成功后异步触发一次检测 |
 
 `reload` 在监听地址、`WEB_DIR`、`DATA_DIR`、`DATABASE_PATH`、`ADMIN_TOKEN` 发生变化时返回错误并拒绝加载——这些必须重启。
+
+`PROBE_PROMPT`、`PROBE_SYSTEM_PROMPT` 和 `AUTO_CHECK_RUN_ON_START` 不属于 SQLite `RuntimeSettings`：两个提示词来自基础配置，可通过 `.env` 热加载；`AUTO_CHECK_RUN_ON_START` 只在进程启动时判断。Provider 默认由 SQLite 接管，只有热加载的 `.env` 明确包含 Provider 时才会覆盖并保存 Provider 列表。
 
 敏感字段写策略：告警 webhook / Telegram token / chat id 在 GET 接口只返回 `*_set` 布尔；PUT 时留空表示保持不变，传 `clear_*=true` 表示清除。

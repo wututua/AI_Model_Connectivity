@@ -1,5 +1,7 @@
 # 系统架构
 
+> [项目主页](../README.md) · [文档索引](README.md) · [GitHub 仓库](https://github.com/wututua/AI_Model_Connectivity) · [CNB 仓库](https://cnb.cool/ligzs/AI_Model_Connectivity) · [仓库与发布](repositories.md)
+
 ## 1. 概览
 
 ```
@@ -129,4 +131,4 @@ application.checkWithOptions
 .env 文件 ──► 环境变量（覆盖 .env）──► 基础配置 ──► 生效配置
 ```
 
-监听地址、静态/数据路径、外部 `ADMIN_TOKEN` 变更需重启；其他参数热加载后立即生效。详见 [configuration.md](configuration.md)。
+监听地址、静态/数据路径和外部 `ADMIN_TOKEN` 变更需重启；探测提示词可从 `.env` 热加载，`AUTO_CHECK_RUN_ON_START` 只在启动时判断，其余可管理参数由 SQLite 持久化并即时生效。详见 [configuration.md](configuration.md)。

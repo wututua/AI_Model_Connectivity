@@ -1,5 +1,7 @@
 # HTTP API 参考
 
+> [项目主页](../README.md) · [文档索引](README.md) · [GitHub 仓库](https://github.com/wututua/AI_Model_Connectivity) · [CNB 仓库](https://cnb.cool/ligzs/AI_Model_Connectivity) · [仓库与发布](repositories.md)
+
 基础路径默认为 `http://127.0.0.1:8080`。所有响应为 UTF-8 JSON；受认证接口额外返回 `Cache-Control: no-store`。
 
 ## 1. 认证

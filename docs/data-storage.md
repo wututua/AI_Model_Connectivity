@@ -1,5 +1,7 @@
 # 数据存储
 
+> [项目主页](../README.md) · [文档索引](README.md) · [GitHub 仓库](https://github.com/wututua/AI_Model_Connectivity) · [CNB 仓库](https://cnb.cool/ligzs/AI_Model_Connectivity) · [仓库与发布](repositories.md)
+
 所有状态保存在单个 SQLite 文件（默认 `data/cg.sqlite`，驱动 `modernc.org/sqlite`，纯 Go 无 CGO）。
 
 ## 1. 连接与 PRAGMA
@@ -130,4 +132,4 @@ sqlite3 data/cg.sqlite ".backup backup.sqlite"   # 需要 sqlite3 CLI
 cp -a data data.bak
 ```
 
-备份包含管理密钥（哈希未加密存储）与 Provider API Key，请按第 7 节的要求保护。
+备份包含自动生成的管理密钥、只读分享密钥、Provider API Key 和通知凭据。这些敏感值以可供服务读取的形式保存，并未进行静态加密，请按第 7 节的要求保护。
