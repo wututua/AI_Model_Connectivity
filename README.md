@@ -1,8 +1,50 @@
-# AI_Model_Connectivity
+<div align="center">
+  <img src="assets/gpt_uptime_v2.png" alt="AI Model Connectivity logo" width="180">
+  <h1>AI Model Connectivity</h1>
+  <p>面向 OpenAI 兼容接口的轻量级模型可用性监控与管理平台</p>
+  <p>
+    <a href="https://github.com/wututua/AI_Model_Connectivity/actions/workflows/ci.yml">
+      <img src="https://github.com/wututua/AI_Model_Connectivity/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI">
+    </a>
+    <a href="https://go.dev/">
+      <img src="https://img.shields.io/badge/Go-1.25-00ADD8?logo=go&amp;logoColor=white" alt="Go 1.25">
+    </a>
+    <a href="https://react.dev/">
+      <img src="https://img.shields.io/badge/React-18.3-61DAFB?logo=react&amp;logoColor=20232A" alt="React 18.3">
+    </a>
+    <a href="LICENSE">
+      <img src="https://img.shields.io/github/license/wututua/AI_Model_Connectivity" alt="MIT License">
+    </a>
+  </p>
+  <p>
+    <a href="#快速开始">快速开始</a>
+    <span> · </span>
+    <a href="#部署">部署</a>
+    <span> · </span>
+    <a href="docs/README.md">完整文档</a>
+  </p>
+</div>
 
-一个用于检测 OpenAI 兼容模型接口连通性的独立 Web 状态页，配套基于 React 与 shadcn/ui 的可视化管理面板。
+> AI Model Connectivity（简称 CG）会定期探测多个 Provider 与模型，聚合可用率、延迟、历史状态和告警信息，并通过一个自托管 Web 界面集中展示。
 
-## 功能
+<details open>
+  <summary><strong>目录</strong></summary>
+
+- [功能亮点](#功能亮点)
+- [技术栈](#技术栈)
+- [快速开始](#快速开始)
+- [管理面板](#管理面板)
+- [部署](#部署)
+- [配置](#配置)
+- [Provider 配置](#provider-配置)
+- [API](#api)
+- [项目结构](#项目结构)
+- [安全提示](#安全提示)
+- [License](#license)
+
+</details>
+
+## 功能亮点
 
 - 检测 `/v1/chat/completions` 和 `/v1/models` 接口
 - 支持多个 Provider 和多个模型，双层并发控制（全局 + 单 Provider）
@@ -17,6 +59,15 @@
 - 支持 Telegram、Discord、Bark、企业微信、钉钉和通用 Webhook 告警通知
 - 天蓝色主视觉，健康、较慢、异常状态分别使用独立语义色；支持跟随系统 / 深色 / 浅色三态主题
 - **无配置启动**：不需要 `.env` 文件，首次运行自动生成密码学随机管理密钥，管理面板引导修改
+
+## 技术栈
+
+| 层级 | 技术 |
+|------|------|
+| 后端 | Go 1.25、SQLite、SSE |
+| 前端 | React 18、TypeScript、Vite |
+| UI | shadcn/ui、Radix UI、Tailwind CSS、Lucide |
+| 部署 | Docker、Docker Compose、跨平台二进制 |
 
 ## 文档
 
@@ -37,30 +88,44 @@
 
 ## 快速开始
 
+### 1. 启动服务
+
 ```bash
 go run ./cmd/cg
 ```
 
-打开 [http://127.0.0.1:8080](http://127.0.0.1:8080) 查看仪表盘，点击右上角 **管理** 进入管理面板。
+启动后访问 [http://127.0.0.1:8080](http://127.0.0.1:8080) 查看仪表盘，访问 [http://127.0.0.1:8080/admin](http://127.0.0.1:8080/admin) 进入管理面板。
 
-**首次启动**时若未设置 `ADMIN_TOKEN`，服务会自动生成一个随机密钥并打印到终端：
+### 2. 完成首次登录
 
-```
+若未设置 `ADMIN_TOKEN`，服务会在首次启动时生成一个随机管理密钥并打印到终端：
+
+```text
 Auto-generated ADMIN_TOKEN: aB3xZ9mK2p...
 Please change it on first login.
 ```
 
-首次进入管理面板时，系统会强制要求修改密钥（至少 16 位），修改完成后自动进入。
+首次进入管理面板时，系统会强制要求将密钥修改为至少 16 位的新密钥。
 
-若需要自定义 Provider，复制并编辑配置文件后再启动：
+### 3. 添加 Provider
+
+可以在管理面板的 **Provider** 标签页中直接添加，也可以复制配置模板后启动：
 
 ```bash
+# macOS / Linux
 cp .env.example .env
-# 编辑 .env，填写 Provider 信息
+
+# Windows PowerShell
+Copy-Item .env.example .env
+```
+
+编辑 `.env`，填写 Provider 信息后重新启动：
+
+```bash
 go run ./cmd/cg
 ```
 
-首次启动若仪表盘为空，先手动触发一次检测：
+如果仪表盘暂时为空，可以手动触发一次检测：
 
 ```bash
 curl -X POST -H "Authorization: Bearer <your-token>" http://127.0.0.1:8080/api/admin/check
@@ -83,7 +148,7 @@ curl -X POST -H "Authorization: Bearer <your-token>" http://127.0.0.1:8080/api/a
 
 ## 部署
 
-### Docker（推荐）
+### 从源码构建 Docker 镜像
 
 ```bash
 # 构建镜像
@@ -109,7 +174,7 @@ docker run -d \
 
 可选：复制 `.env.example` 为 `.env` 并填写 Provider 信息，配置自动检测间隔和告警。
 
-### Docker
+### 使用预构建镜像
 
 容器默认监听 `0.0.0.0`，启动前必须设置至少 16 字符的 `ADMIN_TOKEN`，例如通过 `.env` 或 `export ADMIN_TOKEN=...` 提供。Docker Compose 会在缺失密钥时直接报错。
 
@@ -363,6 +428,20 @@ xinference  bailian  volcengine
 管理 API 的 JSON 请求体上限为 1 MiB，超限返回 `413`，多个 JSON 值或格式错误返回 `400`。同一连接来源 IP 在一分钟内累计 10 次认证失败后返回 `429`，等待 `Retry-After` 指定的时间后重试。应用不信任客户端提供的 `X-Forwarded-For`；反向代理后的用户共享代理 IP 的限额，需要按真实 IP 限流时请在受信任代理上配置。
 
 超时必须是有限正数且不超过 86400 秒，自动检测间隔必须为有限非负数且不超过 8760 小时；并发数上限为 1024。停止检测后，未完成任务标记为 `canceled`，不更新最新报告、历史记录，也不触发告警。模型列表请求失败则会生成 `DEGRADED` 报告，并保留失败 Provider。
+
+## 项目结构
+
+| 路径 | 说明 |
+|------|------|
+| `cmd/cg/` | 服务入口与命令行操作 |
+| `internal/config/` | 环境变量、运行时配置与管理密钥 |
+| `internal/probe/` | Provider 和模型探测流程 |
+| `internal/provider/` | OpenAI 兼容 Provider 请求与图标匹配 |
+| `internal/storage/` | SQLite 数据存储、迁移与权限控制 |
+| `internal/web/` | HTTP API、SSE 与静态资源服务 |
+| `frontend/` | React 管理面板与仪表盘源码 |
+| `web/` | Vite 构建后的可发布前端资源 |
+| `docs/` | 架构、配置、API、部署与运维文档 |
 
 ## 数据文件
 
