@@ -38,18 +38,23 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     headers: adminHeaders(),
     body: body != null ? JSON.stringify(body) : undefined,
   })
-  const data = await res.json()
-  if (!res.ok) throw new Error((data as { error?: string }).error ?? `HTTP ${res.status}`)
+  return decodeResponse<T>(res)
+}
+
+async function decodeResponse<T>(res: Response): Promise<T> {
+  const data = await res.json().catch(() => null)
+  if (res.status === 401 && location.pathname.startsWith('/admin')) {
+    setToken('')
+    window.dispatchEvent(new Event('cg:unauthorized'))
+  }
+  if (!res.ok) throw new Error((data as { error?: string } | null)?.error ?? `HTTP ${res.status}`)
+  if (data === null) throw new Error('Invalid JSON response')
   return data as T
 }
 
 export const api = {
   status: (): Promise<Report> =>
-    fetch('/api/status').then(async r => {
-      const data = await r.json()
-      if (!r.ok) throw new Error((data as { error?: string }).error ?? `HTTP ${r.status}`)
-      return data as Report
-    }),
+    fetch('/api/status').then(decodeResponse<Report>),
 
   detection: (): Promise<RunningState> =>
     request<RunningState>('GET', '/api/admin/detection'),
@@ -78,11 +83,11 @@ export const api = {
   createProvider: (p: ProviderUpdate): Promise<SafeProviderConfig> =>
     request<SafeProviderConfig>('POST', '/api/admin/providers', p),
   updateProvider: (id: string, p: ProviderUpdate): Promise<SafeProviderConfig> =>
-    request<SafeProviderConfig>('PUT', `/api/admin/providers/${id}`, p),
+    request<SafeProviderConfig>('PUT', `/api/admin/providers/${encodeURIComponent(id)}`, p),
   deleteProvider: (id: string): Promise<unknown> =>
-    request('DELETE', `/api/admin/providers/${id}`),
+    request('DELETE', `/api/admin/providers/${encodeURIComponent(id)}`),
   rerunProvider: (id: string): Promise<unknown> =>
-    request('POST', `/api/admin/providers/${id}/rerun`),
+    request('POST', `/api/admin/providers/${encodeURIComponent(id)}/rerun`),
 
   tasks: (params?: { limit?: number; offset?: number; status?: string }): Promise<CheckTask[]> => {
     const qs = new URLSearchParams()

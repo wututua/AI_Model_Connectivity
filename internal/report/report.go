@@ -9,6 +9,7 @@ import (
 
 	"cg/internal/config"
 	"cg/internal/probe"
+	providerpkg "cg/internal/provider"
 )
 
 type HistoryRecord struct {
@@ -75,6 +76,12 @@ type Report struct {
 }
 
 func Build(cfg config.Config, results []probe.Result, providerErrors []probe.ProviderError, history map[string][]HistoryRecord, started time.Time) (Report, map[string][]HistoryRecord) {
+	providerErrors = append([]probe.ProviderError{}, providerErrors...)
+	if !cfg.ShowErrorDetail {
+		for index := range providerErrors {
+			providerErrors[index].Error = ""
+		}
+	}
 	now := time.Now()
 	theme := themeName(cfg, now)
 	interval := intervalLabel(cfg)
@@ -87,7 +94,7 @@ func Build(cfg config.Config, results []probe.Result, providerErrors []probe.Pro
 	for _, result := range results {
 		records := pruneHistory(updatedHistory[result.HistoryKey], now, cfg.StatsWindowDays, cfg.HistorySize)
 		records = append(records, HistoryRecord{Status: result.Status, LatencyMS: result.LatencyMS, CheckedAt: now.Format(time.RFC3339)})
-		limit := max(cfg.HistorySize, cfg.MaxHistoryRecords)
+		limit := max(1, cfg.MaxHistoryRecords)
 		if len(records) > limit {
 			records = records[len(records)-limit:]
 		}
@@ -156,6 +163,29 @@ func Build(cfg config.Config, results []probe.Result, providerErrors []probe.Pro
 			group.ErrorCount++
 		}
 	}
+	failedProviders := map[string]bool{}
+	for _, failure := range providerErrors {
+		failedProviders[failure.ProviderID] = true
+	}
+	for _, provider := range cfg.Providers {
+		if !provider.Enabled || (provider.ProbeEnabled && !failedProviders[provider.ID]) || grouped[provider.ID] != nil {
+			continue
+		}
+		grouped[provider.ID] = &ProviderReport{
+			ProviderID:   provider.ID,
+			ProviderType: provider.Type,
+			ProviderName: provider.Name,
+			ProviderLogo: providerpkg.IconFor(provider.ID, provider.Type, provider.Name),
+			Results:      []ModelResult{},
+			Status:       "paused",
+			StatusLabel:  "已暂停",
+		}
+		if failedProviders[provider.ID] {
+			grouped[provider.ID].Status = "error"
+			grouped[provider.ID].StatusLabel = "异常"
+		}
+		order = append(order, provider.ID)
+	}
 	providers := []ProviderReport{}
 	for _, key := range order {
 		group := grouped[key]
@@ -183,7 +213,7 @@ func Build(cfg config.Config, results []probe.Result, providerErrors []probe.Pro
 	}
 	overallStatus := "OPERATIONAL"
 	overallClass := "ok"
-	if errorCount > 0 {
+	if errorCount > 0 || len(providerErrors) > 0 {
 		overallStatus = "DEGRADED"
 		overallClass = "error"
 	}
@@ -207,6 +237,75 @@ func Build(cfg config.Config, results []probe.Result, providerErrors []probe.Pro
 		Theme:               theme,
 		ThemeLabel:          map[bool]string{true: "白天", false: "夜间"}[theme == "light"],
 	}, updatedHistory
+}
+
+// MergeProvider replaces one provider in a previously generated full report
+// with the result of a provider-only check while preserving all other models.
+func MergeProvider(base, update Report, providerID string) Report {
+	if base.GeneratedAt == "" {
+		return update
+	}
+
+	merged := update
+	merged.Providers = make([]ProviderReport, 0, len(base.Providers)+len(update.Providers))
+	merged.ProviderErrors = make([]probe.ProviderError, 0, len(base.ProviderErrors)+len(update.ProviderErrors))
+	replaced := false
+	for _, item := range base.Providers {
+		if item.ProviderID == providerID {
+			for _, replacement := range update.Providers {
+				if replacement.ProviderID == providerID {
+					merged.Providers = append(merged.Providers, replacement)
+					replaced = true
+				}
+			}
+			if !replaced {
+				for _, failure := range update.ProviderErrors {
+					if failure.ProviderID == providerID {
+						item.Results = []ModelResult{}
+						item.OKCount, item.SlowCount, item.ErrorCount, item.ModelCount = 0, 0, 0, 0
+						item.Status, item.StatusLabel = "error", "异常"
+						merged.Providers = append(merged.Providers, item)
+						replaced = true
+						break
+					}
+				}
+			}
+			continue
+		}
+		merged.Providers = append(merged.Providers, item)
+	}
+	if !replaced {
+		for _, item := range update.Providers {
+			if item.ProviderID == providerID {
+				merged.Providers = append(merged.Providers, item)
+			}
+		}
+	}
+
+	for _, item := range base.ProviderErrors {
+		if item.ProviderID != providerID {
+			merged.ProviderErrors = append(merged.ProviderErrors, item)
+		}
+	}
+	merged.ProviderErrors = append(merged.ProviderErrors, update.ProviderErrors...)
+	merged.ProviderCount = len(merged.Providers)
+	merged.Total = 0
+	merged.OKCount = 0
+	merged.SlowCount = 0
+	merged.ErrorCount = 0
+	for _, provider := range merged.Providers {
+		merged.Total += len(provider.Results)
+		merged.OKCount += provider.OKCount
+		merged.SlowCount += provider.SlowCount
+		merged.ErrorCount += provider.ErrorCount
+	}
+	merged.OverallStatus = "OPERATIONAL"
+	merged.OverallClass = "ok"
+	if merged.ErrorCount > 0 || len(merged.ProviderErrors) > 0 {
+		merged.OverallStatus = "DEGRADED"
+		merged.OverallClass = "error"
+	}
+	return merged
 }
 
 func themeName(cfg config.Config, now time.Time) string {

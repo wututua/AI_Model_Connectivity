@@ -3,11 +3,14 @@ package web
 import (
 	"context"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -51,6 +54,7 @@ type RunningState struct {
 	AutoCheckIntervalMinHours float64 `json:"auto_check_interval_min_hours"`
 	AutoCheckIntervalMaxHours float64 `json:"auto_check_interval_max_hours"`
 	FirstUse                  bool    `json:"first_use"`
+	ReadOnly                  bool    `json:"read_only"`
 }
 
 var ErrCheckAlreadyRunning = errors.New("check already running")
@@ -89,12 +93,13 @@ func (b *Broker) Publish(value report.Report) {
 }
 
 type Server struct {
-	cfg     config.Config
-	store   *storage.SQLiteStore
-	check   CheckFunc
-	broker  *Broker
-	admin   AdminController
-	metrics *metrics.Metrics
+	cfg          config.Config
+	store        *storage.SQLiteStore
+	check        CheckFunc
+	broker       *Broker
+	admin        AdminController
+	metrics      *metrics.Metrics
+	authFailures authFailureLimiter
 }
 
 func NewServer(cfg config.Config, store *storage.SQLiteStore, check CheckFunc, broker *Broker, admin AdminController) *Server {
@@ -220,7 +225,12 @@ func (s *Server) adminDetection(w http.ResponseWriter, r *http.Request) {
 		methodNotAllowed(w)
 		return
 	}
-	writeJSON(w, http.StatusOK, s.admin.RunningState())
+	state := s.admin.RunningState()
+	state.ReadOnly = s.admin.ViewToken() != "" && r.Header.Get("Authorization") == "Bearer "+s.admin.ViewToken() && r.Header.Get("Authorization") != "Bearer "+s.admin.AdminToken()
+	if state.ReadOnly {
+		state.FirstUse = false
+	}
+	writeJSON(w, http.StatusOK, state)
 }
 
 func (s *Server) adminDetectionStart(w http.ResponseWriter, r *http.Request) {
@@ -253,7 +263,7 @@ func (s *Server) adminDetectionStop(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) adminConfig(w http.ResponseWriter, r *http.Request) {
-	if !s.requireAuth(w, r) {
+	if !s.requireAdmin(w, r) {
 		return
 	}
 	if r.Method != http.MethodGet {
@@ -312,7 +322,12 @@ func (s *Server) adminProviderItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	path := strings.TrimPrefix(r.URL.Path, "/api/admin/providers/")
-	if id, ok := strings.CutSuffix(path, "/rerun"); ok {
+	id, rerun := strings.CutSuffix(path, "/rerun")
+	if err := config.ValidateProviderID(id); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if rerun {
 		if r.Method != http.MethodPost {
 			methodNotAllowed(w)
 			return
@@ -325,11 +340,6 @@ func (s *Server) adminProviderItem(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "report": value})
-		return
-	}
-	id := strings.Trim(path, "/")
-	if id == "" {
-		writeErrorText(w, http.StatusBadRequest, "provider id is required")
 		return
 	}
 	switch r.Method {
@@ -348,7 +358,7 @@ func (s *Server) adminProviderItem(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) adminConfigExport(w http.ResponseWriter, r *http.Request) {
-	if !s.requireAuth(w, r) {
+	if !s.requireAdmin(w, r) {
 		return
 	}
 	if r.Method != http.MethodGet {
@@ -471,31 +481,52 @@ func (s *Server) adminTaskItem(w http.ResponseWriter, r *http.Request) {
 // Used for GET endpoints that should be shareable without granting
 // mutation rights.  Behaves like requireAdmin otherwise.
 func (s *Server) requireAuth(w http.ResponseWriter, r *http.Request) bool {
-	adminTok := s.admin.AdminToken()
-	viewTok := s.admin.ViewToken()
-	provided := r.Header.Get("Authorization")
-	matches := func(t string) bool {
-		return t != "" && provided == "Bearer "+t
-	}
-	if matches(adminTok) || matches(viewTok) {
-		return true
-	}
-	// Fall through to the strict admin path so the loopback + empty-token
-	// development shortcut still applies.
-	return s.requireAdmin(w, r)
+	return s.authorize(w, r, true)
 }
 
 func (s *Server) requireAdmin(w http.ResponseWriter, r *http.Request) bool {
-	token := s.admin.AdminToken()
-	if token != "" && r.Header.Get("Authorization") != "Bearer "+token {
-		writeJSON(w, http.StatusUnauthorized, map[string]any{"ok": false, "error": "unauthorized"})
+	return s.authorize(w, r, false)
+}
+
+func (s *Server) authorize(w http.ResponseWriter, r *http.Request, allowView bool) bool {
+	w.Header().Set("Cache-Control", "no-store")
+	address := r.RemoteAddr
+	if host, _, err := net.SplitHostPort(address); err == nil {
+		address = host
+	}
+	now := time.Now()
+	if retryAfter := s.authFailures.retryAfter(address, now); retryAfter > 0 {
+		w.Header().Set("Retry-After", strconv.Itoa(int(retryAfter.Seconds())+1))
+		writeErrorText(w, http.StatusTooManyRequests, "too many authentication failures; try again later")
 		return false
 	}
-	if token == "" && isPublicBindHost(s.cfg.AppHost) {
+	token := s.admin.AdminToken()
+	provided := r.Header.Get("Authorization")
+	matches := func(candidate string) bool {
+		expected := "Bearer " + candidate
+		return candidate != "" && subtle.ConstantTimeCompare([]byte(provided), []byte(expected)) == 1
+	}
+	if matches(token) {
+		s.authFailures.reset(address)
+		return true
+	}
+	if matches(s.admin.ViewToken()) {
+		if !allowView {
+			writeErrorText(w, http.StatusForbidden, "read-only token cannot access this endpoint")
+			return false
+		}
+		return true
+	}
+	if token == "" && IsPublicBindHost(s.cfg.AppHost) {
 		writeJSON(w, http.StatusForbidden, map[string]any{"ok": false, "error": "ADMIN_TOKEN is required for admin APIs when APP_HOST is public"})
 		return false
 	}
-	return true
+	if token == "" {
+		return true
+	}
+	s.authFailures.fail(address, now)
+	writeErrorText(w, http.StatusUnauthorized, "unauthorized")
+	return false
 }
 
 func (s *Server) adminChangeToken(w http.ResponseWriter, r *http.Request) {
@@ -509,12 +540,20 @@ func (s *Server) adminChangeToken(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Token string `json:"token"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || strings.TrimSpace(body.Token) == "" {
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	body.Token = strings.TrimSpace(body.Token)
+	if body.Token == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "token cannot be empty"})
 		return
 	}
+	if err := config.ValidateToken(body.Token); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
 	if err := s.admin.ChangeAdminToken(r.Context(), body.Token); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
+		writeError(w, http.StatusBadRequest, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -535,13 +574,24 @@ func (s *Server) adminViewToken(w http.ResponseWriter, r *http.Request) {
 		var body struct {
 			Token string `json:"token"`
 		}
-		_ = json.NewDecoder(r.Body).Decode(&body)
+		if !decodeRequestJSON(w, r, &body, true) {
+			return
+		}
 		token := strings.TrimSpace(body.Token)
 		if token == "" {
-			token = randomToken(16)
+			var err error
+			token, err = randomToken(16)
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
+				return
+			}
+		}
+		if err := config.ValidateToken(token); err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
 		}
 		if err := s.admin.ChangeViewToken(r.Context(), token); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
+			writeError(w, http.StatusBadRequest, err)
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "token": token})
@@ -558,18 +608,15 @@ func (s *Server) adminViewToken(w http.ResponseWriter, r *http.Request) {
 
 // randomToken returns a URL-safe base64 token with the given byte length
 // of entropy.  Uses crypto/rand so tokens aren't guessable from system time.
-func randomToken(bytes int) string {
+func randomToken(bytes int) (string, error) {
 	if bytes <= 0 {
 		bytes = 16
 	}
 	buf := make([]byte, bytes)
 	if _, err := rand.Read(buf); err != nil {
-		// rand.Read on the standard library only fails when the OS RNG
-		// itself is broken; in that case fall back to a timestamp so we
-		// still hand the caller something usable rather than panicking.
-		return fmt.Sprintf("vt-%d", time.Now().UnixNano())
+		return "", fmt.Errorf("generate token: %w", err)
 	}
-	return base64.RawURLEncoding.EncodeToString(buf)
+	return base64.RawURLEncoding.EncodeToString(buf), nil
 }
 
 func (s *Server) writeCheckError(w http.ResponseWriter, err error) {
@@ -581,7 +628,7 @@ func (s *Server) writeCheckError(w http.ResponseWriter, err error) {
 }
 
 func (s *Server) HTTPServer() *http.Server {
-	addr := fmt.Sprintf("%s:%d", s.cfg.AppHost, s.cfg.AppPort)
+	addr := net.JoinHostPort(strings.Trim(s.cfg.AppHost, "[]"), strconv.Itoa(s.cfg.AppPort))
 	slog.Info("server started", "web_dir", filepath.Clean(s.cfg.WebDir), "addr", "http://"+addr+"/")
 	return &http.Server{
 		Addr:              addr,
@@ -613,13 +660,13 @@ func spaHandler(webDir string) http.Handler {
 	})
 }
 
-func isPublicBindHost(host string) bool {
-	switch strings.TrimSpace(strings.ToLower(host)) {
-	case "", "0.0.0.0", "::", "[::]":
-		return true
-	default:
+func IsPublicBindHost(host string) bool {
+	host = strings.Trim(strings.TrimSpace(host), "[]")
+	if strings.EqualFold(host, "localhost") {
 		return false
 	}
+	ip := net.ParseIP(host)
+	return ip == nil || !ip.IsLoopback()
 }
 
 func writeSSE(w http.ResponseWriter, flusher http.Flusher, value report.Report) {
@@ -632,11 +679,44 @@ func writeSSE(w http.ResponseWriter, flusher http.Flusher, value report.Report) 
 }
 
 func decodeJSON(w http.ResponseWriter, r *http.Request, value any) bool {
-	if err := json.NewDecoder(r.Body).Decode(value); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return false
+	return decodeRequestJSON(w, r, value, false)
+}
+
+const maxRequestBody = 1 << 20
+
+func decodeRequestJSON(w http.ResponseWriter, r *http.Request, value any, allowEmpty bool) bool {
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBody)
+	decoder := json.NewDecoder(r.Body)
+	var payload json.RawMessage
+	err := decoder.Decode(&payload)
+	if allowEmpty && errors.Is(err, io.EOF) {
+		return true
 	}
-	return true
+	if err == nil {
+		if len(payload) == 0 || payload[0] != '{' {
+			writeErrorText(w, http.StatusBadRequest, "request body must be a JSON object")
+			return false
+		}
+		if err := json.Unmarshal(payload, value); err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return false
+		}
+		var extra any
+		err = decoder.Decode(&extra)
+		if errors.Is(err, io.EOF) {
+			return true
+		}
+		if err == nil {
+			err = errors.New("request body must contain a single JSON value")
+		}
+	}
+	var tooLarge *http.MaxBytesError
+	if errors.As(err, &tooLarge) {
+		writeErrorText(w, http.StatusRequestEntityTooLarge, "request body exceeds 1 MiB")
+	} else {
+		writeError(w, http.StatusBadRequest, err)
+	}
+	return false
 }
 
 func writeResult(w http.ResponseWriter, value any, err error) {

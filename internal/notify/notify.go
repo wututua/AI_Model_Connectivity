@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"cg/internal/config"
+	"cg/internal/httpclient"
 	"cg/internal/report"
 )
 
@@ -54,11 +56,16 @@ func New(cfg config.Config, stateStore StateStore) *Client {
 	return &Client{
 		cfg:        cfg,
 		stateStore: stateStore,
-		httpClient: &http.Client{Timeout: 10 * time.Second},
+		httpClient: newHTTPClient(),
 	}
 }
 
+func newHTTPClient() *http.Client {
+	return httpclient.New(10 * time.Second)
+}
+
 func (c *Client) SendIfNeeded(ctx context.Context, value report.Report) error {
+	defer c.httpClient.CloseIdleConnections()
 	if !c.enabled() {
 		return nil
 	}
@@ -79,7 +86,7 @@ func (c *Client) SendIfNeeded(ctx context.Context, value report.Report) error {
 	}
 	now := time.Now()
 	if inCooldown(previous, now, c.cfg.NotifyCooldownMinutes) {
-		return c.stateStore.Write(State{Status: current, SentAt: previous.SentAt})
+		return nil
 	}
 	if err := c.send(ctx, buildPayload(value)); err != nil {
 		return err
@@ -174,6 +181,9 @@ func (c *Client) send(ctx context.Context, body payload) error {
 }
 
 func (c *Client) sendWebhook(ctx context.Context, body payload) error {
+	if err := config.ValidateWebhookURL(c.cfg.NotifyWebhookURL); err != nil {
+		return fmt.Errorf("notify_webhook_url: %w", err)
+	}
 	data, err := json.Marshal(c.webhookBody(body))
 	if err != nil {
 		return err
@@ -218,6 +228,10 @@ func (c *Client) sendTelegram(ctx context.Context, body payload) error {
 func (c *Client) do(request *http.Request) error {
 	response, err := c.httpClient.Do(request)
 	if err != nil {
+		var requestError *url.Error
+		if errors.As(err, &requestError) {
+			return fmt.Errorf("notify request failed: %w", requestError.Err)
+		}
 		return err
 	}
 	defer response.Body.Close()

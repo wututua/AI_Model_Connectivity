@@ -4,13 +4,16 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
 
 	"cg/internal/config"
+	"cg/internal/httpclient"
 )
 
 var (
@@ -70,7 +73,31 @@ type modelsResponse struct {
 }
 
 func NewOpenAICompatible(cfg config.ProviderConfig) *OpenAICompatible {
-	return &OpenAICompatible{cfg: cfg, client: http.DefaultClient}
+	return &OpenAICompatible{cfg: cfg, client: newProviderHTTPClient()}
+}
+
+func newProviderHTTPClient() *http.Client {
+	return httpclient.New(0)
+}
+
+func (p *OpenAICompatible) CloseIdleConnections() {
+	p.client.CloseIdleConnections()
+}
+
+func (p *OpenAICompatible) redactError(err error) error {
+	var requestError *url.Error
+	if errors.As(err, &requestError) {
+		err = requestError.Err
+	}
+	message := err.Error()
+	if p.cfg.APIKey != "" {
+		message = strings.ReplaceAll(message, p.cfg.APIKey, "[redacted]")
+	}
+	characters := []rune(message)
+	if len(characters) > 300 {
+		message = string(characters[:300]) + "..."
+	}
+	return errors.New(message)
 }
 
 func (p *OpenAICompatible) ID() string      { return p.cfg.ID }
@@ -94,7 +121,7 @@ func (p *OpenAICompatible) Models(ctx context.Context) ([]string, error) {
 
 	resp, err := p.client.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, p.redactError(err)
 	}
 	defer resp.Body.Close()
 
@@ -103,11 +130,12 @@ func (p *OpenAICompatible) Models(ctx context.Context) ([]string, error) {
 		return nil, err
 	}
 	var parsed modelsResponse
-	if err := json.Unmarshal(body, &parsed); err != nil {
-		return nil, fmt.Errorf("parse models response: %w", err)
+	parseErr := json.Unmarshal(body, &parsed)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 || parsed.Error != nil {
+		return nil, p.redactError(responseError(resp.StatusCode, parsed.Error, string(body)))
 	}
-	if resp.StatusCode >= 400 {
-		return nil, responseError(resp.StatusCode, parsed.Error, string(body))
+	if parseErr != nil {
+		return nil, fmt.Errorf("parse models response: %w", parseErr)
 	}
 	models := []string{}
 	seen := map[string]bool{}
@@ -148,7 +176,7 @@ func (p *OpenAICompatible) Chat(ctx context.Context, model, systemPrompt, prompt
 
 	resp, err := p.client.Do(req)
 	if err != nil {
-		return "", Usage{}, err
+		return "", Usage{}, p.redactError(err)
 	}
 	defer resp.Body.Close()
 
@@ -157,11 +185,12 @@ func (p *OpenAICompatible) Chat(ctx context.Context, model, systemPrompt, prompt
 		return "", Usage{}, err
 	}
 	var parsed chatResponse
-	if err := json.Unmarshal(respBody, &parsed); err != nil {
-		return "", Usage{}, fmt.Errorf("parse chat response: %w", err)
+	parseErr := json.Unmarshal(respBody, &parsed)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 || parsed.Error != nil {
+		return "", Usage{}, p.redactError(responseError(resp.StatusCode, parsed.Error, string(respBody)))
 	}
-	if resp.StatusCode >= 400 {
-		return "", Usage{}, responseError(resp.StatusCode, parsed.Error, string(respBody))
+	if parseErr != nil {
+		return "", Usage{}, fmt.Errorf("parse chat response: %w", parseErr)
 	}
 	if len(parsed.Choices) == 0 {
 		return "", Usage{}, fmt.Errorf("empty choices")
@@ -197,9 +226,6 @@ func responseError(status int, apiErr interface{}, body string) error {
 	}
 	if message == "" {
 		message = strings.TrimSpace(body)
-	}
-	if len(message) > 300 {
-		message = message[:300] + "..."
 	}
 	return fmt.Errorf("http %d: %s", status, message)
 }

@@ -1,336 +1,153 @@
-import { useState, useEffect, useCallback } from 'react'
-import { Edit2, Trash2, Save, Plus, RefreshCw, XCircle } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Database, Edit2, KeyRound, Plus, RefreshCw, RotateCw, Search, Trash2 } from 'lucide-react'
 import { api } from '../../api'
-import type { SafeProviderConfig, ProviderUpdate } from '../../types'
-import { useAutoMsg, Btn, Badge, Field, inputCls } from './shared'
+import type { ProviderUpdate, SafeProviderConfig } from '../../types'
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '../../components/ui/alert-dialog'
+import { Badge } from '../../components/ui/badge'
+import { Button } from '../../components/ui/button'
+import { Card, CardContent } from '../../components/ui/card'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../../components/ui/dialog'
+import { Input } from '../../components/ui/input'
+import { Switch } from '../../components/ui/switch'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../components/ui/table'
+import { Textarea } from '../../components/ui/textarea'
+import { Tooltip, TooltipContent, TooltipTrigger } from '../../components/ui/tooltip'
+import { Feedback, Field, LoadingButton, useAutoMsg } from './shared'
 
-function ProviderModal({
-  initial,
-  onSave,
-  onClose,
-}: {
-  initial: SafeProviderConfig | null
-  onSave: (id: string | null, update: ProviderUpdate) => Promise<void>
-  onClose: () => void
-}) {
-  const [form, setForm] = useState<{
-    id: string; name: string; type: string; base_url: string
-    api_key: string; clear_api_key: boolean; models: string
-    enabled: boolean; probe_enabled: boolean
-  }>(() => ({
-    id: initial?.id ?? '',
-    name: initial?.name ?? '',
-    type: initial?.type ?? 'openai',
-    base_url: initial?.base_url ?? '',
-    api_key: '',
-    clear_api_key: false,
-    models: initial?.models.join(', ') ?? '',
-    enabled: initial?.enabled ?? true,
-    probe_enabled: initial?.probe_enabled ?? true,
-  }))
-  const [saving, setSaving] = useState(false)
-  const [err, setErr] = useState('')
+type EditingState = SafeProviderConfig | 'new' | null
 
-  const set = <K extends keyof typeof form>(key: K, val: (typeof form)[K]) =>
-    setForm(f => ({ ...f, [key]: val }))
+export function ProvidersTab({ readOnly = false }: { readOnly?: boolean }) {
+  const [providers, setProviders] = useState<SafeProviderConfig[]>([])
+  const [loading, setLoading] = useState(false)
+  const [editing, setEditing] = useState<EditingState>(null)
+  const [deleteTarget, setDeleteTarget] = useState<SafeProviderConfig | null>(null)
+  const [deleting, setDeleting] = useState(false)
+  const [rerunning, setRerunning] = useState<string | null>(null)
+  const [search, setSearch] = useState('')
+  const [message, setMessage] = useAutoMsg()
 
-  const submit = async () => {
-    if (!form.name.trim() || !form.base_url.trim()) {
-      setErr('名称和 Base URL 为必填项')
-      return
-    }
-    setSaving(true)
-    setErr('')
-    try {
-      await onSave(initial?.id ?? null, {
-        id: form.id.trim(),
-        name: form.name.trim(),
-        type: form.type.trim() || 'openai',
-        base_url: form.base_url.trim(),
-        api_key: form.api_key,
-        clear_api_key: form.clear_api_key,
-        models: form.models.split(',').map(m => m.trim()).filter(Boolean),
-        enabled: form.enabled,
-        probe_enabled: form.probe_enabled,
-      })
-    } catch (e) {
-      setErr((e as Error).message)
-      setSaving(false)
-    }
+  const load = useCallback(() => {
+    setLoading(true)
+    api.providers().then(setProviders).catch(cause => setMessage(`错误：${(cause as Error).message}`)).finally(() => setLoading(false))
+  }, [setMessage])
+
+  useEffect(() => { load() }, [load])
+
+  const filtered = useMemo(() => {
+    const query = search.trim().toLowerCase()
+    if (!query) return providers
+    return providers.filter(provider => [provider.id, provider.name, provider.type, provider.base_url, ...provider.models].some(value => value.toLowerCase().includes(query)))
+  }, [providers, search])
+
+  const save = async (id: string | null, update: ProviderUpdate) => {
+    if (id) await api.updateProvider(id, update)
+    else await api.createProvider(update)
+    setEditing(null); setMessage('Provider 已保存'); load()
+  }
+
+  const remove = async () => {
+    if (!deleteTarget) return
+    setDeleting(true)
+    try { await api.deleteProvider(deleteTarget.id); setDeleteTarget(null); setMessage('Provider 已删除'); load() }
+    catch (cause) { setMessage(`错误：${(cause as Error).message}`) }
+    finally { setDeleting(false) }
+  }
+
+  const rerun = async (provider: SafeProviderConfig) => {
+    setRerunning(provider.id); setMessage('')
+    try { await api.rerunProvider(provider.id); setMessage(`已触发「${provider.name}」的检测任务`) }
+    catch (cause) { setMessage(`错误：${(cause as Error).message}`) }
+    finally { setRerunning(null) }
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 backdrop-blur-sm" style={{ background: 'rgba(11,16,32,.75)' }}>
-      <div className="w-full max-w-lg glass rounded-[24px] overflow-hidden anim-fade-in">
-        <div className="flex items-center justify-between px-5 py-4" style={{ borderBottom: '1px solid var(--border)' }}>
-          <h3 className="font-semibold" style={{ color: 'var(--text)' }}>
-            {initial ? '编辑 Provider' : '新增 Provider'}
-          </h3>
-          <button onClick={onClose} className="cursor-pointer transition-colors" style={{ color: 'var(--muted)' }} onMouseEnter={e=>(e.currentTarget.style.color='var(--text)')} onMouseLeave={e=>(e.currentTarget.style.color='var(--muted)')}>
-            <XCircle className="w-5 h-5" />
-          </button>
-        </div>
-
-        <div className="p-5 space-y-4 max-h-[70vh] overflow-y-auto">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <Field label="ID（唯一标识）">
-              <input
-                className={inputCls}
-                value={form.id}
-                onChange={e => set('id', e.target.value)}
-                placeholder="openai-main"
-                disabled={!!initial}
-              />
-            </Field>
-            <Field label="名称 *">
-              <input className={inputCls} value={form.name} onChange={e => set('name', e.target.value)} placeholder="OpenAI" />
-            </Field>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <Field label="类型">
-              <input className={inputCls} value={form.type} onChange={e => set('type', e.target.value)} placeholder="openai" />
-            </Field>
-            <Field label="Base URL *">
-              <input className={inputCls} value={form.base_url} onChange={e => set('base_url', e.target.value)} placeholder="https://api.openai.com/v1" />
-            </Field>
-          </div>
-
-          <Field label={`API Key${initial?.api_key_set ? '（已设置，留空保留）' : ''}`}>
-            <input
-              type="password"
-              className={inputCls}
-              value={form.api_key}
-              onChange={e => set('api_key', e.target.value)}
-              placeholder={initial?.api_key_set ? '留空保留已有 Key' : 'sk-...'}
-            />
-            {initial?.api_key_set && (
-              <label className="flex items-center gap-2 mt-1.5 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={form.clear_api_key}
-                  onChange={e => set('clear_api_key', e.target.checked)}
-                  className="rounded"
-                />
-                <span className="text-xs" style={{ color: 'var(--error)' }}>清除已有 Key</span>
-              </label>
-            )}
-          </Field>
-
-          <Field label="模型列表" hint="逗号分隔；留空则自动从 /v1/models 获取">
-            <input className={inputCls} value={form.models} onChange={e => set('models', e.target.value)} placeholder="gpt-4o-mini, gpt-4.1-mini" />
-          </Field>
-
-          <div className="flex flex-col gap-2">
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input type="checkbox" checked={form.enabled} onChange={e => set('enabled', e.target.checked)} className="rounded" />
-              <span className="text-sm" style={{ color: 'var(--text)' }}>启用此 Provider</span>
-            </label>
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={form.probe_enabled}
-                onChange={e => set('probe_enabled', e.target.checked)}
-                className="rounded"
-                disabled={!form.enabled}
-              />
-              <span className="text-sm" style={{ color: form.enabled ? 'var(--text)' : 'var(--muted)', opacity: form.enabled ? 1 : .5 }}>
-                参与检测运行
-              </span>
-              <span className="text-[11px] font-mono" style={{ color: 'var(--muted)', opacity: .6 }}>
-                （关闭后保留配置但不会被探测）
-              </span>
-            </label>
-          </div>
-
-          {err && <p className="text-red-400 text-xs">{err}</p>}
-        </div>
-
-        <div className="flex justify-end gap-2 px-5 py-4" style={{ borderTop: '1px solid var(--border)' }}>
-          <Btn onClick={onClose} variant="ghost">取消</Btn>
-          <Btn onClick={submit} loading={saving} variant="primary">
-            <Save className="w-3.5 h-3.5" />保存
-          </Btn>
+    <div className="space-y-5">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="relative w-full sm:max-w-sm"><Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input value={search} onChange={event => setSearch(event.target.value)} placeholder="搜索名称、ID、URL 或模型" className="pl-9" /></div>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={load} disabled={loading}><RefreshCw className={loading ? 'animate-spin' : ''} />刷新</Button>
+          {!readOnly && <Button size="sm" onClick={() => setEditing('new')}><Plus />新增 Provider</Button>}
         </div>
       </div>
+      <Feedback message={message} />
+
+      <Card>
+        <CardContent className="p-0">
+          <Table>
+            <TableHeader><TableRow><TableHead>Provider</TableHead><TableHead className="hidden md:table-cell">连接地址</TableHead><TableHead className="hidden sm:table-cell">模型</TableHead><TableHead>状态</TableHead><TableHead className="w-[132px] text-right">操作</TableHead></TableRow></TableHeader>
+            <TableBody>
+              {filtered.map(provider => (
+                <TableRow key={provider.id}>
+                  <TableCell><div className="flex items-center gap-3"><div className="flex size-8 shrink-0 items-center justify-center rounded-md bg-muted font-mono text-xs font-semibold">{provider.name.slice(0, 2).toUpperCase()}</div><div className="min-w-0"><p className="truncate font-medium">{provider.name}</p><p className="truncate font-mono text-xs text-muted-foreground">{provider.id} · {provider.type}</p></div></div></TableCell>
+                  <TableCell className="hidden max-w-[320px] md:table-cell"><p className="truncate font-mono text-xs text-muted-foreground" title={provider.base_url}>{provider.base_url}</p><p className="mt-1 flex items-center gap-1 text-xs text-muted-foreground"><KeyRound className="size-3" />{provider.api_key_set ? 'API Key 已设置' : '未设置 API Key'}</p></TableCell>
+                  <TableCell className="hidden sm:table-cell"><span className="font-mono text-xs">{provider.models.length || '自动'}</span></TableCell>
+                  <TableCell><div className="flex flex-col items-start gap-1"><Badge variant={provider.enabled ? 'success' : 'muted'}>{provider.enabled ? '已启用' : '已停用'}</Badge><span className="text-xs text-muted-foreground">{provider.enabled && provider.probe_enabled ? '参与检测' : '不参与检测'}</span></div></TableCell>
+                  <TableCell>
+                    <div className="flex justify-end gap-1">
+                      <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" onClick={() => rerun(provider)} disabled={!provider.enabled || !provider.probe_enabled || rerunning !== null} aria-label={`重新检测 ${provider.name}`}><RotateCw className={rerunning === provider.id ? 'animate-spin' : ''} /></Button></TooltipTrigger><TooltipContent>重新检测</TooltipContent></Tooltip>
+                      {!readOnly && <><Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" onClick={() => setEditing(provider)} aria-label={`编辑 ${provider.name}`}><Edit2 /></Button></TooltipTrigger><TooltipContent>编辑</TooltipContent></Tooltip><Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" className="text-destructive hover:text-destructive" onClick={() => setDeleteTarget(provider)} aria-label={`删除 ${provider.name}`}><Trash2 /></Button></TooltipTrigger><TooltipContent>删除</TooltipContent></Tooltip></>}
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+              {!loading && filtered.length === 0 && <TableRow><TableCell colSpan={5}><div className="flex min-h-52 flex-col items-center justify-center text-muted-foreground"><Database className="mb-3 size-7" /><p className="text-sm">{providers.length ? '没有匹配的 Provider' : '尚未添加 Provider'}</p></div></TableCell></TableRow>}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+
+      {!readOnly && <ProviderDialog key={editing === 'new' ? 'new' : editing?.id ?? 'closed'} value={editing} onOpenChange={open => !open && setEditing(null)} onSave={save} />}
+
+      <AlertDialog open={Boolean(deleteTarget)} onOpenChange={open => !open && !deleting && setDeleteTarget(null)}>
+        <AlertDialogContent><AlertDialogHeader><AlertDialogTitle>删除 Provider？</AlertDialogTitle><AlertDialogDescription>将删除「{deleteTarget?.name}」及其配置。历史检测记录不会被此次操作修改。</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel disabled={deleting}>取消</AlertDialogCancel><AlertDialogAction onClick={event => { event.preventDefault(); remove() }} disabled={deleting}>{deleting ? '删除中…' : '确认删除'}</AlertDialogAction></AlertDialogFooter></AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
 
-export function ProvidersTab() {
-  const [providers, setProviders] = useState<SafeProviderConfig[]>([])
-  const [loading, setLoading] = useState(false)
-  const [editing, setEditing] = useState<SafeProviderConfig | null | 'new'>(null)
-  const [msg, setMsg] = useAutoMsg()
-  const [deleting, setDeleting] = useState<string | null>(null)
-  const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
-  const [rerunning, setRerunning] = useState<string | null>(null)
-  const [search, setSearch] = useState('')
-
-  const load = useCallback(() => {
-    setLoading(true)
-    api.providers().then(setProviders).catch(() => {}).finally(() => setLoading(false))
-  }, [])
-
-  useEffect(() => { load() }, [load])
-
-  const handleSave = async (id: string | null, update: ProviderUpdate) => {
-    if (id) {
-      await api.updateProvider(id, update)
-    } else {
-      await api.createProvider(update)
-    }
-    setEditing(null)
-    setMsg('已保存')
-    load()
-  }
-
-  const handleDelete = async (id: string) => {
-    if (confirmDelete !== id) {
-      setConfirmDelete(id)
-      return
-    }
-    setConfirmDelete(null)
-    setDeleting(id)
-    try {
-      await api.deleteProvider(id)
-      setMsg('已删除')
-      load()
-    } catch (e) {
-      setMsg(`错误：${(e as Error).message}`)
-    } finally {
-      setDeleting(null)
-    }
-  }
-
-  const handleRerun = async (id: string, name: string) => {
-    setRerunning(id)
-    setMsg('')
-    try {
-      await api.rerunProvider(id)
-      setMsg(`「${name}」重新检测已触发，完成后结果将更新至仪表盘`)
-    } catch (e) {
-      setMsg(`错误：${(e as Error).message}`)
-    } finally {
-      setRerunning(null)
-    }
-  }
-
-  const filtered = providers.filter(p => {
-    if (!search.trim()) return true
-    const q = search.toLowerCase()
-    return p.id.toLowerCase().includes(q) || p.name.toLowerCase().includes(q) || p.base_url.toLowerCase().includes(q)
+function ProviderDialog({ value, onOpenChange, onSave }: { value: EditingState; onOpenChange: (open: boolean) => void; onSave: (id: string | null, update: ProviderUpdate) => Promise<void> }) {
+  const initial = value && value !== 'new' ? value : null
+  const [form, setForm] = useState({
+    id: initial?.id ?? '', name: initial?.name ?? '', type: initial?.type ?? 'openai', base_url: initial?.base_url ?? '',
+    api_key: '', clear_api_key: false, models: initial?.models.join('\n') ?? '', enabled: initial?.enabled ?? true, probe_enabled: initial?.probe_enabled ?? true,
   })
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const set = <Key extends keyof typeof form>(key: Key, next: (typeof form)[Key]) => setForm(current => ({ ...current, [key]: next }))
+
+  const submit = async () => {
+    if (!form.id.trim() || !form.name.trim() || !form.base_url.trim()) { setError('ID、名称和 Base URL 均为必填项'); return }
+    setSaving(true); setError('')
+    try {
+      await onSave(initial?.id ?? null, {
+        id: form.id.trim(), name: form.name.trim(), type: form.type.trim() || 'openai', base_url: form.base_url.trim(), api_key: form.api_key,
+        clear_api_key: form.clear_api_key, models: form.models.split(/[\n,]/).map(model => model.trim()).filter(Boolean), enabled: form.enabled, probe_enabled: form.enabled && form.probe_enabled,
+      })
+    } catch (cause) { setError((cause as Error).message); setSaving(false) }
+  }
 
   return (
-    <div className="space-y-4 anim-fade-in">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-base font-semibold" style={{ color: 'var(--text)' }}>Provider 管理</h2>
-        <div className="flex items-center gap-2 flex-wrap">
-          <input
-            className="input-glass rounded-xl px-3 py-1.5 text-xs w-44"
-            placeholder="搜索 ID / 名称 / URL…"
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-          />
-          <Btn onClick={load} loading={loading} variant="ghost"><RefreshCw className="w-3.5 h-3.5" /></Btn>
-          <Btn onClick={() => setEditing('new')} variant="primary"><Plus className="w-3.5 h-3.5" />新增</Btn>
+    <Dialog open={value !== null} onOpenChange={onOpenChange}>
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+        <DialogHeader><DialogTitle>{initial ? '编辑 Provider' : '新增 Provider'}</DialogTitle><DialogDescription>配置 OpenAI 兼容接口、模型范围与检测状态。</DialogDescription></DialogHeader>
+        <div className="field-grid py-2">
+          <Field label="唯一 ID" htmlFor="provider-id" hint={initial ? '创建后不可修改' : '建议使用小写字母、数字和连字符'}><Input id="provider-id" value={form.id} onChange={event => set('id', event.target.value)} placeholder="openai-main" disabled={Boolean(initial)} className="font-mono" /></Field>
+          <Field label="显示名称" htmlFor="provider-name"><Input id="provider-name" value={form.name} onChange={event => set('name', event.target.value)} placeholder="OpenAI" /></Field>
+          <Field label="Provider 类型" htmlFor="provider-type"><Input id="provider-type" value={form.type} onChange={event => set('type', event.target.value)} placeholder="openai" className="font-mono" /></Field>
+          <Field label="Base URL" htmlFor="provider-url"><Input id="provider-url" type="url" value={form.base_url} onChange={event => set('base_url', event.target.value)} placeholder="https://api.openai.com/v1" className="font-mono" /></Field>
+          <Field className="md:col-span-2" label={`API Key${initial?.api_key_set ? '（留空保留现有值）' : ''}`} htmlFor="provider-key"><Input id="provider-key" type="password" value={form.api_key} onChange={event => set('api_key', event.target.value)} placeholder={initial?.api_key_set ? '已设置' : 'sk-...'} className="font-mono" /></Field>
+          {initial?.api_key_set && <ToggleRow className="md:col-span-2" label="清除现有 API Key" description="保存后移除服务端存储的 Key" checked={form.clear_api_key} onCheckedChange={value => set('clear_api_key', value)} danger />}
+          <Field className="md:col-span-2" label="模型列表" htmlFor="provider-models" hint="每行一个模型，也支持逗号分隔；留空时从 /v1/models 自动获取"><Textarea id="provider-models" value={form.models} onChange={event => set('models', event.target.value)} placeholder={'gpt-4o-mini\ngpt-4.1-mini'} className="min-h-28 font-mono" /></Field>
+          <ToggleRow className="md:col-span-2" label="启用 Provider" description="停用后不会展示或参与检测" checked={form.enabled} onCheckedChange={value => set('enabled', value)} />
+          <ToggleRow className="md:col-span-2" label="参与检测" description="关闭后保留配置和展示，但跳过连通性探测" checked={form.probe_enabled} onCheckedChange={value => set('probe_enabled', value)} disabled={!form.enabled} />
         </div>
-      </div>
-
-      {msg && (
-        <p className="text-sm font-mono anim-slide-in-down" style={{ color: msg.startsWith('错误') ? 'var(--error)' : 'var(--ok)' }}>
-          {msg}
-        </p>
-      )}
-
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-xs text-left" style={{ borderBottom: '1px solid var(--border)', color: 'var(--muted)' }}>
-              <th className="pb-2 pr-4 font-medium">ID / 名称</th>
-              <th className="pb-2 pr-4 font-medium hidden sm:table-cell">类型</th>
-              <th className="pb-2 pr-4 font-medium hidden md:table-cell">Base URL</th>
-              <th className="pb-2 pr-4 font-medium hidden sm:table-cell">模型</th>
-              <th className="pb-2 pr-4 font-medium hidden sm:table-cell">Key</th>
-              <th className="pb-2 pr-3 font-medium">启用</th>
-              <th className="pb-2 pr-4 font-medium hidden sm:table-cell">检测</th>
-              <th className="pb-2 font-medium">操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.map((p) => (
-              <tr
-                key={p.id}
-                className="transition-colors"
-                style={{ borderBottom: '1px solid var(--border)' }}
-              >
-                <td className="py-3 pr-4">
-                  <div className="font-mono text-xs" style={{ color: 'var(--muted)' }}>{p.id}</div>
-                  <div style={{ color: 'var(--text)' }}>{p.name}</div>
-                </td>
-                <td className="py-3 pr-4 font-mono text-xs hidden sm:table-cell" style={{ color: 'var(--muted)' }}>{p.type}</td>
-                <td className="py-3 pr-4 max-w-[180px] hidden md:table-cell">
-                  <span className="font-mono text-xs truncate block" style={{ color: 'var(--muted)' }} title={p.base_url}>
-                    {p.base_url}
-                  </span>
-                </td>
-                <td className="py-3 pr-4 text-xs hidden sm:table-cell" style={{ color: 'var(--muted)' }}>
-                  {p.models.length === 0 ? <span className="italic">自动</span> : p.models.length}
-                </td>
-                <td className="py-3 pr-4 hidden sm:table-cell">
-                  {p.api_key_set
-                    ? <span className="text-xs" style={{ color: 'var(--ok)' }}>●</span>
-                    : <span className="text-xs" style={{ color: 'var(--muted)', opacity: .4 }}>—</span>}
-                </td>
-                <td className="py-3 pr-3">
-                  <Badge status={p.enabled ? 'ok' : 'error'} />
-                </td>
-                <td className="py-3 pr-4 hidden sm:table-cell">
-                  <Badge status={!p.enabled ? 'canceled' : p.probe_enabled ? 'ok' : 'paused'} />
-                </td>
-                <td className="py-3">
-                  <div className="flex items-center gap-1">
-                    <Btn variant="ghost" onClick={() => handleRerun(p.id, p.name)} loading={rerunning === p.id} className="shrink-0" title="重新检测此 Provider">
-                      <RefreshCw className="w-3.5 h-3.5" />
-                    </Btn>
-                    <Btn variant="ghost" onClick={() => setEditing(p)}>
-                      <Edit2 className="w-3.5 h-3.5" />
-                    </Btn>
-                    {confirmDelete === p.id ? (
-                      <>
-                        <Btn variant="danger" onClick={() => handleDelete(p.id)} loading={deleting === p.id} className="text-[11px] px-2">
-                          确认删除
-                        </Btn>
-                        <Btn variant="ghost" onClick={() => setConfirmDelete(null)} className="text-[11px] px-2">
-                          取消
-                        </Btn>
-                      </>
-                    ) : (
-                      <Btn variant="danger" onClick={() => handleDelete(p.id)} loading={deleting === p.id}>
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </Btn>
-                    )}
-                  </div>
-                </td>
-              </tr>
-            ))}
-            {!loading && providers.length === 0 && (
-              <tr>
-                <td colSpan={8} className="py-12 text-center" style={{ color: 'var(--muted)', opacity: .5 }}>暂无 Provider</td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      {editing !== null && (
-        <ProviderModal
-          initial={editing === 'new' ? null : editing}
-          onSave={handleSave}
-          onClose={() => setEditing(null)}
-        />
-      )}
-    </div>
+        {error && <p className="text-sm text-destructive">{error}</p>}
+        <DialogFooter><Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>取消</Button><LoadingButton onClick={submit} loading={saving}>保存 Provider</LoadingButton></DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
+}
+
+function ToggleRow({ label, description, checked, onCheckedChange, disabled, danger, className }: { label: string; description: string; checked: boolean; onCheckedChange: (value: boolean) => void; disabled?: boolean; danger?: boolean; className?: string }) {
+  return <div className={`flex items-center justify-between gap-4 rounded-md border p-3 ${className ?? ''}`}><div><p className={`text-sm font-medium ${danger ? 'text-destructive' : ''}`}>{label}</p><p className="mt-0.5 text-xs text-muted-foreground">{description}</p></div><Switch checked={checked} onCheckedChange={onCheckedChange} disabled={disabled} /></div>
 }

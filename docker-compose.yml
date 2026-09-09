@@ -10,13 +10,15 @@ services:
     volumes:
       - ./data:/app/data      # SQLite 数据库持久化
     env_file:
-      - .env
+      - path: .env
+        required: false
     environment:
       # 容器内必须监听 0.0.0.0 才能接收外部流量
       - APP_HOST=0.0.0.0
       - APP_PORT=8080
+      - ADMIN_TOKEN=${ADMIN_TOKEN:?Set ADMIN_TOKEN to a secret of at least 16 characters}
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/health || exit 1"]
+      test: ["CMD", "/model-connectivity", "healthcheck"]
       interval: 30s
       timeout: 5s
       retries: 3

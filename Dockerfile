@@ -13,6 +13,7 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 COPY --from=frontend-builder /app/web ./web
+RUN mkdir -p /runtime-data
 RUN CGO_ENABLED=0 go build \
     -trimpath \
     -ldflags="-s -w" \
@@ -24,7 +25,9 @@ FROM gcr.io/distroless/static-debian12:nonroot
 WORKDIR /app
 COPY --from=backend-builder /model-connectivity /model-connectivity
 COPY --from=backend-builder /app/web ./web
+COPY --chown=65532:65532 --from=backend-builder /runtime-data ./data
 
+ENV APP_HOST=0.0.0.0 APP_PORT=8080
 EXPOSE 8080
 VOLUME ["/app/data"]
 

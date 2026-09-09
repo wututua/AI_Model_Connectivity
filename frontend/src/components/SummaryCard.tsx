@@ -1,24 +1,25 @@
 import type { ReactNode } from 'react'
+import { Card, CardContent } from './ui/card'
+import { cn } from '../lib/utils'
 
-export function SummaryCard({ icon, label, value, status, animDelay = 0 }: {
+export function SummaryCard({ icon, label, value, status }: {
   icon: ReactNode
   label: string
   value: number | string
   status?: string
   animDelay?: number
 }) {
-  const valueColor = status
-    ? (status === 'ok' ? 'var(--ok)' : status === 'slow' ? 'var(--slow)' : 'var(--error)')
-    : 'var(--text)'
   return (
-    <div className="glass summary-card rounded-[22px] px-4 py-4 anim-fade-in-up" style={{ animationDelay: `${animDelay}ms` }}>
-      <div className="flex items-center gap-1.5 mb-2" style={{ color: 'var(--muted)' }}>
-        {icon}
-        <span className="text-xs uppercase tracking-widest" style={{ letterSpacing: '.16em' }}>{label}</span>
-      </div>
-      <strong className="block text-2xl font-mono font-bold" style={{ color: valueColor }}>
-        {value}
-      </strong>
-    </div>
+    <Card>
+      <CardContent className="p-4">
+        <div className="mb-3 flex items-center justify-between text-muted-foreground">
+          <span className="data-label">{label}</span>
+          {icon}
+        </div>
+        <strong className={cn('metric-value block', status === 'ok' && 'text-success', status === 'slow' && 'text-warning', status === 'error' && 'text-destructive')}>
+          {value}
+        </strong>
+      </CardContent>
+    </Card>
   )
 }

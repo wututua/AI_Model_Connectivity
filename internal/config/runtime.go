@@ -3,39 +3,47 @@ package config
 import (
 	"errors"
 	"fmt"
+	"math"
 	"net"
 	"net/url"
 	"strings"
+	"unicode"
 )
 
 type RuntimeSettings struct {
-	DashboardTitle            string   `json:"dashboard_title"`
-	TimeoutSeconds            float64  `json:"timeout_seconds"`
-	ModelListTimeoutSeconds   float64  `json:"model_list_timeout_seconds"`
-	SlowThresholdMS           int      `json:"slow_threshold_ms"`
-	Concurrency               int      `json:"concurrency"`
-	ProviderConcurrency       int      `json:"provider_concurrency"`
-	MaxModelsPerProvider      int      `json:"max_models_per_provider"`
-	SkipModels                []string `json:"skip_models"`
-	EnableHistory             bool     `json:"enable_history"`
-	ShowCurveChart            bool     `json:"show_curve_chart"`
-	StatsWindowDays           int      `json:"stats_window_days"`
-	HistorySize               int      `json:"history_size"`
-	MaxHistoryRecords         int      `json:"max_history_records"`
-	ShowErrorDetail           bool     `json:"show_error_detail"`
-	ThemeMode                 string   `json:"theme_mode"`
-	DayModeStartHour          int      `json:"day_mode_start_hour"`
-	DayModeEndHour            int      `json:"day_mode_end_hour"`
-	AutoCheckIntervalMinHours float64  `json:"auto_check_interval_min_hours"`
-	AutoCheckIntervalMaxHours float64  `json:"auto_check_interval_max_hours"`
-	NotifyPlatform            string   `json:"notify_platform"`
-	NotifyWebhookURL          string   `json:"notify_webhook_url,omitempty"`
-	NotifyTelegramBotToken    string   `json:"notify_telegram_bot_token,omitempty"`
-	NotifyTelegramChatID      string   `json:"notify_telegram_chat_id,omitempty"`
-	NotifyOnRecovery          bool     `json:"notify_on_recovery"`
-	NotifyCooldownMinutes     int      `json:"notify_cooldown_minutes"`
-	NotifyProviders           []string `json:"notify_providers"`
-	NotifyModels              []string `json:"notify_models"`
+	DashboardTitle              string   `json:"dashboard_title"`
+	TimeoutSeconds              float64  `json:"timeout_seconds"`
+	ModelListTimeoutSeconds     float64  `json:"model_list_timeout_seconds"`
+	SlowThresholdMS             int      `json:"slow_threshold_ms"`
+	Concurrency                 int      `json:"concurrency"`
+	ProviderConcurrency         int      `json:"provider_concurrency"`
+	MaxModelsPerProvider        int      `json:"max_models_per_provider"`
+	SkipModels                  []string `json:"skip_models"`
+	EnableHistory               bool     `json:"enable_history"`
+	ShowCurveChart              bool     `json:"show_curve_chart"`
+	StatsWindowDays             int      `json:"stats_window_days"`
+	HistorySize                 int      `json:"history_size"`
+	MaxHistoryRecords           int      `json:"max_history_records"`
+	ShowErrorDetail             bool     `json:"show_error_detail"`
+	ThemeMode                   string   `json:"theme_mode"`
+	DayModeStartHour            int      `json:"day_mode_start_hour"`
+	DayModeEndHour              int      `json:"day_mode_end_hour"`
+	AutoCheckIntervalMinHours   float64  `json:"auto_check_interval_min_hours"`
+	AutoCheckIntervalMaxHours   float64  `json:"auto_check_interval_max_hours"`
+	NotifyPlatform              string   `json:"notify_platform"`
+	NotifyWebhookURL            string   `json:"notify_webhook_url,omitempty"`
+	NotifyTelegramBotToken      string   `json:"notify_telegram_bot_token,omitempty"`
+	NotifyTelegramChatID        string   `json:"notify_telegram_chat_id,omitempty"`
+	NotifyWebhookURLSet         bool     `json:"notify_webhook_url_set,omitempty"`
+	NotifyTelegramBotTokenSet   bool     `json:"notify_telegram_bot_token_set,omitempty"`
+	NotifyTelegramChatIDSet     bool     `json:"notify_telegram_chat_id_set,omitempty"`
+	ClearNotifyWebhookURL       bool     `json:"clear_notify_webhook_url,omitempty"`
+	ClearNotifyTelegramBotToken bool     `json:"clear_notify_telegram_bot_token,omitempty"`
+	ClearNotifyTelegramChatID   bool     `json:"clear_notify_telegram_chat_id,omitempty"`
+	NotifyOnRecovery            bool     `json:"notify_on_recovery"`
+	NotifyCooldownMinutes       int      `json:"notify_cooldown_minutes"`
+	NotifyProviders             []string `json:"notify_providers"`
+	NotifyModels                []string `json:"notify_models"`
 }
 
 type SafeProviderConfig struct {
@@ -106,6 +114,9 @@ func SettingsFromConfig(cfg Config) RuntimeSettings {
 		NotifyWebhookURL:          cfg.NotifyWebhookURL,
 		NotifyTelegramBotToken:    cfg.NotifyTelegramBotToken,
 		NotifyTelegramChatID:      cfg.NotifyTelegramChatID,
+		NotifyWebhookURLSet:       cfg.NotifyWebhookURL != "",
+		NotifyTelegramBotTokenSet: cfg.NotifyTelegramBotToken != "",
+		NotifyTelegramChatIDSet:   cfg.NotifyTelegramChatID != "",
 		NotifyOnRecovery:          cfg.NotifyOnRecovery,
 		NotifyCooldownMinutes:     cfg.NotifyCooldownMinutes,
 		NotifyProviders:           append([]string(nil), cfg.NotifyProviders...),
@@ -163,7 +174,7 @@ func SafeProviders(providers []ProviderConfig) []SafeProviderConfig {
 			Name:         provider.Name,
 			Type:         provider.Type,
 			BaseURL:      provider.BaseURL,
-			Models:       append([]string(nil), provider.Models...),
+			Models:       append([]string{}, provider.Models...),
 			Enabled:      provider.Enabled,
 			ProbeEnabled: provider.ProbeEnabled,
 			APIKeySet:    provider.APIKey != "",
@@ -201,11 +212,11 @@ func ApplyProviderUpdate(existing ProviderConfig, update ProviderUpdate) Provide
 }
 
 func ValidateRuntimeSettings(settings RuntimeSettings) error {
-	if settings.TimeoutSeconds <= 0 {
-		return errors.New("timeout_seconds must be greater than 0")
+	if !isFinitePositive(settings.TimeoutSeconds) || settings.TimeoutSeconds > 24*60*60 {
+		return errors.New("timeout_seconds must be finite, greater than 0, and no more than 86400")
 	}
-	if settings.ModelListTimeoutSeconds <= 0 {
-		return errors.New("model_list_timeout_seconds must be greater than 0")
+	if !isFinitePositive(settings.ModelListTimeoutSeconds) || settings.ModelListTimeoutSeconds > 24*60*60 {
+		return errors.New("model_list_timeout_seconds must be finite, greater than 0, and no more than 86400")
 	}
 	if settings.SlowThresholdMS <= 0 {
 		return errors.New("slow_threshold_ms must be greater than 0")
@@ -213,14 +224,31 @@ func ValidateRuntimeSettings(settings RuntimeSettings) error {
 	if settings.Concurrency <= 0 || settings.ProviderConcurrency <= 0 {
 		return errors.New("concurrency values must be greater than 0")
 	}
+	if settings.Concurrency > 1024 || settings.ProviderConcurrency > 1024 {
+		return errors.New("concurrency values must be no more than 1024")
+	}
+	if settings.MaxModelsPerProvider < 0 || settings.MaxModelsPerProvider > 100000 {
+		return errors.New("max_models_per_provider must be between 0 and 100000")
+	}
 	if settings.StatsWindowDays <= 0 || settings.HistorySize <= 0 || settings.MaxHistoryRecords <= 0 {
 		return errors.New("history values must be greater than 0")
+	}
+	if settings.StatsWindowDays > 3650 || settings.HistorySize > 100000 || settings.MaxHistoryRecords > 1000000 {
+		return errors.New("history values exceed the supported limits")
 	}
 	if settings.DayModeStartHour < 0 || settings.DayModeStartHour > 23 || settings.DayModeEndHour < 0 || settings.DayModeEndHour > 23 {
 		return errors.New("day mode hours must be between 0 and 23")
 	}
 	if settings.NotifyCooldownMinutes < 0 {
 		return errors.New("notify_cooldown_minutes must be greater than or equal to 0")
+	}
+	if !isFiniteNonNegative(settings.AutoCheckIntervalMinHours) || !isFiniteNonNegative(settings.AutoCheckIntervalMaxHours) || settings.AutoCheckIntervalMinHours > 8760 || settings.AutoCheckIntervalMaxHours > 8760 {
+		return errors.New("auto check intervals must be finite, non-negative, and no more than 8760 hours")
+	}
+	if strings.TrimSpace(settings.NotifyWebhookURL) != "" {
+		if err := ValidateWebhookURL(settings.NotifyWebhookURL); err != nil {
+			return fmt.Errorf("notify_webhook_url: %w", err)
+		}
 	}
 	return nil
 }
@@ -229,8 +257,8 @@ func ValidateProviders(providers []ProviderConfig) error {
 	seen := map[string]bool{}
 	for _, provider := range providers {
 		id := strings.TrimSpace(provider.ID)
-		if id == "" {
-			return errors.New("provider id is required")
+		if err := ValidateProviderID(id); err != nil {
+			return err
 		}
 		key := strings.ToLower(id)
 		if seen[key] {
@@ -250,14 +278,30 @@ func ValidateProviders(providers []ProviderConfig) error {
 // (169.254.x.x) that are commonly used as cloud instance metadata endpoints.
 // Localhost and RFC-1918 ranges are intentionally allowed for self-hosted use.
 func validateProviderURL(rawURL string) error {
+	return validateHTTPURL(rawURL, false)
+}
+
+func validateHTTPURL(rawURL string, allowQuery bool) error {
 	u, err := url.ParseRequestURI(rawURL)
 	if err != nil {
 		return fmt.Errorf("invalid base_url: %w", err)
 	}
-	if u.Scheme != "http" && u.Scheme != "https" {
+	if !strings.EqualFold(u.Scheme, "http") && !strings.EqualFold(u.Scheme, "https") {
 		return fmt.Errorf("base_url scheme must be http or https, got %q", u.Scheme)
 	}
 	host := u.Hostname()
+	if host == "" {
+		return errors.New("base_url host is required")
+	}
+	if u.User != nil {
+		return errors.New("base_url must not contain user information")
+	}
+	if !allowQuery && (u.RawQuery != "" || u.ForceQuery) {
+		return errors.New("base_url must not contain query parameters")
+	}
+	if u.Fragment != "" || strings.Contains(rawURL, "#") {
+		return errors.New("base_url must not contain a fragment")
+	}
 	if ip := net.ParseIP(host); ip != nil {
 		// Block link-local (169.254.0.0/16) — cloud metadata SSRF vector
 		if ip.IsLinkLocalUnicast() {
@@ -267,6 +311,40 @@ func validateProviderURL(rawURL string) error {
 	return nil
 }
 
+func ValidateWebhookURL(rawURL string) error {
+	return validateHTTPURL(rawURL, true)
+}
+
+func ValidateProviderID(id string) error {
+	if id == "" {
+		return errors.New("provider id is required")
+	}
+	if id == "." || id == ".." || id != strings.TrimSpace(id) {
+		return errors.New("provider id must be a valid path segment")
+	}
+	if len([]rune(id)) > 128 {
+		return errors.New("provider id must be no more than 128 characters")
+	}
+	for _, character := range id {
+		if unicode.IsControl(character) || character == '/' || character == '\\' || character == '?' || character == '#' {
+			return errors.New("provider id contains unsupported characters")
+		}
+	}
+	return nil
+}
+
+func isFinitePositive(value float64) bool {
+	return value > 0 && !math.IsNaN(value) && !math.IsInf(value, 0)
+}
+
+func isFiniteNonNegative(value float64) bool {
+	return value >= 0 && !math.IsNaN(value) && !math.IsInf(value, 0)
+}
+
 func AdminConfigFromConfig(cfg Config) AdminConfig {
-	return AdminConfig{Settings: SettingsFromConfig(cfg), Providers: SafeProviders(cfg.Providers)}
+	settings := SettingsFromConfig(cfg)
+	settings.NotifyWebhookURL = ""
+	settings.NotifyTelegramBotToken = ""
+	settings.NotifyTelegramChatID = ""
+	return AdminConfig{Settings: settings, Providers: SafeProviders(cfg.Providers)}
 }

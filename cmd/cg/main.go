@@ -2,13 +2,16 @@ package main
 
 import (
 	"context"
+	crand "crypto/rand"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"log/slog"
-	"math/rand"
+	mathrand "math/rand"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -30,6 +33,18 @@ func main() {
 		slog.Error("load config", "err", err)
 		os.Exit(1)
 	}
+	args := os.Args[1:]
+	if len(args) > 0 && args[0] == "healthcheck" {
+		if err := healthcheck(baseCfg.AppPort); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
+	if web.IsPublicBindHost(baseCfg.AppHost) && strings.TrimSpace(baseCfg.AdminToken) == "" {
+		slog.Error("public bind requires ADMIN_TOKEN to be explicitly configured")
+		os.Exit(1)
+	}
 	store, err := storage.NewSQLite(context.Background(), baseCfg.DatabasePath, baseCfg.DataDir)
 	if err != nil {
 		slog.Error("open database", "err", err)
@@ -44,9 +59,6 @@ func main() {
 	cfg := baseCfg
 	if ok {
 		cfg = config.ApplyRuntimeConfig(baseCfg, runtimeCfg)
-		if len(baseCfg.Providers) > 0 {
-			cfg.Providers = append([]config.ProviderConfig(nil), baseCfg.Providers...)
-		}
 	} else {
 		runtimeCfg = config.RuntimeConfigFromConfig(baseCfg)
 		if err := store.SaveRuntimeConfig(context.Background(), runtimeCfg); err != nil {
@@ -56,31 +68,20 @@ func main() {
 	}
 
 	broker := web.NewBroker()
+	if err := config.ValidateRuntimeSettings(config.SettingsFromConfig(cfg)); err != nil {
+		slog.Error("invalid persisted runtime settings", "err", err)
+		os.Exit(1)
+	}
+	if err := config.ValidateProviders(cfg.Providers); err != nil {
+		slog.Error("invalid persisted providers", "err", err)
+		os.Exit(1)
+	}
 	app := &application{baseCfg: baseCfg, cfg: cfg, store: store, broker: broker, metrics: metrics.New(), schedulerWake: make(chan struct{}, 1)}
 
-	// Resolve effective admin token: env var > stored > auto-generate
-	adminToken := baseCfg.AdminToken
-	adminFirstUse := false
-	if adminToken == "" {
-		stored, found, _ := store.GetKV(context.Background(), "admin_stored_token")
-		if found && stored != "" {
-			adminToken = stored
-			firstUseVal, _, _ := store.GetKV(context.Background(), "admin_token_first_use")
-			adminFirstUse = firstUseVal == "true"
-		} else {
-			adminToken = generateAdminToken()
-			adminFirstUse = true
-			_ = store.SetKV(context.Background(), "admin_stored_token", adminToken)
-			_ = store.SetKV(context.Background(), "admin_token_first_use", "true")
-			fmt.Printf("\n╔══════════════════════════════════════════╗\n║  Auto-generated ADMIN_TOKEN: %-10s  ║\n║  Please change it on first login         ║\n╚══════════════════════════════════════════╝\n\n", adminToken)
-		}
+	if err := app.initializeTokens(context.Background()); err != nil {
+		slog.Error("initialize authentication", "err", err)
+		os.Exit(1)
 	}
-	app.adminToken = adminToken
-	app.adminFirstUse = adminFirstUse
-	if viewTok, found, _ := store.GetKV(context.Background(), "admin_view_token"); found {
-		app.viewToken = viewTok
-	}
-	args := os.Args[1:]
 	if len(args) > 0 {
 		switch args[0] {
 		case "check", "once":
@@ -153,6 +154,8 @@ type application struct {
 	metrics        *metrics.Metrics
 	schedulerWake  chan struct{}
 	mu             sync.RWMutex
+	configMu       sync.Mutex
+	tokenMu        sync.Mutex
 	running        bool
 	runCancel      context.CancelFunc
 	taskID         int64
@@ -174,7 +177,7 @@ func (a *application) check(ctx context.Context) (report.Report, error) {
 }
 
 func (a *application) CheckProvider(ctx context.Context, providerID string) (report.Report, error) {
-	return a.checkWithOptions(ctx, checkOptions{Kind: "provider", ProviderID: providerID, SaveLatest: false})
+	return a.checkWithOptions(ctx, checkOptions{Kind: "provider", ProviderID: providerID, SaveLatest: true})
 }
 
 func (a *application) StopCheck() bool {
@@ -213,10 +216,18 @@ func (a *application) AdminToken() string {
 }
 
 func (a *application) ChangeAdminToken(ctx context.Context, newToken string) error {
-	if err := a.store.SetKV(ctx, "admin_stored_token", newToken); err != nil {
+	a.tokenMu.Lock()
+	defer a.tokenMu.Unlock()
+	if a.currentConfig().AdminToken != "" {
+		return errors.New("ADMIN_TOKEN is configured externally; update the environment or .env and restart")
+	}
+	if err := config.ValidateToken(newToken); err != nil {
 		return err
 	}
-	if err := a.store.SetKV(ctx, "admin_token_first_use", "false"); err != nil {
+	if newToken == a.ViewToken() {
+		return errors.New("admin token and view token must differ")
+	}
+	if err := a.store.SetKVs(ctx, map[string]string{"admin_stored_token": newToken, "admin_token_first_use": "false"}); err != nil {
 		return err
 	}
 	a.mu.Lock()
@@ -233,6 +244,16 @@ func (a *application) ViewToken() string {
 }
 
 func (a *application) ChangeViewToken(ctx context.Context, newToken string) error {
+	a.tokenMu.Lock()
+	defer a.tokenMu.Unlock()
+	if newToken != "" {
+		if err := config.ValidateToken(newToken); err != nil {
+			return err
+		}
+		if newToken == a.AdminToken() {
+			return errors.New("admin token and view token must differ")
+		}
+	}
 	if err := a.store.SetKV(ctx, "admin_view_token", newToken); err != nil {
 		return err
 	}
@@ -243,10 +264,13 @@ func (a *application) ChangeViewToken(ctx context.Context, newToken string) erro
 }
 
 func (a *application) UpdateSettings(ctx context.Context, settings config.RuntimeSettings) (config.AdminConfig, error) {
+	a.configMu.Lock()
+	defer a.configMu.Unlock()
+	current := a.currentConfig()
+	mergeNotificationSecrets(&settings, current)
 	if err := config.ValidateRuntimeSettings(settings); err != nil {
 		return config.AdminConfig{}, err
 	}
-	current := a.currentConfig()
 	runtimeCfg := config.RuntimeConfig{Settings: settings, Providers: current.Providers}
 	if err := a.replaceRuntimeConfig(ctx, runtimeCfg); err != nil {
 		return config.AdminConfig{}, err
@@ -255,6 +279,8 @@ func (a *application) UpdateSettings(ctx context.Context, settings config.Runtim
 }
 
 func (a *application) UpsertProvider(ctx context.Context, id string, update config.ProviderUpdate) (config.SafeProviderConfig, error) {
+	a.configMu.Lock()
+	defer a.configMu.Unlock()
 	current := a.currentConfig()
 	providers := append([]config.ProviderConfig(nil), current.Providers...)
 	found := -1
@@ -288,6 +314,8 @@ func (a *application) UpsertProvider(ctx context.Context, id string, update conf
 }
 
 func (a *application) DeleteProvider(ctx context.Context, id string) error {
+	a.configMu.Lock()
+	defer a.configMu.Unlock()
 	current := a.currentConfig()
 	providers := []config.ProviderConfig{}
 	found := false
@@ -306,14 +334,17 @@ func (a *application) DeleteProvider(ctx context.Context, id string) error {
 
 func (a *application) ExportConfig(context.Context) (config.ConfigExport, error) {
 	current := a.currentConfig()
-	return config.ConfigExport{Settings: config.SettingsFromConfig(current), Providers: config.SafeProviders(current.Providers)}, nil
+	return config.ConfigExport{Settings: config.AdminConfigFromConfig(current).Settings, Providers: config.SafeProviders(current.Providers)}, nil
 }
 
 func (a *application) ImportConfig(ctx context.Context, value config.ConfigImport) (config.AdminConfig, error) {
+	a.configMu.Lock()
+	defer a.configMu.Unlock()
+	current := a.currentConfig()
+	mergeNotificationSecrets(&value.Settings, current)
 	if err := config.ValidateRuntimeSettings(value.Settings); err != nil {
 		return config.AdminConfig{}, err
 	}
-	current := a.currentConfig()
 	existing := map[string]config.ProviderConfig{}
 	for _, provider := range current.Providers {
 		existing[provider.ID] = provider
@@ -332,9 +363,18 @@ func (a *application) ImportConfig(ctx context.Context, value config.ConfigImpor
 }
 
 func (a *application) ReloadConfig(ctx context.Context) (config.AdminConfig, error) {
+	a.configMu.Lock()
+	defer a.configMu.Unlock()
 	loaded, err := config.Load(".env")
 	if err != nil {
 		return config.AdminConfig{}, err
+	}
+	current := a.currentConfig()
+	if loaded.AppHost != current.AppHost || loaded.AppPort != current.AppPort || loaded.WebDir != current.WebDir || loaded.DatabasePath != current.DatabasePath || loaded.DataDir != current.DataDir || loaded.AdminToken != current.AdminToken {
+		return config.AdminConfig{}, errors.New("changes to listening address, paths or ADMIN_TOKEN require a restart")
+	}
+	if web.IsPublicBindHost(loaded.AppHost) && loaded.AdminToken == "" {
+		return config.AdminConfig{}, errors.New("public bind requires an explicitly configured ADMIN_TOKEN")
 	}
 	runtimeCfg, ok, err := a.store.LoadRuntimeConfig(ctx)
 	if err != nil {
@@ -345,6 +385,10 @@ func (a *application) ReloadConfig(ctx context.Context) (config.AdminConfig, err
 		cfg = config.ApplyRuntimeConfig(loaded, runtimeCfg)
 		if len(loaded.Providers) > 0 {
 			cfg.Providers = append([]config.ProviderConfig(nil), loaded.Providers...)
+			runtimeCfg.Providers = append([]config.ProviderConfig(nil), loaded.Providers...)
+			if err := a.store.SaveRuntimeConfig(ctx, runtimeCfg); err != nil {
+				return config.AdminConfig{}, err
+			}
 		}
 	}
 	a.mu.Lock()
@@ -478,12 +522,12 @@ func (a *application) runCheck(ctx context.Context, options checkOptions) (repor
 	}
 	runner := probe.NewRunner(cfg)
 	results, providerErrors, err := runner.Run(ctx)
-	if err != nil && len(results) == 0 {
+	if err != nil {
 		return report.Report{}, err
 	}
 	history := map[string][]report.HistoryRecord{}
 	if cfg.EnableHistory {
-		loaded, loadErr := a.store.LoadHistory(ctx, max(cfg.HistorySize, cfg.MaxHistoryRecords), cfg.StatsWindowDays)
+		loaded, loadErr := a.store.LoadHistory(ctx, cfg.MaxHistoryRecords, cfg.StatsWindowDays)
 		if loadErr != nil {
 			slog.Warn("load history failed", "err", loadErr)
 		} else {
@@ -491,20 +535,27 @@ func (a *application) runCheck(ctx context.Context, options checkOptions) (repor
 		}
 	}
 	value, _ := report.Build(cfg, results, providerErrors, history, started)
+	if options.ProviderID != "" && options.SaveLatest {
+		latest, latestErr := a.store.LatestReport(ctx)
+		if latestErr != nil {
+			slog.Warn("load latest report for provider rerun failed", "err", latestErr)
+		} else {
+			value = report.MergeProvider(latest, value, options.ProviderID)
+		}
+	}
 	if a.metrics != nil {
 		for _, result := range results {
 			a.metrics.RecordProbe(result)
 		}
 	}
-	if cfg.EnableHistory {
-		if err := a.store.AppendResults(ctx, results, time.Now()); err != nil {
-			slog.Error("save history failed", "err", err)
-		}
+	var latest *report.Report
+	if options.SaveLatest {
+		latest = &value
+	}
+	if err := a.store.RecordCheck(ctx, results, time.Now(), cfg.MaxHistoryRecords, cfg.EnableHistory, latest); err != nil {
+		return report.Report{}, fmt.Errorf("save probe results: %w", err)
 	}
 	if options.SaveLatest {
-		if err := a.store.SaveLatestReport(ctx, value); err != nil {
-			return report.Report{}, err
-		}
 		if a.broker != nil {
 			a.broker.Publish(value)
 		}
@@ -528,7 +579,7 @@ func (a *application) scheduler(ctx context.Context) {
 				return
 			}
 		}
-		interval := max(time.Duration((minHours+rand.Float64()*(maxHours-minHours))*float64(time.Hour)), time.Minute)
+		interval := max(time.Duration((minHours+mathrand.Float64()*(maxHours-minHours))*float64(time.Hour)), time.Minute)
 		slog.Info("next scheduled check", "interval", interval.Round(time.Minute).String(), "at", time.Now().Add(interval).Format("15:04"))
 		timer := time.NewTimer(interval)
 		select {
@@ -564,6 +615,30 @@ func filterProvider(cfg config.Config, providerID string) (config.Config, bool) 
 	return cfg, false
 }
 
+func mergeNotificationSecrets(settings *config.RuntimeSettings, current config.Config) {
+	if settings.ClearNotifyWebhookURL {
+		settings.NotifyWebhookURL = ""
+	} else if settings.NotifyWebhookURL == "" {
+		settings.NotifyWebhookURL = current.NotifyWebhookURL
+	}
+	if settings.ClearNotifyTelegramBotToken {
+		settings.NotifyTelegramBotToken = ""
+	} else if settings.NotifyTelegramBotToken == "" {
+		settings.NotifyTelegramBotToken = current.NotifyTelegramBotToken
+	}
+	if settings.ClearNotifyTelegramChatID {
+		settings.NotifyTelegramChatID = ""
+	} else if settings.NotifyTelegramChatID == "" {
+		settings.NotifyTelegramChatID = current.NotifyTelegramChatID
+	}
+	settings.NotifyWebhookURLSet = settings.NotifyWebhookURL != ""
+	settings.NotifyTelegramBotTokenSet = settings.NotifyTelegramBotToken != ""
+	settings.NotifyTelegramChatIDSet = settings.NotifyTelegramChatID != ""
+	settings.ClearNotifyWebhookURL = false
+	settings.ClearNotifyTelegramBotToken = false
+	settings.ClearNotifyTelegramChatID = false
+}
+
 func intervalRange(cfg config.Config) (float64, float64, bool) {
 	minHours := cfg.AutoCheckIntervalMinHours
 	maxHours := cfg.AutoCheckIntervalMaxHours
@@ -582,20 +657,23 @@ func intervalRange(cfg config.Config) (float64, float64, bool) {
 	return minHours, maxHours, maxHours > 0
 }
 
-// generateAdminToken returns a random 10-character token containing at least
-// one lowercase letter, one uppercase letter, and one digit.
-func generateAdminToken() string {
-	const lower = "abcdefghijklmnopqrstuvwxyz"
-	const upper = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-	const digit = "0123456789"
-	const all = lower + upper + digit
-	b := make([]byte, 10)
-	b[0] = lower[rand.Intn(len(lower))]
-	b[1] = upper[rand.Intn(len(upper))]
-	b[2] = digit[rand.Intn(len(digit))]
-	for i := 3; i < 10; i++ {
-		b[i] = all[rand.Intn(len(all))]
+func generateAdminToken() (string, error) {
+	buf := make([]byte, 18)
+	if _, err := crand.Read(buf); err != nil {
+		return "", fmt.Errorf("generate admin token: %w", err)
 	}
-	rand.Shuffle(len(b), func(i, j int) { b[i], b[j] = b[j], b[i] })
-	return string(b)
+	return base64.RawURLEncoding.EncodeToString(buf), nil
+}
+
+func healthcheck(port int) error {
+	client := &http.Client{Timeout: 3 * time.Second}
+	response, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/health", port))
+	if err != nil {
+		return fmt.Errorf("healthcheck failed: %w", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		return fmt.Errorf("healthcheck returned %s", response.Status)
+	}
+	return nil
 }

@@ -106,7 +106,17 @@ func NewSQLite(ctx context.Context, databasePath, dataDir string) (*SQLiteStore,
 	if databasePath == "" {
 		databasePath = filepath.Join(dataDir, "cg.sqlite")
 	}
-	if err := os.MkdirAll(filepath.Dir(databasePath), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(databasePath), 0700); err != nil {
+		return nil, err
+	}
+	file, err := os.OpenFile(databasePath, os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		return nil, err
+	}
+	if err := file.Close(); err != nil {
+		return nil, err
+	}
+	if err := protectDatabaseFiles(databasePath); err != nil {
 		return nil, err
 	}
 	db, err := sql.Open("sqlite", databasePath)
@@ -123,11 +133,34 @@ func NewSQLite(ctx context.Context, databasePath, dataDir string) (*SQLiteStore,
 		db.Close()
 		return nil, err
 	}
+	if err := protectDatabaseFiles(databasePath); err != nil {
+		db.Close()
+		return nil, err
+	}
 	if err := store.importLegacy(ctx); err != nil {
 		db.Close()
 		return nil, err
 	}
+	if err := store.initUsage(ctx); err != nil {
+		db.Close()
+		return nil, err
+	}
 	return store, nil
+}
+
+func protectDatabaseFiles(databasePath string) error {
+	for _, suffix := range []string{"", "-wal", "-shm", "-journal"} {
+		path := databasePath + suffix
+		if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+			continue
+		} else if err != nil {
+			return err
+		}
+		if err := restrictFileAccess(path); err != nil {
+			return fmt.Errorf("protect database file %q: %w", path, err)
+		}
+	}
+	return nil
 }
 
 func (s *SQLiteStore) Close() error {
@@ -272,8 +305,16 @@ func (s *SQLiteStore) LoadHistory(ctx context.Context, limitPerKey int, statsWin
 	return history, nil
 }
 
-func (s *SQLiteStore) AppendResults(ctx context.Context, results []probe.Result, checkedAt time.Time) error {
-	if len(results) == 0 {
+func (s *SQLiteStore) AppendResults(ctx context.Context, results []probe.Result, checkedAt time.Time, maxPerKey int) error {
+	return s.RecordResults(ctx, results, checkedAt, maxPerKey, true)
+}
+
+func (s *SQLiteStore) RecordResults(ctx context.Context, results []probe.Result, checkedAt time.Time, maxPerKey int, saveHistory bool) error {
+	return s.RecordCheck(ctx, results, checkedAt, maxPerKey, saveHistory, nil)
+}
+
+func (s *SQLiteStore) RecordCheck(ctx context.Context, results []probe.Result, checkedAt time.Time, maxPerKey int, saveHistory bool, latest *report.Report) error {
+	if len(results) == 0 && latest == nil {
 		return nil
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -282,6 +323,27 @@ func (s *SQLiteStore) AppendResults(ctx context.Context, results []probe.Result,
 	}
 	defer tx.Rollback()
 
+	commit := func() error {
+		if latest != nil {
+			data, err := json.Marshal(latest)
+			if err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, `INSERT INTO latest_report (id, generated_at, report_json) VALUES (1, ?, ?) ON CONFLICT(id) DO UPDATE SET generated_at = excluded.generated_at, report_json = excluded.report_json`, latest.GeneratedAt, string(data)); err != nil {
+				return err
+			}
+		}
+		return tx.Commit()
+	}
+	if len(results) == 0 {
+		return commit()
+	}
+	if err := appendUsage(ctx, tx, results, checkedAt); err != nil {
+		return err
+	}
+	if !saveHistory {
+		return commit()
+	}
 	stmt, err := tx.PrepareContext(ctx, `INSERT INTO probe_results (provider, provider_type, provider_name, model, result, latency_ms, checked_at, error_type, error_message, response_preview, history_key, prompt_tokens, completion_tokens, total_tokens) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`) //nolint:lll
 	if err != nil {
 		return err
@@ -298,7 +360,18 @@ func (s *SQLiteStore) AppendResults(ctx context.Context, results []probe.Result,
 	if _, err := tx.ExecContext(ctx, `DELETE FROM probe_results WHERE checked_at < ?`, cutoff); err != nil {
 		return err
 	}
-	return tx.Commit()
+	if maxPerKey > 0 {
+		keys := map[string]struct{}{}
+		for _, result := range results {
+			keys[result.HistoryKey] = struct{}{}
+		}
+		for key := range keys {
+			if _, err := tx.ExecContext(ctx, `DELETE FROM probe_results WHERE history_key = ? AND id NOT IN (SELECT id FROM probe_results WHERE history_key = ? ORDER BY checked_at DESC, id DESC LIMIT ?)`, key, key, maxPerKey); err != nil {
+				return err
+			}
+		}
+	}
+	return commit()
 }
 
 func (s *SQLiteStore) LatestReport(ctx context.Context) (report.Report, error) {
@@ -399,11 +472,25 @@ func (s *SQLiteStore) GetKV(ctx context.Context, key string) (string, bool, erro
 }
 
 func (s *SQLiteStore) SetKV(ctx context.Context, key, value string) error {
-	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO runtime_config (key, value_json, updated_at) VALUES (?, ?, ?)
+	return s.SetKVs(ctx, map[string]string{key: value})
+}
+
+func (s *SQLiteStore) SetKVs(ctx context.Context, values map[string]string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for key, value := range values {
+		_, err = tx.ExecContext(ctx,
+			`INSERT INTO runtime_config (key, value_json, updated_at) VALUES (?, ?, ?)
 		 ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json, updated_at = excluded.updated_at`,
-		key, value, time.Now().Format(time.RFC3339))
-	return err
+			key, value, time.Now().Format(time.RFC3339))
+		if err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 // LoadBillingSummary aggregates token consumption over the last `days` days.
@@ -414,8 +501,9 @@ func (s *SQLiteStore) LoadBillingSummary(ctx context.Context, days int) (Billing
 	if days <= 0 {
 		days = 30
 	}
-	now := time.Now()
-	cutoff := now.Add(-time.Duration(days) * 24 * time.Hour)
+	days = min(days, 365)
+	now := time.Now().UTC()
+	cutoff := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC).AddDate(0, 0, 1-days)
 	summary := BillingSummary{
 		RangeDays:  days,
 		RangeStart: cutoff.Format(time.RFC3339),
@@ -423,18 +511,18 @@ func (s *SQLiteStore) LoadBillingSummary(ctx context.Context, days int) (Billing
 		PerModel:   []BillingItem{},
 		Daily:      []BillingDaily{},
 	}
-	cutoffStr := cutoff.Format(time.RFC3339)
+	cutoffStr := cutoff.Format(time.DateOnly)
 
 	// Per (provider, model) aggregate.
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT provider, COALESCE(NULLIF(provider_name,''), provider) AS provider_name,
 		       COALESCE(provider_type, '') AS provider_type, model,
 		       SUM(prompt_tokens), SUM(completion_tokens), SUM(total_tokens),
-		       COUNT(*)
-		FROM probe_results
-		WHERE checked_at >= ?
+		       SUM(probe_count)
+		FROM usage_daily
+		WHERE day >= ? AND day <= ?
 		GROUP BY provider, model
-		ORDER BY SUM(total_tokens) DESC, provider, model`, cutoffStr)
+		ORDER BY SUM(total_tokens) DESC, provider, model`, cutoffStr, now.Format(time.DateOnly))
 	if err != nil {
 		return summary, err
 	}
@@ -457,13 +545,13 @@ func (s *SQLiteStore) LoadBillingSummary(ctx context.Context, days int) (Billing
 
 	// Per-day timeline. Relies on RFC3339 timestamps starting with YYYY-MM-DD.
 	dayRows, err := s.db.QueryContext(ctx, `
-		SELECT substr(checked_at, 1, 10) AS day,
+		SELECT day,
 		       SUM(prompt_tokens), SUM(completion_tokens), SUM(total_tokens),
-		       COUNT(*)
-		FROM probe_results
-		WHERE checked_at >= ?
+		       SUM(probe_count)
+		FROM usage_daily
+		WHERE day >= ? AND day <= ?
 		GROUP BY day
-		ORDER BY day ASC`, cutoffStr)
+		ORDER BY day ASC`, cutoffStr, now.Format(time.DateOnly))
 	if err != nil {
 		return summary, err
 	}
@@ -518,7 +606,7 @@ func (s *SQLiteStore) ListCheckTasks(ctx context.Context, query TaskQuery) ([]Ch
 	if len(where) > 0 {
 		statement += " WHERE " + strings.Join(where, " AND ")
 	}
-	statement += " ORDER BY started_at DESC LIMIT ? OFFSET ?"
+	statement += " ORDER BY started_at DESC, id DESC LIMIT ? OFFSET ?"
 	args = append(args, limit, offset)
 	rows, err := s.db.QueryContext(ctx, statement, args...)
 	if err != nil {

@@ -34,7 +34,7 @@ func TestSQLiteStoreAppendAndLoadHistory(t *testing.T) {
 		{ProviderID: "openai-main", ProviderType: "openai", ProviderName: "OpenAI", Model: "gpt-4o-mini", Status: "ok", LatencyMS: 120, HistoryKey: "openai-main::gpt-4o-mini"},
 		{ProviderID: "openai-main", ProviderType: "openai", ProviderName: "OpenAI", Model: "gpt-4.1-mini", Status: "error", LatencyMS: 300, Error: "timeout after 30s", HistoryKey: "openai-main::gpt-4.1-mini"},
 	}
-	if err := store.AppendResults(context.Background(), results, checkedAt); err != nil {
+	if err := store.AppendResults(context.Background(), results, checkedAt, 10); err != nil {
 		t.Fatalf("append results: %v", err)
 	}
 	history, err := store.LoadHistory(context.Background(), 10, 7)
@@ -148,7 +148,7 @@ func TestSQLiteHistoryLimitPerKey(t *testing.T) {
 			LatencyMS:    100 + i,
 			HistoryKey:   "p1::m1",
 		}}
-		if err := store.AppendResults(ctx, results, time.Now().UTC()); err != nil {
+		if err := store.AppendResults(ctx, results, time.Now().UTC(), 3); err != nil {
 			t.Fatalf("append results iter %d: %v", i, err)
 		}
 	}
@@ -159,6 +159,13 @@ func TestSQLiteHistoryLimitPerKey(t *testing.T) {
 	}
 	if len(history["p1::m1"]) != 3 {
 		t.Fatalf("expected 3 records (limit), got %d", len(history["p1::m1"]))
+	}
+	var count int
+	if err := store.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM probe_results WHERE history_key = ?`, "p1::m1").Scan(&count); err != nil {
+		t.Fatalf("count retained history: %v", err)
+	}
+	if count != 3 {
+		t.Fatalf("expected database retention to keep 3 records, got %d", count)
 	}
 }
 

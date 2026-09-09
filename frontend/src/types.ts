@@ -76,6 +76,7 @@ export interface RunningState {
   auto_check_interval_min_hours: number
   auto_check_interval_max_hours: number
   first_use: boolean
+  read_only: boolean
 }
 
 export interface RuntimeSettings {
@@ -102,6 +103,12 @@ export interface RuntimeSettings {
   notify_webhook_url: string
   notify_telegram_bot_token: string
   notify_telegram_chat_id: string
+  notify_webhook_url_set?: boolean
+  notify_telegram_bot_token_set?: boolean
+  notify_telegram_chat_id_set?: boolean
+  clear_notify_webhook_url?: boolean
+  clear_notify_telegram_bot_token?: boolean
+  clear_notify_telegram_chat_id?: boolean
   notify_on_recovery: boolean
   notify_cooldown_minutes: number
   notify_providers: string[]

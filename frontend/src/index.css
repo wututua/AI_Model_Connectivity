@@ -2,279 +2,128 @@
 @tailwind components;
 @tailwind utilities;
 
-/* ── Design System Variables ───────────────────────────────────────── */
-:root {
-  --bg:          #0b1020;
-  --card:        rgba(18, 27, 52, .82);
-  --card-strong: rgba(29, 42, 78, .9);
-  --text:        #edf2ff;
-  --muted:       #96a3bd;
-  --border:      rgba(148, 163, 184, .22);
-  --ok:          #38d996;
-  --slow:        #f6c453;
-  --error:       #ff6b7a;
-  --shadow:      0 24px 80px rgba(0, 0, 0, .35);
-  --nav-bg:      rgba(11, 16, 32, .70);
-  --row-bg:      rgba(255, 255, 255, .04);
-  --row-hover:   rgba(255, 255, 255, .07);
-}
-
-body[data-theme="light"] {
-  --bg:          #eef3ff;
-  --card:        rgba(255, 255, 255, .86);
-  --card-strong: rgba(235, 241, 255, .95);
-  --text:        #162033;
-  --muted:       #5f6f8a;
-  --border:      rgba(86, 104, 134, .18);
-  --shadow:      0 24px 80px rgba(86, 104, 134, .18);
-  --nav-bg:      rgba(238, 243, 255, .75);
-  --row-bg:      rgba(86, 104, 134, .08);
-  --row-hover:   rgba(86, 104, 134, .14);
-}
-
-/* ── Base ──────────────────────────────────────────────────────────── */
 @layer base {
-  *, *::before, *::after { box-sizing: border-box; }
+  :root {
+    --background: 210 20% 98%;
+    --foreground: 220 20% 12%;
+    --card: 0 0% 100%;
+    --card-foreground: 220 20% 12%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 220 20% 12%;
+    --primary: 199 89% 48%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 210 18% 94%;
+    --secondary-foreground: 220 18% 18%;
+    --muted: 210 18% 94%;
+    --muted-foreground: 215 12% 43%;
+    --accent: 210 18% 92%;
+    --accent-foreground: 220 18% 16%;
+    --destructive: 0 72% 50%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 214 17% 86%;
+    --input: 214 17% 82%;
+    --ring: 199 89% 48%;
+    --success: 155 65% 34%;
+    --warning: 36 88% 43%;
+    --radius: 0.5rem;
+  }
 
-  html { color-scheme: dark; }
-  body[data-theme="light"] { color-scheme: light; }
+  body[data-theme='dark'] {
+    --background: 220 16% 9%;
+    --foreground: 210 16% 92%;
+    --card: 220 14% 12%;
+    --card-foreground: 210 16% 92%;
+    --popover: 220 14% 12%;
+    --popover-foreground: 210 16% 92%;
+    --primary: 198 93% 60%;
+    --primary-foreground: 220 20% 8%;
+    --secondary: 220 13% 17%;
+    --secondary-foreground: 210 15% 88%;
+    --muted: 220 13% 17%;
+    --muted-foreground: 215 11% 62%;
+    --accent: 220 13% 20%;
+    --accent-foreground: 210 15% 92%;
+    --destructive: 0 62% 48%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 220 12% 23%;
+    --input: 220 12% 26%;
+    --ring: 198 93% 60%;
+    --success: 153 64% 47%;
+    --warning: 39 88% 56%;
+  }
+
+  * {
+    @apply border-border;
+    box-sizing: border-box;
+  }
+
+  html {
+    min-width: 320px;
+    color-scheme: light;
+  }
+
+  body[data-theme='dark'] {
+    color-scheme: dark;
+  }
 
   body {
-    background-color: var(--bg);
-    color: var(--text);
-    font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-    -webkit-font-smoothing: antialiased;
+    @apply min-h-screen bg-background text-foreground antialiased;
     overflow-wrap: anywhere;
-    word-break: break-word;
-    min-height: 100vh;
+    letter-spacing: 0;
   }
 
-  /*
-   * Fixed decorative gradient implemented as a pseudo-element rather than
-   * background-attachment:fixed.  background-attachment:fixed disables GPU
-   * layer caching on Firefox/Safari and triggers a full background repaint on
-   * every scroll frame.  A fixed-position ::before with z-index:-1 achieves
-   * the same visual result using a single compositor layer that never repaints.
-   */
-  body::before {
-    content: '';
-    position: fixed;
-    inset: 0;
-    background: radial-gradient(circle at top left, rgba(74,144,226,.35), transparent 36rem);
-    pointer-events: none;
-    z-index: -1;
+  button, input, textarea, select {
+    letter-spacing: 0;
+  }
+
+  ::selection {
+    @apply bg-primary/20 text-foreground;
   }
 }
 
-/* ── Glassmorphism Components ──────────────────────────────────────── */
 @layer components {
-  /*
-   * NO transform:translateZ(0) here.
-   * backdrop-filter already creates its own compositing layer automatically;
-   * adding translateZ(0) would create a second redundant layer for the card
-   * content, doubling layer count and GPU memory usage.
-   * contain:layout style limits reflow and style-recalculation propagation
-   * without the overhead of a paint layer.
-   */
-  .glass {
-    background: var(--card);
-    backdrop-filter: blur(18px);
-    -webkit-backdrop-filter: blur(18px);
-    border: 1px solid var(--border);
-    box-shadow: var(--shadow);
-    contain: layout style;
+  .app-shell {
+    min-height: 100vh;
+    background-image: linear-gradient(hsl(var(--border) / 0.25) 1px, transparent 1px), linear-gradient(90deg, hsl(var(--border) / 0.25) 1px, transparent 1px);
+    background-size: 32px 32px;
+    background-position: -1px -1px;
   }
 
-  .glass-strong {
-    background: var(--card-strong);
-    backdrop-filter: blur(18px);
-    -webkit-backdrop-filter: blur(18px);
-    border: 1px solid var(--border);
-    box-shadow: var(--shadow);
-    contain: layout style;
-  }
-
-  /* Status badges */
-  .badge-ok      { background: rgba(56,217,150,.15);  color: var(--ok);    border: 1px solid rgba(56,217,150,.35); }
-  .badge-slow    { background: rgba(246,196,83,.15);  color: var(--slow);  border: 1px solid rgba(246,196,83,.35); }
-  .badge-error   { background: rgba(255,107,122,.15); color: var(--error); border: 1px solid rgba(255,107,122,.35); }
-  .badge-unknown { background: rgba(148,163,184,.12); color: var(--muted); border: 1px solid rgba(148,163,184,.22); }
-
-  /* History bars */
-  .bar-ok    { background: var(--ok); }
-  .bar-slow  { background: var(--slow); }
-  .bar-error { background: var(--error); }
-  .bar-empty { background: rgba(148, 163, 184, .2); }
-
-  /* Status color text */
-  .text-ok    { color: var(--ok); }
-  .text-slow  { color: var(--slow); }
-  .text-error { color: var(--error); }
-  .text-muted { color: var(--muted); }
-
-  /* Provider/model status border accent */
-  .border-ok    { border-color: rgba(56,217,150,.35) !important; }
-  .border-slow  { border-color: rgba(246,196,83,.35) !important; }
-  .border-error { border-color: rgba(255,107,122,.35) !important; }
-
-  /*
-   * summary-card hover: translateY only — no translateZ(0).
-   * translateZ(0) on hover creates a compositing-layer flash on enter/leave.
-   * The browser promotes the element automatically for transform animations.
-   */
-  .summary-card {
-    transition: box-shadow 0.2s ease, transform 0.2s ease;
-  }
-  .summary-card:hover {
-    transform: translateY(-2px);
-    box-shadow: var(--shadow), 0 0 0 1px rgba(148, 163, 184, .15);
-  }
+  .page-surface { @apply bg-background/95; }
+  .status-dot { @apply inline-block size-2 shrink-0 rounded-full; }
+  .status-dot-ok { @apply bg-success shadow-[0_0_0_3px_hsl(var(--success)/0.14)]; }
+  .status-dot-slow { @apply bg-warning shadow-[0_0_0_3px_hsl(var(--warning)/0.14)]; }
+  .status-dot-error { @apply bg-destructive shadow-[0_0_0_3px_hsl(var(--destructive)/0.14)]; }
+  .metric-value { @apply font-mono text-2xl font-semibold tabular-nums; }
+  .data-label { @apply text-xs font-medium text-muted-foreground; }
+  .code-value { @apply font-mono text-xs tabular-nums; }
+  .section-heading { @apply text-base font-semibold leading-none; }
+  .field-grid { @apply grid grid-cols-1 gap-4 md:grid-cols-2; }
+  .history-cell { @apply h-2 flex-1 rounded-[2px] bg-muted; min-width: 3px; }
+  .history-ok { @apply bg-success; }
+  .history-slow { @apply bg-warning; }
+  .history-error { @apply bg-destructive; }
+  .curve-overlay { @apply pointer-events-none absolute inset-x-0 bottom-0 h-16 w-full opacity-[0.14]; }
 }
 
-/* ── Animation Keyframes ───────────────────────────────────────────── */
-
-/* translateY/scale/translateX animations — safe for elements WITHOUT
-   backdrop-filter children (sidebar buttons, simple text rows, etc.) */
-@keyframes fadeInUp {
-  from { opacity: 0; transform: translateY(14px); }
-  to   { opacity: 1; transform: none; }
-}
-
-@keyframes scaleIn {
-  from { opacity: 0; transform: scale(.95); }
-  to   { opacity: 1; transform: none; }
-}
-
-@keyframes slideInLeft {
-  from { opacity: 0; transform: translateX(-10px); }
-  to   { opacity: 1; transform: none; }
-}
-
-@keyframes slideInRight {
-  from { opacity: 0; transform: translateX(10px); }
-  to   { opacity: 1; transform: none; }
-}
-
-@keyframes slideInDown {
-  from { opacity: 0; transform: translateY(-8px); }
-  to   { opacity: 1; transform: none; }
-}
-
-/* Opacity-only animation — use for glass cards and any container that has
-   backdrop-filter children.  Translating/scaling such containers forces the
-   compositor to recapture and re-blur every child backdrop region every frame,
-   which is the primary source of animation jank on glass-heavy pages. */
-@keyframes fadeIn {
-  from { opacity: 0; }
-  to   { opacity: 1; }
-}
-
-/* ── Utilities ─────────────────────────────────────────────────────── */
 @layer utilities {
-  .glow-ok    { filter: drop-shadow(0 0 10px rgba(56,217,150,.55)); }
-  .glow-error { filter: drop-shadow(0 0 10px rgba(255,107,122,.55)); }
-  .glow-slow  { filter: drop-shadow(0 0 10px rgba(246,196,83,.55)); }
-
-  .input-glass {
-    background: var(--card-strong);
-    border: 1px solid var(--border);
-    color: var(--text);
-    transition: border-color 0.2s ease, background-color 0.3s ease;
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--border)) transparent;
   }
-  .input-glass::placeholder { color: var(--muted); opacity: .7; }
-  .input-glass:focus { border-color: rgba(56,217,150,.5); outline: none; }
-
-  .curve-overlay {
-    position: absolute;
-    bottom: 0; left: 0; right: 0;
-    width: 100%; height: 70%;
-    opacity: .16;
-    pointer-events: none;
-  }
-
-  .nav-glass {
-    background: var(--nav-bg);
-    /*
-     * transform + opacity transition drives the scroll hide/show animation.
-     * background-color transition is intentionally omitted — theme switches are
-     * handled by the View Transitions API at compositor level (no live repaints).
-     */
-    transition: transform 0.2s ease-in-out, opacity 0.18s ease;
-  }
-
-  /*
-   * Animation utility classes — NO will-change in the class definition.
-   *
-   * Putting will-change in a CSS class means the browser allocates a
-   * compositor layer for EVERY matching element at mount time, not just during
-   * animation.  With 20+ rows or cards all having will-change:transform, this
-   * creates 20+ compositor layers simultaneously, exhausting GPU memory and
-   * causing jank.
-   *
-   * Modern browsers promote transform+opacity animations to the compositor
-   * automatically without an explicit hint.  The hint only helps for elements
-   * that will animate VERY soon after mount — and even then, applying it
-   * dynamically (e.g. via JS just before the animation) is better.
-   */
-  .anim-fade-in-up {
-    animation: fadeInUp 0.4s cubic-bezier(.25,.46,.45,.94) both;
-  }
-  .anim-fade-in {
-    animation: fadeIn 0.28s ease-out both;
-  }
-  .anim-scale-in {
-    animation: scaleIn 0.32s cubic-bezier(.25,.46,.45,.94) both;
-  }
-  .anim-slide-in-left {
-    animation: slideInLeft 0.26s cubic-bezier(.25,.46,.45,.94) both;
-  }
-  .anim-slide-in-right {
-    animation: slideInRight 0.26s cubic-bezier(.25,.46,.45,.94) both;
-  }
-  .anim-slide-in-down {
-    animation: slideInDown 0.22s cubic-bezier(.25,.46,.45,.94) both;
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    .anim-fade-in-up,
-    .anim-fade-in,
-    .anim-scale-in,
-    .anim-slide-in-left,
-    .anim-slide-in-right,
-    .anim-slide-in-down { animation: none; }
-  }
+  .animate-enter { animation: enter 220ms ease-out both; }
 }
 
-/* ── View Transitions (theme switch + page navigation) ────────────── */
-
-/*
- * Shared by two scenarios:
- *   1. Theme switch  — useTheme cycle() wraps applyTheme in startViewTransition
- *   2. Page navigation — React Router unstable_viewTransition on <Link>
- *
- * Old snapshot fades out; new snapshot slides up slightly (10px → 0) for
- * a sense of forward movement. Screenshots are already composited, so
- * backdrop-filter glass elements incur no per-frame repaint cost.
- */
-::view-transition-old(root) {
-  animation: vt-fade-out 0.2s ease-out both;
-}
-::view-transition-new(root) {
-  animation: vt-slide-in 0.25s cubic-bezier(.25,.46,.45,.94) both;
-}
-
-@keyframes vt-fade-out {
-  from { opacity: 1; }
-  to   { opacity: 0; }
-}
-@keyframes vt-slide-in {
-  from { opacity: 0; transform: translateY(10px); }
-  to   { opacity: 1; transform: none; }
+@keyframes enter {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  ::view-transition-old(root),
-  ::view-transition-new(root) {
-    animation-duration: 0.001s;
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
   }
 }

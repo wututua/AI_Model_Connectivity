@@ -1,66 +1,69 @@
+import { useState } from 'react'
+import { Boxes, CircleAlert, CircleCheck, Timer } from 'lucide-react'
 import type { ProviderReport } from '../types'
-import { statusClass } from '../utils/status'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card'
 import { StatusPill } from './StatusPill'
 import { ModelRow } from './ModelRow'
 
-export function ProviderCard({ provider, showError, compact, animDelay = 0 }: {
+export function ProviderCard({ provider, showError, compact }: {
   provider: ProviderReport
   showError: boolean
   compact?: boolean
   animDelay?: number
 }) {
-  const sc = statusClass(provider.status)
-  const accentColor = sc === 'ok' ? 'var(--ok)' : sc === 'slow' ? 'var(--slow)' : 'var(--error)'
-  const accentRgb = sc === 'ok' ? '56,217,150' : sc === 'slow' ? '246,196,83' : '255,107,122'
-
+  const [failedLogo, setFailedLogo] = useState('')
   return (
-    <div className={`glass rounded-[28px] overflow-hidden border-${sc} transition-all duration-300 anim-scale-in`} style={{ animationDelay: `${animDelay}ms` }}>
-      <div
-        className="flex items-center justify-between px-5 py-4"
-        style={{
-          borderBottom: '1px solid var(--border)',
-          background: `linear-gradient(90deg, rgba(${accentRgb},.06), transparent)`,
-        }}
-      >
-        <div className="flex items-center gap-3">
-          {provider.provider_logo ? (
-            <img
-              src={provider.provider_logo}
-              alt={provider.provider_name}
-              className="w-9 h-9 rounded-xl object-contain"
-              style={{ background: 'var(--card-strong)' }}
-            />
-          ) : (
-            <div className="w-9 h-9 rounded-xl flex items-center justify-center text-xs font-black font-mono"
-              style={{ background: 'var(--card-strong)', color: accentColor }}>
-              {provider.provider_name.slice(0, 2).toUpperCase()}
+    <Card className="overflow-hidden shadow-panel">
+      <CardHeader className="border-b p-4">
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex min-w-0 items-center gap-3">
+            {provider.provider_logo && failedLogo !== provider.provider_logo ? (
+              <img
+                src={provider.provider_logo}
+                alt=""
+                className="size-9 shrink-0 rounded-md border bg-white object-contain p-1"
+                referrerPolicy="no-referrer"
+                onError={() => setFailedLogo(provider.provider_logo)}
+              />
+            ) : (
+              <div className="flex size-9 shrink-0 items-center justify-center rounded-md border bg-muted font-mono text-xs font-semibold text-muted-foreground">
+                {provider.provider_name.slice(0, 2).toUpperCase()}
+              </div>
+            )}
+            <div className="min-w-0">
+              <CardTitle className="truncate text-sm">{provider.provider_name}</CardTitle>
+              <CardDescription className="mt-1 flex items-center gap-1.5 font-mono text-xs">
+                <span>{provider.provider_type}</span><span>·</span><span>{provider.model_count} 个模型</span>
+              </CardDescription>
             </div>
-          )}
-          <div>
-            <h2 className="text-sm font-semibold leading-tight" style={{ color: 'var(--text)' }}>
-              {provider.provider_name}
-            </h2>
-            <p className="text-[11px] font-mono mt-0.5" style={{ color: 'var(--muted)' }}>
-              {provider.provider_type} · {provider.model_count} 个模型
-            </p>
           </div>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <span className="flex items-center gap-1.5 text-[11px] font-mono mr-1" style={{ color: 'var(--muted)' }}>
-            <span style={{ color: 'var(--ok)' }}>{provider.ok_count}↑</span>
-            {provider.slow_count > 0 && <span style={{ color: 'var(--slow)' }}>{provider.slow_count}~</span>}
-            {provider.error_count > 0 && <span style={{ color: 'var(--error)' }}>{provider.error_count}✕</span>}
-          </span>
           <StatusPill status={provider.status} label={provider.status_label} />
         </div>
-      </div>
+        <div className="grid grid-cols-3 gap-2 pt-2">
+          <ProviderMetric icon={<CircleCheck />} label="正常" value={provider.ok_count} tone="text-success" />
+          <ProviderMetric icon={<Timer />} label="较慢" value={provider.slow_count} tone="text-warning" />
+          <ProviderMetric icon={<CircleAlert />} label="异常" value={provider.error_count} tone="text-destructive" />
+        </div>
+      </CardHeader>
+      <CardContent className="p-0">
+        {(provider.results ?? []).length > 0 ? (
+          provider.results.map(result => <ModelRow key={result.model} result={result} showError={showError} compact={compact} />)
+        ) : (
+          <div className="flex min-h-28 flex-col items-center justify-center gap-2 text-muted-foreground">
+            <Boxes className="size-5" /><span className="text-sm">没有匹配的模型</span>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
 
-      <div className={`p-4 ${compact ? 'space-y-1.5' : 'space-y-3'}`}>
-        {provider.results.map(result => (
-          <ModelRow key={result.model} result={result} showError={showError} compact={compact} />
-        ))}
-      </div>
+function ProviderMetric({ icon, label, value, tone }: { icon: React.ReactNode; label: string; value: number; tone: string }) {
+  return (
+    <div className="flex items-center gap-2 rounded-md bg-muted/60 px-2.5 py-2">
+      <span className={`${tone} [&>svg]:size-3.5`}>{icon}</span>
+      <span className="text-xs text-muted-foreground">{label}</span>
+      <strong className="ml-auto font-mono text-xs tabular-nums">{value}</strong>
     </div>
   )
 }

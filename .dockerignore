@@ -1,4 +1,6 @@
 .git
+.gocache/
+dist/
 .github
 data/
 frontend/node_modules/

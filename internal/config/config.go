@@ -106,7 +106,7 @@ func Load(path string) (Config, error) {
 	cfg.AutoCheckIntervalMinHours = getFloat(values, "AUTO_CHECK_INTERVAL_MIN_HOURS", cfg.AutoCheckIntervalMinHours)
 	cfg.AutoCheckIntervalMaxHours = getFloat(values, "AUTO_CHECK_INTERVAL_MAX_HOURS", cfg.AutoCheckIntervalMaxHours)
 	cfg.AutoCheckRunOnStart = getBool(values, "AUTO_CHECK_RUN_ON_START", cfg.AutoCheckRunOnStart)
-	cfg.AdminToken = getString(values, "ADMIN_TOKEN", cfg.AdminToken)
+	cfg.AdminToken = strings.TrimSpace(getString(values, "ADMIN_TOKEN", cfg.AdminToken))
 	cfg.NotifyPlatform = strings.ToLower(getString(values, "NOTIFY_PLATFORM", cfg.NotifyPlatform))
 	cfg.NotifyWebhookURL = getString(values, "NOTIFY_WEBHOOK_URL", cfg.NotifyWebhookURL)
 	cfg.NotifyTelegramBotToken = getString(values, "NOTIFY_TELEGRAM_BOT_TOKEN", cfg.NotifyTelegramBotToken)
@@ -116,6 +116,20 @@ func Load(path string) (Config, error) {
 	cfg.NotifyProviders = splitList(getString(values, "NOTIFY_PROVIDERS", ""))
 	cfg.NotifyModels = splitList(getString(values, "NOTIFY_MODELS", ""))
 	cfg.Providers = loadProviders(values)
+	if cfg.AppPort < 1 || cfg.AppPort > 65535 {
+		return cfg, fmt.Errorf("app port must be between 1 and 65535")
+	}
+	if err := ValidateProviders(cfg.Providers); err != nil {
+		return cfg, err
+	}
+	if err := ValidateRuntimeSettings(SettingsFromConfig(cfg)); err != nil {
+		return cfg, err
+	}
+	if cfg.AdminToken != "" {
+		if err := ValidateToken(cfg.AdminToken); err != nil {
+			return cfg, fmt.Errorf("admin token: %w", err)
+		}
+	}
 	return cfg, nil
 }
 

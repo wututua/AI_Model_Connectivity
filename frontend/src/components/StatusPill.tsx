@@ -1,12 +1,13 @@
-import { statusClass } from '../utils/status'
+import { Badge } from './ui/badge'
+import { statusClass, statusDotClass } from '../utils/status'
 
 export function StatusPill({ status, label, large }: { status: string; label: string; large?: boolean }) {
-  const sz = large ? 'px-4 py-2.5 text-base font-black' : 'px-3 py-1.5 text-xs font-bold'
+  const tone = statusClass(status)
+  const variant = tone === 'ok' ? 'success' : tone === 'slow' ? 'warning' : 'destructive'
   return (
-    <span
-      className={`inline-flex items-center rounded-full border whitespace-nowrap font-mono ${sz} badge-${statusClass(status)}`}
-    >
+    <Badge variant={variant} className={large ? 'gap-2 px-3 py-1 text-sm' : 'gap-1.5'}>
+      <span className={`status-dot ${statusDotClass(status)} size-1.5 shadow-none`} />
       {label}
-    </span>
+    </Badge>
   )
 }

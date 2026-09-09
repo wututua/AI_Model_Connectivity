@@ -65,14 +65,23 @@ func NewRunner(cfg config.Config) *Runner {
 }
 
 func (r *Runner) Run(ctx context.Context) ([]Result, []ProviderError, error) {
-	targets, providerErrors := r.collectTargets(ctx)
-	if len(targets) == 0 {
-		if len(providerErrors) > 0 {
-			return nil, providerErrors, errors.New("no probe targets collected")
+	for _, item := range r.providers {
+		if closer, ok := item.(interface{ CloseIdleConnections() }); ok {
+			defer closer.CloseIdleConnections()
 		}
-		return nil, nil, errors.New("no enabled providers or models")
 	}
-	return r.probeTargets(ctx, targets), providerErrors, nil
+	targets, providerErrors := r.collectTargets(ctx)
+	if err := ctx.Err(); err != nil {
+		return nil, providerErrors, err
+	}
+	if len(targets) == 0 {
+		return nil, providerErrors, nil
+	}
+	results := r.probeTargets(ctx, targets)
+	if err := ctx.Err(); err != nil {
+		return results, providerErrors, err
+	}
+	return results, providerErrors, nil
 }
 
 func (r *Runner) collectTargets(ctx context.Context) ([]Target, []ProviderError) {
@@ -82,6 +91,9 @@ func (r *Runner) collectTargets(ctx context.Context) ([]Target, []ProviderError)
 	skip := skipSet(r.cfg.SkipModels)
 
 	for _, item := range r.providers {
+		if ctx.Err() != nil {
+			break
+		}
 		modelsCtx, cancel := context.WithTimeout(ctx, durationSeconds(r.cfg.ModelListTimeoutSeconds))
 		models, err := item.Models(modelsCtx)
 		cancel()
@@ -90,6 +102,10 @@ func (r *Runner) collectTargets(ctx context.Context) ([]Target, []ProviderError)
 			continue
 		}
 		models = dedupe(models)
+		if len(models) == 0 {
+			providerErrors = append(providerErrors, ProviderError{ProviderID: item.ID(), ProviderType: item.Type(), Error: "no models returned"})
+			continue
+		}
 		if r.cfg.MaxModelsPerProvider > 0 && len(models) > r.cfg.MaxModelsPerProvider {
 			models = models[:r.cfg.MaxModelsPerProvider]
 		}
@@ -269,5 +285,3 @@ func truncate(text string, limit int) string {
 	}
 	return string(runes[:limit]) + "..."
 }
-
-
