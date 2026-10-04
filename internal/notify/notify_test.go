@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"cg/internal/config"
+	"cg/internal/probe"
 	"cg/internal/report"
 )
 
@@ -65,5 +66,44 @@ func TestCooldownDoesNotDiscardPendingAlert(t *testing.T) {
 	}
 	if sent.Load() != 1 || store.state.Status != "error" {
 		t.Fatal("pending alert not sent after cooldown")
+	}
+}
+
+func TestDisabledNotificationRetainsCredentialsWithoutSending(t *testing.T) {
+	var sent atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { sent.Add(1) }))
+	defer server.Close()
+	store := &memoryState{state: State{Status: "ok"}}
+	client := New(config.Config{NotifyPlatform: "disabled", NotifyWebhookURL: server.URL}, store)
+	if err := client.SendIfNeeded(context.Background(), report.Report{ErrorCount: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if sent.Load() != 0 || store.state.Status != "ok" {
+		t.Fatal("disabled notification sent or modified state")
+	}
+	if !New(config.Config{NotifyWebhookURL: server.URL}, store).enabled() {
+		t.Fatal("legacy empty platform must still use webhook")
+	}
+}
+
+func TestProviderNameFilterPreservesDiscoveryFailure(t *testing.T) {
+	value := report.Report{
+		Providers:      []report.ProviderReport{{ProviderID: "p1", ProviderName: "Display Name", Status: "error"}},
+		ProviderErrors: []probe.ProviderError{{ProviderID: "p1", Error: "unavailable"}},
+	}
+	filtered := filterReport(value, []string{"display name"}, nil)
+	if len(filtered.ProviderErrors) != 1 || alertState(filtered) != "error" {
+		t.Fatalf("filter lost failure: %+v", filtered)
+	}
+	var sent atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { sent.Add(1) }))
+	defer server.Close()
+	store := &memoryState{state: State{Status: "error"}}
+	client := New(config.Config{NotifyWebhookURL: server.URL, NotifyProviders: []string{"Display Name"}, NotifyOnRecovery: true}, store)
+	if err := client.SendIfNeeded(context.Background(), value); err != nil {
+		t.Fatal(err)
+	}
+	if sent.Load() != 0 || store.state.Status != "error" {
+		t.Fatal("discovery failure produced a false recovery")
 	}
 }

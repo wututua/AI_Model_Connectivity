@@ -96,6 +96,8 @@ func (c *Client) SendIfNeeded(ctx context.Context, value report.Report) error {
 
 func (c *Client) enabled() bool {
 	switch c.platform() {
+	case "disabled":
+		return false
 	case "telegram":
 		return c.cfg.NotifyTelegramBotToken != "" && c.cfg.NotifyTelegramChatID != ""
 	default:
@@ -119,7 +121,7 @@ func inCooldown(previous State, now time.Time, minutes int) bool {
 }
 
 func alertState(value report.Report) string {
-	if value.ErrorCount > 0 || len(value.ProviderErrors) > 0 {
+	if value.ErrorCount > 0 || value.UnknownCount > 0 || len(value.ProviderErrors) > 0 {
 		return "error"
 	}
 	if value.SlowCount > 0 {

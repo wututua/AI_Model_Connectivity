@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Activity, CheckCircle2, Clock3, Play, RefreshCw, Server, Square, Timer } from 'lucide-react'
+import { Activity, CheckCircle2, Clock3, Play, RefreshCw, Server, Timer } from 'lucide-react'
 import { api } from '../../api'
 import type { Report, RunningState, RuntimeSettings, SafeProviderConfig } from '../../types'
 import { relativeTime } from '../../utils/status'
+import { useNow } from '../../hooks/useNow'
 import { Badge } from '../../components/ui/badge'
 import { Button } from '../../components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card'
@@ -10,11 +11,12 @@ import { Skeleton } from '../../components/ui/skeleton'
 import { Feedback, LoadingButton, TokenEstimateCard, normalizeSettings, useAutoMsg } from './shared'
 
 export function OverviewTab({ readOnly = false }: { readOnly?: boolean }) {
+  const now = useNow()
   const [state, setState] = useState<RunningState | null>(null)
   const [config, setConfig] = useState<{ providers: SafeProviderConfig[]; settings: RuntimeSettings } | null>(null)
   const [summary, setSummary] = useState<Report | null>(null)
   const [loading, setLoading] = useState(false)
-  const [action, setAction] = useState<'run' | 'stop' | null>(null)
+  const [starting, setStarting] = useState(false)
   const [message, setMessage] = useAutoMsg()
 
   const load = useCallback(() => {
@@ -37,17 +39,10 @@ export function OverviewTab({ readOnly = false }: { readOnly?: boolean }) {
   }, [])
 
   const run = async () => {
-    setAction('run'); setMessage('')
+    setStarting(true); setMessage('')
     try { await api.triggerCheck(); setMessage('检测任务已完成'); load() }
     catch (cause) { setMessage(`错误：${(cause as Error).message}`) }
-    finally { setAction(null) }
-  }
-
-  const stop = async () => {
-    setAction('stop'); setMessage('')
-    try { await api.stopDetection(); setMessage('已发送停止请求'); load() }
-    catch (cause) { setMessage(`错误：${(cause as Error).message}`) }
-    finally { setAction(null) }
+    finally { setStarting(false) }
   }
 
   if (!state && loading) return <OverviewSkeleton />
@@ -73,8 +68,7 @@ export function OverviewTab({ readOnly = false }: { readOnly?: boolean }) {
           </CardHeader>
           {!readOnly && (
             <CardContent className="flex flex-wrap gap-2">
-              <LoadingButton onClick={run} loading={action === 'run'} disabled={state.running || action !== null}><Play />立即检测</LoadingButton>
-              <LoadingButton variant="destructive" onClick={stop} loading={action === 'stop'} disabled={!state.running || action !== null}><Square />停止检测</LoadingButton>
+              <LoadingButton onClick={run} loading={starting} disabled={state.running}><Play />立即检测</LoadingButton>
             </CardContent>
           )}
         </Card>
@@ -89,7 +83,7 @@ export function OverviewTab({ readOnly = false }: { readOnly?: boolean }) {
 
       {summary && summary.total > 0 && (
         <Card>
-          <CardHeader><CardTitle className="text-sm">最近一次检测</CardTitle><CardDescription>{relativeTime(summary.generated_at).text}完成，共检测 {summary.total} 个模型</CardDescription></CardHeader>
+          <CardHeader><CardTitle className="text-sm">最近一次检测</CardTitle><CardDescription>{relativeTime(summary.generated_at, now, summary.stale_after_seconds).text}更新，共 {summary.total} 个模型，{summary.unknown_count ?? 0} 个未检测</CardDescription></CardHeader>
           <CardContent className="grid grid-cols-2 gap-4 sm:grid-cols-4">
             <ResultMetric label="正常" value={summary.ok_count} className="text-success" />
             <ResultMetric label="较慢" value={summary.slow_count} className="text-warning" />

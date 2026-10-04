@@ -1,3 +1,5 @@
+const harmonySans = ['"HarmonyOS Sans"', 'ui-sans-serif', 'system-ui', '"PingFang SC"', '"Microsoft YaHei"', 'sans-serif']
+
 /** @type {import('tailwindcss').Config} */
 export default {
   darkMode: ['class', '[data-theme="dark"]'],
@@ -27,11 +29,11 @@ export default {
         sm: 'calc(var(--radius) - 4px)',
       },
       fontFamily: {
-        sans: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'],
-        mono: ['"Fira Code"', 'ui-monospace', 'SFMono-Regular', 'Consolas', 'monospace'],
+        sans: harmonySans,
+        mono: harmonySans,
       },
       boxShadow: {
-        panel: '0 1px 2px rgb(0 0 0 / 0.04), 0 8px 24px rgb(0 0 0 / 0.04)',
+        panel: '0 1px 3px rgb(0 0 0 / 0.04)',
       },
     },
   },

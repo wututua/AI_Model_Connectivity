@@ -3,7 +3,6 @@ package web
 import (
 	"context"
 	"crypto/rand"
-	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -31,13 +30,10 @@ type AdminController interface {
 	CheckProvider(context.Context, string) (report.Report, error)
 	StopCheck() bool
 	RunningState() RunningState
-	AdminToken() string
-	ChangeAdminToken(context.Context, string) error
-	ViewToken() string
-	ChangeViewToken(context.Context, string) error
 	AdminConfig(context.Context) (config.AdminConfig, error)
 	UpdateSettings(context.Context, config.RuntimeSettings) (config.AdminConfig, error)
 	UpsertProvider(context.Context, string, config.ProviderUpdate) (config.SafeProviderConfig, error)
+	DiscoverModels(context.Context, config.ModelDiscoveryRequest) ([]string, error)
 	DeleteProvider(context.Context, string) error
 	ExportConfig(context.Context) (config.ConfigExport, error)
 	ImportConfig(context.Context, config.ConfigImport) (config.AdminConfig, error)
@@ -53,11 +49,11 @@ type RunningState struct {
 	ProviderID                string  `json:"provider_id"`
 	AutoCheckIntervalMinHours float64 `json:"auto_check_interval_min_hours"`
 	AutoCheckIntervalMaxHours float64 `json:"auto_check_interval_max_hours"`
-	FirstUse                  bool    `json:"first_use"`
 	ReadOnly                  bool    `json:"read_only"`
 }
 
 var ErrCheckAlreadyRunning = errors.New("check already running")
+var ErrShuttingDown = errors.New("service is shutting down")
 
 type Broker struct {
 	mu      sync.Mutex
@@ -88,25 +84,34 @@ func (b *Broker) Publish(value report.Report) {
 		select {
 		case ch <- value:
 		default:
+			select {
+			case <-ch:
+			default:
+			}
+			select {
+			case ch <- value:
+			default:
+			}
 		}
 	}
 }
 
 type Server struct {
-	cfg          config.Config
-	store        *storage.SQLiteStore
-	check        CheckFunc
-	broker       *Broker
-	admin        AdminController
-	metrics      *metrics.Metrics
-	authFailures authFailureLimiter
+	cfg           config.Config
+	store         *storage.SQLiteStore
+	check         CheckFunc
+	broker        *Broker
+	admin         AdminController
+	metrics       *metrics.Metrics
+	authFailures  authFailureLimiter
+	passwordSlots chan struct{}
 }
 
 func NewServer(cfg config.Config, store *storage.SQLiteStore, check CheckFunc, broker *Broker, admin AdminController) *Server {
 	if broker == nil {
 		broker = NewBroker()
 	}
-	return &Server{cfg: cfg, store: store, check: check, broker: broker, admin: admin}
+	return &Server{cfg: cfg, store: store, check: check, broker: broker, admin: admin, passwordSlots: make(chan struct{}, 4)}
 }
 
 // SetMetrics wires a metrics collector and exposes /metrics.  Optional —
@@ -131,14 +136,27 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/admin/settings", s.adminSettings)
 	mux.HandleFunc("/api/admin/providers", s.adminProviders)
 	mux.HandleFunc("/api/admin/providers/", s.adminProviderItem)
+	mux.HandleFunc("/api/admin/provider-models", s.adminProviderModels)
 	mux.HandleFunc("/api/admin/tasks", s.adminTasks)
 	mux.HandleFunc("/api/admin/billing", s.adminBilling)
 	mux.HandleFunc("/metrics", s.metricsHandler)
 	mux.HandleFunc("/api/admin/tasks/", s.adminTaskItem)
-	mux.HandleFunc("/api/admin/token", s.adminChangeToken)
-	mux.HandleFunc("/api/admin/view-token", s.adminViewToken)
+	mux.HandleFunc("/api/auth/session", s.authSession)
+	mux.HandleFunc("/api/auth/login", s.authLogin)
+	mux.HandleFunc("/api/auth/logout", s.authLogout)
+	mux.HandleFunc("/api/auth/password", s.authPassword)
+	mux.HandleFunc("/api/admin/users", s.adminUsers)
+	mux.HandleFunc("/api/admin/users/", s.adminUserItem)
 	mux.Handle("/", spaHandler(s.cfg.WebDir))
-	return mux
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("Referrer-Policy", "same-origin")
+		w.Header().Set("X-Frame-Options", "DENY")
+		if strings.HasPrefix(r.URL.Path, "/api/") || r.URL.Path == "/metrics" {
+			w.Header().Set("Cache-Control", "no-store")
+		}
+		mux.ServeHTTP(w, r)
+	})
 }
 
 func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
@@ -146,6 +164,13 @@ func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) status(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w)
+		return
+	}
+	if !s.requireStatusAccess(w, r) {
+		return
+	}
 	value, err := s.store.LatestReport(r.Context())
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
@@ -155,17 +180,34 @@ func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]any{"ok": false, "error": "no report available"})
 		return
 	}
-	writeJSON(w, http.StatusOK, value)
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, s.publicReport(r.Context(), value))
+}
+
+func (s *Server) publicReport(ctx context.Context, value report.Report) report.Report {
+	show := s.cfg.ShowErrorDetail
+	if s.admin != nil {
+		cfg, err := s.admin.AdminConfig(ctx)
+		show = err == nil && cfg.Settings.ShowErrorDetail
+	}
+	return report.WithErrorVisibility(value, show)
 }
 
 func (s *Server) events(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w)
+		return
+	}
+	if !s.requireStatusAccess(w, r) {
+		return
+	}
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": "streaming unsupported"})
 		return
 	}
 	w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no")
 
@@ -173,26 +215,45 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 	defer unsubscribe()
 
 	if value, err := s.store.LatestReport(r.Context()); err == nil && value.GeneratedAt != "" {
-		writeSSE(w, flusher, value)
+		if !s.streamAuthorized(r) {
+			fmt.Fprint(w, "event: auth-required\ndata: {}\n\n")
+			flusher.Flush()
+			return
+		}
+		writeSSE(w, flusher, s.publicReport(r.Context(), value))
 	}
+	flusher.Flush()
 
-	keepAlive := time.NewTimer(25 * time.Second)
+	keepAlive := time.NewTimer(5 * time.Second)
 	defer keepAlive.Stop()
 	for {
 		select {
-		case value := <-ch:
-			writeSSE(w, flusher, value)
+		case value, open := <-ch:
+			if !open {
+				return
+			}
+			if !s.streamAuthorized(r) {
+				fmt.Fprint(w, "event: auth-required\ndata: {}\n\n")
+				flusher.Flush()
+				return
+			}
+			writeSSE(w, flusher, s.publicReport(r.Context(), value))
 			if !keepAlive.Stop() {
 				select {
 				case <-keepAlive.C:
 				default:
 				}
 			}
-			keepAlive.Reset(25 * time.Second)
+			keepAlive.Reset(5 * time.Second)
 		case <-keepAlive.C:
+			if !s.streamAuthorized(r) {
+				fmt.Fprint(w, "event: auth-required\ndata: {}\n\n")
+				flusher.Flush()
+				return
+			}
 			_, _ = fmt.Fprint(w, ": keep-alive\n\n")
 			flusher.Flush()
-			keepAlive.Reset(25 * time.Second)
+			keepAlive.Reset(5 * time.Second)
 		case <-r.Context().Done():
 			return
 		}
@@ -226,10 +287,7 @@ func (s *Server) adminDetection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	state := s.admin.RunningState()
-	state.ReadOnly = s.admin.ViewToken() != "" && r.Header.Get("Authorization") == "Bearer "+s.admin.ViewToken() && r.Header.Get("Authorization") != "Bearer "+s.admin.AdminToken()
-	if state.ReadOnly {
-		state.FirstUse = false
-	}
+	state.ReadOnly = requestSession(r).User.Role != "admin"
 	writeJSON(w, http.StatusOK, state)
 }
 
@@ -315,6 +373,22 @@ func (s *Server) adminProviders(w http.ResponseWriter, r *http.Request) {
 	default:
 		methodNotAllowed(w)
 	}
+}
+
+func (s *Server) adminProviderModels(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdmin(w, r) {
+		return
+	}
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w)
+		return
+	}
+	var query config.ModelDiscoveryRequest
+	if !decodeJSON(w, r, &query) {
+		return
+	}
+	models, err := s.admin.DiscoverModels(r.Context(), query)
+	writeResult(w, models, err)
 }
 
 func (s *Server) adminProviderItem(w http.ResponseWriter, r *http.Request) {
@@ -422,19 +496,12 @@ func (s *Server) adminTasks(w http.ResponseWriter, r *http.Request) {
 	writeResult(w, tasks, err)
 }
 
-// metricsHandler exposes Prometheus metrics behind the admin token, so
-// scrape configs need an `Authorization: Bearer <ADMIN_TOKEN>` header.
-// This matches the existing security posture — no plaintext leak of
-// provider IDs / model names to unauthenticated callers.  When metrics
-// aren't wired (SetMetrics never called) we return 404 to make the
-// feature explicitly opt-in.
+// Metrics require an authenticated account, independent of status-page privacy.
 func (s *Server) metricsHandler(w http.ResponseWriter, r *http.Request) {
 	if s.metrics == nil {
 		http.NotFound(w, r)
 		return
 	}
-	// Scrape clients (Prometheus, OpenTelemetry collectors) typically use a
-	// dedicated read-only credential — view token is the right scope.
 	if !s.requireAuth(w, r) {
 		return
 	}
@@ -477,135 +544,6 @@ func (s *Server) adminTaskItem(w http.ResponseWriter, r *http.Request) {
 	writeResult(w, value, err)
 }
 
-// requireAuth allows either the admin token or the read-only view token.
-// Used for GET endpoints that should be shareable without granting
-// mutation rights.  Behaves like requireAdmin otherwise.
-func (s *Server) requireAuth(w http.ResponseWriter, r *http.Request) bool {
-	return s.authorize(w, r, true)
-}
-
-func (s *Server) requireAdmin(w http.ResponseWriter, r *http.Request) bool {
-	return s.authorize(w, r, false)
-}
-
-func (s *Server) authorize(w http.ResponseWriter, r *http.Request, allowView bool) bool {
-	w.Header().Set("Cache-Control", "no-store")
-	address := r.RemoteAddr
-	if host, _, err := net.SplitHostPort(address); err == nil {
-		address = host
-	}
-	now := time.Now()
-	if retryAfter := s.authFailures.retryAfter(address, now); retryAfter > 0 {
-		w.Header().Set("Retry-After", strconv.Itoa(int(retryAfter.Seconds())+1))
-		writeErrorText(w, http.StatusTooManyRequests, "too many authentication failures; try again later")
-		return false
-	}
-	token := s.admin.AdminToken()
-	provided := r.Header.Get("Authorization")
-	matches := func(candidate string) bool {
-		expected := "Bearer " + candidate
-		return candidate != "" && subtle.ConstantTimeCompare([]byte(provided), []byte(expected)) == 1
-	}
-	if matches(token) {
-		s.authFailures.reset(address)
-		return true
-	}
-	if matches(s.admin.ViewToken()) {
-		if !allowView {
-			writeErrorText(w, http.StatusForbidden, "read-only token cannot access this endpoint")
-			return false
-		}
-		return true
-	}
-	if token == "" && IsPublicBindHost(s.cfg.AppHost) {
-		writeJSON(w, http.StatusForbidden, map[string]any{"ok": false, "error": "ADMIN_TOKEN is required for admin APIs when APP_HOST is public"})
-		return false
-	}
-	if token == "" {
-		return true
-	}
-	s.authFailures.fail(address, now)
-	writeErrorText(w, http.StatusUnauthorized, "unauthorized")
-	return false
-}
-
-func (s *Server) adminChangeToken(w http.ResponseWriter, r *http.Request) {
-	if !s.requireAdmin(w, r) {
-		return
-	}
-	if r.Method != http.MethodPost {
-		methodNotAllowed(w)
-		return
-	}
-	var body struct {
-		Token string `json:"token"`
-	}
-	if !decodeJSON(w, r, &body) {
-		return
-	}
-	body.Token = strings.TrimSpace(body.Token)
-	if body.Token == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "token cannot be empty"})
-		return
-	}
-	if err := config.ValidateToken(body.Token); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	if err := s.admin.ChangeAdminToken(r.Context(), body.Token); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
-}
-
-// adminViewToken serves CRUD over the read-only share token.
-// GET returns the current token (admin only — exposing it via view token
-// itself would defeat the read-only boundary).  POST sets a new value
-// (empty body auto-generates a 16-char token).  DELETE revokes it.
-func (s *Server) adminViewToken(w http.ResponseWriter, r *http.Request) {
-	if !s.requireAdmin(w, r) {
-		return
-	}
-	switch r.Method {
-	case http.MethodGet:
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "token": s.admin.ViewToken()})
-	case http.MethodPost:
-		var body struct {
-			Token string `json:"token"`
-		}
-		if !decodeRequestJSON(w, r, &body, true) {
-			return
-		}
-		token := strings.TrimSpace(body.Token)
-		if token == "" {
-			var err error
-			token, err = randomToken(16)
-			if err != nil {
-				writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
-				return
-			}
-		}
-		if err := config.ValidateToken(token); err != nil {
-			writeError(w, http.StatusBadRequest, err)
-			return
-		}
-		if err := s.admin.ChangeViewToken(r.Context(), token); err != nil {
-			writeError(w, http.StatusBadRequest, err)
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "token": token})
-	case http.MethodDelete:
-		if err := s.admin.ChangeViewToken(r.Context(), ""); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
-	default:
-		methodNotAllowed(w)
-	}
-}
-
 // randomToken returns a URL-safe base64 token with the given byte length
 // of entropy.  Uses crypto/rand so tokens aren't guessable from system time.
 func randomToken(bytes int) (string, error) {
@@ -620,6 +558,10 @@ func randomToken(bytes int) (string, error) {
 }
 
 func (s *Server) writeCheckError(w http.ResponseWriter, err error) {
+	if errors.Is(err, ErrShuttingDown) {
+		writeError(w, http.StatusServiceUnavailable, err)
+		return
+	}
 	if errors.Is(err, ErrCheckAlreadyRunning) {
 		writeJSON(w, http.StatusConflict, map[string]any{"ok": false, "error": err.Error()})
 		return
@@ -644,6 +586,7 @@ func (s *Server) HTTPServer() *http.Server {
 // the React SPA handles client-side routing (e.g. /admin).
 func spaHandler(webDir string) http.Handler {
 	fs := http.FileServer(http.Dir(webDir))
+	fonts := &fontVersionCache{}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/api/") {
 			http.NotFound(w, r)
@@ -651,7 +594,16 @@ func spaHandler(webDir string) http.Handler {
 		}
 		// If the file exists on disk, serve it directly (assets, index.html, etc.).
 		fpath := filepath.Join(webDir, filepath.Clean(r.URL.Path))
-		if _, err := os.Stat(fpath); err == nil {
+		w.Header().Set("Cache-Control", "no-cache")
+		if info, err := os.Stat(fpath); err == nil {
+			if !info.IsDir() && strings.HasPrefix(r.URL.Path, "/fonts/") && strings.EqualFold(filepath.Ext(fpath), ".ttf") {
+				if digest := fonts.digest(fpath, info); digest != "" {
+					w.Header().Set("ETag", `"`+digest+`"`)
+					if r.URL.Query().Get("v") == digest {
+						w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+					}
+				}
+			}
 			fs.ServeHTTP(w, r)
 			return
 		}

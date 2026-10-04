@@ -27,7 +27,7 @@ jobs:
         run: go test -v -race ./...
 
   test-frontend:
-    name: TypeScript check
+    name: Frontend test & build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -43,6 +43,20 @@ jobs:
         working-directory: frontend
         run: npm ci
 
-      - name: TypeScript check
+      - name: Unit tests
         working-directory: frontend
-        run: npx tsc --noEmit
+        run: npm test
+
+      - name: TypeScript check and build
+        working-directory: frontend
+        run: npm run build
+
+      - name: Install browser
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Browser regression tests
+        working-directory: frontend
+        env:
+          PLAYWRIGHT_CHANNEL: chromium
+        run: npm run test:browser

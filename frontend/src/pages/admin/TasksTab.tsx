@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ChevronLeft, ChevronRight, Clock3, RefreshCw } from 'lucide-react'
 import { api } from '../../api'
 import type { CheckTask } from '../../types'
@@ -7,24 +7,33 @@ import { Button } from '../../components/ui/button'
 import { Card, CardContent } from '../../components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../components/ui/table'
-import { Feedback, StatusBadge } from './shared'
+import { Feedback, ListSkeleton, StatusBadge } from './shared'
 
 const LIMIT = 20
 const KIND_LABELS: Record<string, string> = { manual: '手动检测', scheduled: '定时检测', startup: '启动检测', provider: 'Provider 检测' }
 
 export function TasksTab() {
-  const [tasks, setTasks] = useState<CheckTask[]>([])
-  const [loading, setLoading] = useState(false)
+  const [data, setData] = useState<{ offset: number; filter: string; tasks: CheckTask[] } | null>(null)
+  const [loading, setLoading] = useState(true)
   const [offset, setOffset] = useState(0)
   const [filter, setFilter] = useState('all')
   const [error, setError] = useState('')
+  const pending = useRef<AbortController | null>(null)
+  const requestId = useRef(0)
+  const tasks = data?.offset === offset && data.filter === filter ? data.tasks : []
 
   const load = useCallback(() => {
+    pending.current?.abort()
+    const controller = new AbortController()
+    pending.current = controller
+    const request = ++requestId.current
     setLoading(true); setError('')
-    api.tasks({ limit: LIMIT, offset, status: filter === 'all' ? undefined : filter })
-      .then(setTasks).catch(cause => setError(`错误：${(cause as Error).message}`)).finally(() => setLoading(false))
+    api.tasks({ limit: LIMIT, offset, status: filter === 'all' ? undefined : filter }, controller.signal)
+      .then(tasks => { if (request === requestId.current) setData({ offset, filter, tasks }) })
+      .catch(cause => { if (request === requestId.current && !controller.signal.aborted) setError(`错误：${(cause as Error).message}`) })
+      .finally(() => { if (request === requestId.current) setLoading(false) })
   }, [filter, offset])
-  useEffect(() => { load() }, [load])
+  useEffect(() => { load(); return () => { requestId.current++; pending.current?.abort() } }, [load])
 
   const pageSummary = useMemo(() => ({ success: tasks.filter(task => task.status === 'success').length, failed: tasks.filter(task => task.status === 'error').length, running: tasks.filter(task => task.status === 'running').length }), [tasks])
 
@@ -38,9 +47,10 @@ export function TasksTab() {
         </div>
       </div>
       <Feedback message={error} />
-      <Card><CardContent className="p-0"><Table>
+      <Card aria-busy={loading}><CardContent className="p-0"><Table>
         <TableHeader><TableRow><TableHead className="hidden sm:table-cell">任务</TableHead><TableHead>类型</TableHead><TableHead>状态</TableHead><TableHead>开始时间</TableHead><TableHead className="hidden md:table-cell">耗时</TableHead><TableHead className="text-right">结果</TableHead></TableRow></TableHeader>
         <TableBody>
+          {loading && tasks.length === 0 && <TableRow><TableCell colSpan={6}><ListSkeleton label="正在加载任务历史" /></TableCell></TableRow>}
           {tasks.map(task => (
             <TableRow key={task.id}>
               <TableCell className="hidden font-mono text-xs text-muted-foreground sm:table-cell">#{task.id}</TableCell>
@@ -51,10 +61,10 @@ export function TasksTab() {
               <TableCell className="text-right"><div className="font-mono text-xs tabular-nums"><span className="text-success">{task.ok_count}</span><span className="text-muted-foreground"> / </span><span className="text-warning">{task.slow_count}</span><span className="text-muted-foreground"> / </span><span className="text-destructive">{task.error_count}</span></div><p className="mt-0.5 text-[11px] text-muted-foreground">共 {task.total}</p></TableCell>
             </TableRow>
           ))}
-          {!loading && tasks.length === 0 && <TableRow><TableCell colSpan={6}><div className="flex min-h-52 flex-col items-center justify-center text-muted-foreground"><Clock3 className="mb-3 size-7" /><p className="text-sm">暂无检测任务</p></div></TableCell></TableRow>}
+          {!loading && !error && tasks.length === 0 && <TableRow><TableCell colSpan={6}><div className="flex min-h-52 flex-col items-center justify-center text-muted-foreground"><Clock3 className="mb-3 size-7" /><p className="text-sm">暂无检测任务</p></div></TableCell></TableRow>}
         </TableBody>
       </Table></CardContent></Card>
-      <div className="flex items-center justify-between"><p className="text-xs text-muted-foreground">显示 {tasks.length ? offset + 1 : 0}–{offset + tasks.length} 条</p><div className="flex gap-2"><Button variant="outline" size="sm" onClick={() => setOffset(value => Math.max(0, value - LIMIT))} disabled={offset === 0}><ChevronLeft />上一页</Button><Button variant="outline" size="sm" onClick={() => setOffset(value => value + LIMIT)} disabled={tasks.length < LIMIT}>下一页<ChevronRight /></Button></div></div>
+      <div className="flex flex-wrap items-center justify-between gap-3"><p className="text-xs text-muted-foreground" role="status">{loading && !tasks.length ? '正在加载' : tasks.length ? `显示 ${offset + 1}–${offset + tasks.length} 条` : '当前页无记录'}</p><div className="flex gap-2"><Button variant="outline" size="sm" onClick={() => setOffset(value => Math.max(0, value - LIMIT))} disabled={loading || offset === 0}><ChevronLeft />上一页</Button><Button variant="outline" size="sm" onClick={() => setOffset(value => value + LIMIT)} disabled={loading || tasks.length < LIMIT}>下一页<ChevronRight /></Button></div></div>
     </div>
   )
 }

@@ -20,6 +20,11 @@ func filterReport(value report.Report, providers, models []string) report.Report
 	filtered.SlowCount = 0
 	filtered.ErrorCount = 0
 	filtered.Total = 0
+	filtered.UnknownCount = 0
+	names := map[string]string{}
+	for _, provider := range value.Providers {
+		names[provider.ProviderID] = provider.ProviderName
+	}
 
 	for _, provider := range value.Providers {
 		providerMatched := matchesProvider(providerSet, provider.ProviderID, provider.ProviderName)
@@ -31,6 +36,7 @@ func filterReport(value report.Report, providers, models []string) report.Report
 		copyProvider.OKCount = 0
 		copyProvider.SlowCount = 0
 		copyProvider.ErrorCount = 0
+		copyProvider.UnknownCount = 0
 		for _, result := range provider.Results {
 			if len(modelSet) > 0 && !matchesModel(modelSet, result.Model, result.ProviderID, result.ProviderName) {
 				continue
@@ -43,6 +49,8 @@ func filterReport(value report.Report, providers, models []string) report.Report
 				copyProvider.SlowCount++
 			case "error":
 				copyProvider.ErrorCount++
+			case "unknown":
+				copyProvider.UnknownCount++
 			}
 		}
 		if len(copyProvider.Results) == 0 {
@@ -54,6 +62,9 @@ func filterReport(value report.Report, providers, models []string) report.Report
 		if copyProvider.ErrorCount > 0 {
 			copyProvider.Status = "error"
 			copyProvider.StatusLabel = "异常"
+		} else if copyProvider.UnknownCount > 0 {
+			copyProvider.Status = "unknown"
+			copyProvider.StatusLabel = "未检测"
 		} else if copyProvider.SlowCount > 0 {
 			copyProvider.Status = "slow"
 			copyProvider.StatusLabel = "较慢"
@@ -62,11 +73,12 @@ func filterReport(value report.Report, providers, models []string) report.Report
 		filtered.OKCount += copyProvider.OKCount
 		filtered.SlowCount += copyProvider.SlowCount
 		filtered.ErrorCount += copyProvider.ErrorCount
+		filtered.UnknownCount += copyProvider.UnknownCount
 		filtered.Total += len(copyProvider.Results)
 	}
 
 	for _, item := range value.ProviderErrors {
-		if len(providerSet) == 0 || matchesProvider(providerSet, item.ProviderID, "") {
+		if matchesProvider(providerSet, item.ProviderID, names[item.ProviderID]) {
 			filtered.ProviderErrors = append(filtered.ProviderErrors, item)
 		}
 	}
@@ -74,7 +86,7 @@ func filterReport(value report.Report, providers, models []string) report.Report
 	filtered.ProviderCount = len(filtered.Providers)
 	filtered.OverallStatus = "OPERATIONAL"
 	filtered.OverallClass = "ok"
-	if filtered.ErrorCount > 0 || len(filtered.ProviderErrors) > 0 {
+	if filtered.ErrorCount > 0 || filtered.UnknownCount > 0 || len(filtered.ProviderErrors) > 0 {
 		filtered.OverallStatus = "DEGRADED"
 		filtered.OverallClass = "error"
 	}

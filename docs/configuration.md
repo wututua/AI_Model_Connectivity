@@ -1,6 +1,6 @@
 # 配置参考
 
-> [项目主页](../README.md) · [文档索引](README.md) · [GitHub 仓库](https://github.com/wututua/AI_Model_Connectivity) · [CNB 仓库](https://cnb.cool/ligzs/AI_Model_Connectivity) · [仓库与发布](repositories.md)
+> [项目主页](../README.md) · [文档索引](README.md) · [GitHub 仓库](https://github.com/wututua/AI_Model_Connectivity)
 
 首次启动时，基础配置按 **真实环境变量 > `.env` 文件 > 代码默认值** 解析，然后把可管理的运行时设置和 Provider 写入 SQLite。后续启动时，SQLite 中的运行时设置和 Provider 会覆盖基础配置中的同名值。
 
@@ -25,7 +25,12 @@
 | `DATA_DIR` | `data` | 数据目录 |
 | `DATABASE_PATH` | `DATA_DIR/cg.sqlite` | SQLite 路径 |
 | `DASHBOARD_TITLE` | `模型连通性` | 仪表盘标题 |
-| `ADMIN_TOKEN` | 自动生成 | 管理接口密钥，见 [security.md](security.md) |
+| `ADMIN_USERNAME` | `admin` | 仅首次创建管理员时使用 |
+| `ADMIN_PASSWORD` | 自动生成或迁移 | 仅首次创建管理员时使用；至少 8 位，包含大写、小写字母和数字 |
+| `SECURE_COOKIES` | `false` | HTTPS 反向代理部署设置为 true，重启生效 |
+| `STATUS_LOGIN_REQUIRED` | `false` | 状态监控是否要求普通用户或管理员登录；可在系统设置修改 |
+
+已有用户时环境账号密码不会覆盖数据库账号。旧 `ADMIN_TOKEN` 仅在用户表为空时用于迁移，不再作为 API 凭据；详见 [security.md](security.md)。
 
 ## 2. 探测
 
@@ -51,10 +56,10 @@
 |------|--------|------|
 | `ENABLE_HISTORY` | `true` | 是否记录历史；关闭后仍会计入 token 用量 |
 | `SHOW_CURVE_CHART` | `true` | 是否生成延迟曲线 SVG |
-| `STATS_WINDOW_DAYS` | `7` | 可用率统计窗口（1–3650） |
+| `STATS_WINDOW_DAYS` | `7` | 检测成功率统计窗口（1–3650） |
 | `HISTORY_SIZE` | `30` | 仪表盘展示的历史条数（1–100000） |
 | `MAX_HISTORY_RECORDS` | `500` | 每模型数据库保留记录数（1–1000000） |
-| `SHOW_ERROR_DETAIL` | `true` | 是否展示错误详情；关闭时错误文本清空 |
+| `SHOW_ERROR_DETAIL` | `true` | 是否展示错误详情；关闭后公开 API、SSE 与合并报告按当前设置清空错误文本 |
 | `THEME_MODE` | `auto` | `auto` / `dark` / `light` |
 | `DAY_MODE_START_HOUR` | `8` | `auto` 下亮色起始小时（0–23） |
 | `DAY_MODE_END_HOUR` | `18` | `auto` 下亮色结束小时（0–23） |
@@ -77,7 +82,7 @@
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
-| `NOTIFY_PLATFORM` | `webhook` | `webhook`/`discord`/`bark`/`wecom`/`wechat_work`/`dingtalk`/`telegram` |
+| `NOTIFY_PLATFORM` | `webhook` | `disabled`/`webhook`/`discord`/`bark`/`wecom`/`wechat_work`/`dingtalk`/`telegram`；`disabled` 禁用，空值兼容旧版 webhook |
 | `NOTIFY_WEBHOOK_URL` | — | Webhook 地址（允许查询参数） |
 | `NOTIFY_TELEGRAM_BOT_TOKEN` | — | Telegram Bot Token |
 | `NOTIFY_TELEGRAM_CHAT_ID` | — | Telegram Chat ID |
@@ -88,7 +93,7 @@
 
 发送条件（见 `internal/notify/notify.go`）：
 
-1. 平台配置完整（telegram 需 token + chat_id，其他需 webhook URL）；
+1. 平台不是 `disabled` 且配置完整（telegram 需 token + chat_id，其他需 webhook URL）；
 2. 按 `NOTIFY_PROVIDERS` / `NOTIFY_MODELS` 过滤后重新计算聚合状态；
 3. 与上次告警状态 `ok`/`slow`/`error` **不同**才发；
 4. `ok` 且上次状态为空（首次启动）不发；
@@ -137,7 +142,8 @@ PROVIDER_1_PROBE_ENABLED=true
 - `ID`：非空、≤128 字符、无首尾空格、不含控制字符与 `/ \ ? #`、不得为 `.` 或 `..`；大小写不敏感去重。
 - `BASE_URL`：必须 `http`/`https`；必须有 host；**不允许**用户信息（userinfo）、查询参数、fragment；禁止链路本地地址（169.254.0.0/16）。
 - `NOTIFY_WEBHOOK_URL`：同上，但**允许**查询参数（钉钉/企业微信需要）。
-- `ADMIN_TOKEN` / 只读密钥：16–256 位可打印 ASCII（33–126），不含空格。
+- 账号：3–32 位 ASCII 字母、数字、点、下划线或短横线，以字母/数字开头，忽略大小写。
+- 密码：至少 8 位，必须包含 ASCII 大写字母、小写字母和数字，不强制特殊字符，最多 1024 字节。
 
 ### 6.2 图标匹配
 
@@ -152,7 +158,9 @@ PROVIDER_1_PROBE_ENABLED=true
 | `POST /api/admin/config/import` | 整体替换 settings + providers |
 | `POST /api/admin/config/reload` | 重读 `.env`；仅当 `.env` 有 Provider 时覆盖库内 Provider；成功后异步触发一次检测 |
 
-`reload` 在监听地址、`WEB_DIR`、`DATA_DIR`、`DATABASE_PATH`、`ADMIN_TOKEN` 发生变化时返回错误并拒绝加载——这些必须重启。
+`reload` 在监听地址、`WEB_DIR`、`DATA_DIR`、`DATABASE_PATH`、`SECURE_COOKIES` 发生变化时返回错误并拒绝加载——这些必须重启。`ADMIN_USERNAME` 和 `ADMIN_PASSWORD` 仅供首次初始化；改环境变量或重启都不会重置已有账号。
+
+`STATUS_LOGIN_REQUIRED` 属于运行时设置，SQLite 保存值优先于环境变量。管理员可在 **系统设置 → 访问控制** 修改；它同时保护状态 REST 和 SSE，不只是前端页面。用户管理独立于配置导入导出。
 
 `PROBE_PROMPT`、`PROBE_SYSTEM_PROMPT` 和 `AUTO_CHECK_RUN_ON_START` 不属于 SQLite `RuntimeSettings`：两个提示词来自基础配置，可通过 `.env` 热加载；`AUTO_CHECK_RUN_ON_START` 只在进程启动时判断。Provider 默认由 SQLite 接管，只有热加载的 `.env` 明确包含 Provider 时才会覆盖并保存 Provider 列表。
 

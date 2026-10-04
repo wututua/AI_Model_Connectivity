@@ -27,6 +27,69 @@ func TestSQLiteStoreLatestReport(t *testing.T) {
 	}
 }
 
+func TestRecoverInterruptedTasks(t *testing.T) {
+	store := newTestSQLiteStore(t)
+	ctx := context.Background()
+	for _, status := range []string{"running", "success", "error", "canceled"} {
+		if _, err := store.CreateCheckTask(ctx, CheckTask{Kind: "manual", Status: status, StartedAt: time.Now().UTC().Format(time.RFC3339)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := store.RecoverInterruptedTasks(ctx); err != nil {
+		t.Fatal(err)
+	}
+	task, err := store.GetCheckTask(ctx, 1)
+	if err != nil || task.Status != "canceled" || task.FinishedAt == "" || task.ErrorMessage == "" {
+		t.Fatalf("unrecovered task: %+v, %v", task, err)
+	}
+	for id, status := range []string{"success", "error", "canceled"} {
+		task, err := store.GetCheckTask(ctx, int64(id+2))
+		if err != nil || task.Status != status || task.FinishedAt != "" {
+			t.Fatalf("completed task changed: %+v, %v", task, err)
+		}
+	}
+}
+
+func TestHistoryLimitPerKeyWithMixedTimezoneAndTies(t *testing.T) {
+	store := newTestSQLiteStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+	for _, key := range []string{"p1::m1", "p1::m2"} {
+		for i, at := range []time.Time{now.Add(-time.Hour).In(time.FixedZone("UTC+8", 8*3600)), now, now} {
+			_, err := store.db.ExecContext(ctx, `INSERT INTO probe_results (provider, model, result, latency_ms, checked_at, history_key) VALUES ('p1', 'm', 'ok', ?, ?, ?)`, i, at.Format(time.RFC3339), key)
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	history, err := store.LoadHistory(ctx, 2, 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for key, records := range history {
+		if len(records) != 2 || records[0].LatencyMS != 1 || records[1].LatencyMS != 2 {
+			t.Fatalf("wrong history ordering for %s: %+v", key, records)
+		}
+	}
+	if len(history) != 2 {
+		t.Fatalf("missing history: %+v", history)
+	}
+}
+
+func TestHistoryUsesProbeTimestamp(t *testing.T) {
+	store := newTestSQLiteStore(t)
+	ctx := context.Background()
+	probedAt := time.Now().Add(-time.Hour).UTC().Truncate(time.Second)
+	result := probe.Result{ProviderID: "p1", Model: "m1", Status: "ok", HistoryKey: "p1::m1", CheckedAt: probedAt.Format(time.RFC3339)}
+	if err := store.AppendResults(ctx, []probe.Result{result}, time.Now(), 10); err != nil {
+		t.Fatal(err)
+	}
+	history, err := store.LoadHistory(ctx, 10, 7)
+	if err != nil || len(history["p1::m1"]) != 1 || history["p1::m1"][0].CheckedAt != result.CheckedAt {
+		t.Fatalf("lost probe time: %+v, %v", history, err)
+	}
+}
+
 func TestSQLiteStoreAppendAndLoadHistory(t *testing.T) {
 	store := newTestSQLiteStore(t)
 	checkedAt := time.Now().UTC()

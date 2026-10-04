@@ -47,9 +47,10 @@ type chatMessage struct {
 
 type chatResponse struct {
 	Choices []struct {
-		Message struct {
+		Message *struct {
 			Content string `json:"content"`
 		} `json:"message"`
+		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
 	Usage *struct {
 		PromptTokens     int `json:"prompt_tokens"`
@@ -192,9 +193,6 @@ func (p *OpenAICompatible) Chat(ctx context.Context, model, systemPrompt, prompt
 	if parseErr != nil {
 		return "", Usage{}, fmt.Errorf("parse chat response: %w", parseErr)
 	}
-	if len(parsed.Choices) == 0 {
-		return "", Usage{}, fmt.Errorf("empty choices")
-	}
 	usage := Usage{}
 	if parsed.Usage != nil {
 		usage.PromptTokens = parsed.Usage.PromptTokens
@@ -204,7 +202,21 @@ func (p *OpenAICompatible) Chat(ctx context.Context, model, systemPrompt, prompt
 			usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
 		}
 	}
-	return stripThinkingTags(parsed.Choices[0].Message.Content), usage, nil
+	if len(parsed.Choices) == 0 {
+		return "", usage, fmt.Errorf("empty choices")
+	}
+	choice := parsed.Choices[0]
+	if choice.Message == nil {
+		return "", usage, fmt.Errorf("missing completion message")
+	}
+	if choice.FinishReason == "length" {
+		return "", usage, fmt.Errorf("completion truncated by token limit")
+	}
+	text := stripThinkingTags(choice.Message.Content)
+	if text == "" {
+		return "", usage, fmt.Errorf("empty completion content")
+	}
+	return text, usage, nil
 }
 
 func (p *OpenAICompatible) authorize(req *http.Request) {

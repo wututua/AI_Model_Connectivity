@@ -124,7 +124,7 @@ func NewSQLite(ctx context.Context, databasePath, dataDir string) (*SQLiteStore,
 		return nil, err
 	}
 	// SQLite is single-writer; cap connections to 1 to avoid "database is locked".
-	// WAL mode still allows concurrent readers within the same connection pool.
+	// Reads also queue on this connection; WAL permits readers on other connections.
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
 	db.SetConnMaxLifetime(0)
@@ -142,6 +142,10 @@ func NewSQLite(ctx context.Context, databasePath, dataDir string) (*SQLiteStore,
 		return nil, err
 	}
 	if err := store.initUsage(ctx); err != nil {
+		db.Close()
+		return nil, err
+	}
+	if err := store.initUsers(ctx); err != nil {
 		db.Close()
 		return nil, err
 	}
@@ -278,8 +282,12 @@ func (s *SQLiteStore) LoadHistory(ctx context.Context, limitPerKey int, statsWin
 	if statsWindowDays <= 0 {
 		statsWindowDays = 1
 	}
-	cutoff := time.Now().Add(-time.Duration(statsWindowDays) * 24 * time.Hour).Format(time.RFC3339)
-	rows, err := s.db.QueryContext(ctx, `SELECT history_key, result, latency_ms, checked_at FROM probe_results WHERE checked_at >= ? ORDER BY history_key, checked_at ASC`, cutoff)
+	cutoff := time.Now().UTC().Add(-time.Duration(statsWindowDays) * 24 * time.Hour).Format(time.RFC3339)
+	rows, err := s.db.QueryContext(ctx, `SELECT history_key, result, latency_ms, checked_at FROM (
+		SELECT id, history_key, result, latency_ms, checked_at,
+		       ROW_NUMBER() OVER (PARTITION BY history_key ORDER BY julianday(checked_at) DESC, id DESC) AS row_number
+		FROM probe_results WHERE julianday(checked_at) >= julianday(?)
+	) WHERE row_number <= ? ORDER BY history_key, julianday(checked_at) ASC, id ASC`, cutoff, limitPerKey)
 	if err != nil {
 		return nil, err
 	}
@@ -296,11 +304,6 @@ func (s *SQLiteStore) LoadHistory(ctx context.Context, limitPerKey int, statsWin
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
-	}
-	for key, records := range history {
-		if len(records) > limitPerKey {
-			history[key] = records[len(records)-limitPerKey:]
-		}
 	}
 	return history, nil
 }
@@ -350,14 +353,14 @@ func (s *SQLiteStore) RecordCheck(ctx context.Context, results []probe.Result, c
 	}
 	defer stmt.Close()
 
-	checked := checkedAt.Format(time.RFC3339)
 	for _, result := range results {
+		checked := resultTime(result, checkedAt).Format(time.RFC3339)
 		if _, err := stmt.ExecContext(ctx, result.ProviderID, result.ProviderType, result.ProviderName, result.Model, result.Status, result.LatencyMS, checked, errorType(result), result.Error, result.ResponsePreview, result.HistoryKey, result.PromptTokens, result.CompletionTokens, result.TotalTokens); err != nil {
 			return err
 		}
 	}
-	cutoff := checkedAt.Add(-sqliteRetentionDays * 24 * time.Hour).Format(time.RFC3339)
-	if _, err := tx.ExecContext(ctx, `DELETE FROM probe_results WHERE checked_at < ?`, cutoff); err != nil {
+	cutoff := checkedAt.UTC().Add(-sqliteRetentionDays * 24 * time.Hour).Format(time.RFC3339)
+	if _, err := tx.ExecContext(ctx, `DELETE FROM probe_results WHERE julianday(checked_at) < julianday(?)`, cutoff); err != nil {
 		return err
 	}
 	if maxPerKey > 0 {
@@ -366,12 +369,19 @@ func (s *SQLiteStore) RecordCheck(ctx context.Context, results []probe.Result, c
 			keys[result.HistoryKey] = struct{}{}
 		}
 		for key := range keys {
-			if _, err := tx.ExecContext(ctx, `DELETE FROM probe_results WHERE history_key = ? AND id NOT IN (SELECT id FROM probe_results WHERE history_key = ? ORDER BY checked_at DESC, id DESC LIMIT ?)`, key, key, maxPerKey); err != nil {
+			if _, err := tx.ExecContext(ctx, `DELETE FROM probe_results WHERE history_key = ? AND id NOT IN (SELECT id FROM probe_results WHERE history_key = ? ORDER BY julianday(checked_at) DESC, id DESC LIMIT ?)`, key, key, maxPerKey); err != nil {
 				return err
 			}
 		}
 	}
 	return commit()
+}
+
+func resultTime(result probe.Result, fallback time.Time) time.Time {
+	if checkedAt, err := time.Parse(time.RFC3339, result.CheckedAt); err == nil {
+		return checkedAt.UTC()
+	}
+	return fallback.UTC()
 }
 
 func (s *SQLiteStore) LatestReport(ctx context.Context) (report.Report, error) {
@@ -572,6 +582,13 @@ func (s *SQLiteStore) CreateCheckTask(ctx context.Context, task CheckTask) (int6
 		return 0, err
 	}
 	return result.LastInsertId()
+}
+
+func (s *SQLiteStore) RecoverInterruptedTasks(ctx context.Context) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE check_tasks SET status = 'canceled', finished_at = ?,
+		error_message = 'interrupted by service restart' WHERE status = 'running'`,
+		time.Now().UTC().Format(time.RFC3339))
+	return err
 }
 
 func (s *SQLiteStore) FinishCheckTask(ctx context.Context, id int64, update CheckTaskUpdate) error {

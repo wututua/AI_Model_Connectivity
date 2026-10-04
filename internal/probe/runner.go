@@ -41,6 +41,7 @@ type Result struct {
 	PromptTokens         int    `json:"prompt_tokens"`
 	CompletionTokens     int    `json:"completion_tokens"`
 	TotalTokens          int    `json:"total_tokens"`
+	CheckedAt            string `json:"checked_at"`
 }
 
 type ProviderError struct {
@@ -88,7 +89,6 @@ func (r *Runner) collectTargets(ctx context.Context) ([]Target, []ProviderError)
 	targets := []Target{}
 	providerErrors := []ProviderError{}
 	seen := map[string]bool{}
-	skip := skipSet(r.cfg.SkipModels)
 
 	for _, item := range r.providers {
 		if ctx.Err() != nil {
@@ -106,18 +106,13 @@ func (r *Runner) collectTargets(ctx context.Context) ([]Target, []ProviderError)
 			providerErrors = append(providerErrors, ProviderError{ProviderID: item.ID(), ProviderType: item.Type(), Error: "no models returned"})
 			continue
 		}
-		if r.cfg.MaxModelsPerProvider > 0 && len(models) > r.cfg.MaxModelsPerProvider {
-			models = models[:r.cfg.MaxModelsPerProvider]
-		}
+		models = SelectModels(models, r.cfg.SkipModels, item.ID(), item.Name(), r.cfg.MaxModelsPerProvider)
 		current := ""
 		if len(models) > 0 {
 			current = models[0]
 		}
 		logo := provider.IconFor(item.ID(), item.Type(), item.Name())
 		for _, model := range models {
-			if isSkipped(skip, item.ID(), item.Name(), model) {
-				continue
-			}
 			key := item.ID() + "::" + model
 			if seen[key] {
 				continue
@@ -153,15 +148,15 @@ func (r *Runner) probeTargets(ctx context.Context, targets []Target) []Result {
 		go func(index int, target Target) {
 			defer wg.Done()
 			select {
-			case globalLimit <- struct{}{}:
-				defer func() { <-globalLimit }()
+			case providerLimits[target.ProviderID] <- struct{}{}:
+				defer func() { <-providerLimits[target.ProviderID] }()
 			case <-ctx.Done():
 				results[index] = resultPayload(target, "error", 0, "", shortError(ctx.Err()), provider.Usage{})
 				return
 			}
 			select {
-			case providerLimits[target.ProviderID] <- struct{}{}:
-				defer func() { <-providerLimits[target.ProviderID] }()
+			case globalLimit <- struct{}{}:
+				defer func() { <-globalLimit }()
 			case <-ctx.Done():
 				results[index] = resultPayload(target, "error", 0, "", shortError(ctx.Err()), provider.Usage{})
 				return
@@ -181,9 +176,9 @@ func (r *Runner) probeOne(ctx context.Context, target Target) Result {
 	latency := int(time.Since(started).Milliseconds())
 	if err != nil {
 		if errors.Is(probeCtx.Err(), context.DeadlineExceeded) {
-			return resultPayload(target, "error", latency, "", fmt.Sprintf("timeout after %gs", r.cfg.TimeoutSeconds), provider.Usage{})
+			return resultPayload(target, "error", latency, "", fmt.Sprintf("timeout after %gs", r.cfg.TimeoutSeconds), usage)
 		}
-		return resultPayload(target, "error", latency, "", shortError(err), provider.Usage{})
+		return resultPayload(target, "error", latency, "", shortError(err), usage)
 	}
 	status := "ok"
 	if latency >= r.cfg.SlowThresholdMS {
@@ -212,7 +207,24 @@ func resultPayload(target Target, status string, latency int, preview, errText s
 		PromptTokens:         usage.PromptTokens,
 		CompletionTokens:     usage.CompletionTokens,
 		TotalTokens:          usage.TotalTokens,
+		CheckedAt:            time.Now().UTC().Format(time.RFC3339),
 	}
+}
+
+// SelectModels applies exclusions before spending the per-provider probe budget.
+func SelectModels(models, exclusions []string, providerID, providerName string, limit int) []string {
+	skip := skipSet(exclusions)
+	selected := []string{}
+	for _, model := range dedupe(models) {
+		if isSkipped(skip, providerID, providerName, model) {
+			continue
+		}
+		selected = append(selected, model)
+		if limit > 0 && len(selected) >= limit {
+			break
+		}
+	}
+	return selected
 }
 
 func skipSet(items []string) map[string]bool {

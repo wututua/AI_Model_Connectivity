@@ -1,6 +1,6 @@
 # 开发指南
 
-> [项目主页](../README.md) · [文档索引](README.md) · [GitHub 仓库](https://github.com/wututua/AI_Model_Connectivity) · [CNB 仓库](https://cnb.cool/ligzs/AI_Model_Connectivity) · [仓库与发布](repositories.md)
+> [项目主页](../README.md) · [文档索引](README.md) · [GitHub 仓库](https://github.com/wututua/AI_Model_Connectivity)
 
 ## 1. 环境
 
@@ -36,6 +36,7 @@ cd frontend && npx tsc --noEmit
 | 包 | 职责边界 |
 |----|----------|
 | `internal/config` | 只做解析、模型定义与纯函数校验，不碰 IO 之外的业务 |
+| `internal/auth` | 用户名/密码校验、加盐密码哈希与验证 |
 | `internal/provider` | Provider 抽象；目前只有 OpenAI 兼容实现（`New` 的 switch 预留扩展点） |
 | `internal/probe` | 并发编排，不直接写库 |
 | `internal/report` | 纯函数式报告构建（输入配置+结果+历史，输出报告与新历史） |
@@ -51,23 +52,24 @@ cd frontend && npx tsc --noEmit
 
 | 包 | 重点 |
 |----|------|
-| `cmd/cg` | 取消检测不覆盖报告/不发告警；单 Provider 重跑失败保留其他 Provider；密钥轮换与并发一致性 |
+| `cmd/cg` | 取消检测不覆盖报告/不发告警；单 Provider 重跑失败保留其他 Provider；初始账号创建、旧 Token 迁移、重启不覆盖密码 |
+| `internal/auth` | 密码强度、大小写用户名归一化、哈希验证 |
 | `internal/config` | URL/Provider ID 校验、危险数值拒绝、管理配置不泄露通知凭据 |
 | `internal/httpclient` | 拨号前拒绝不安全地址、固定解析结果、DNS 变化后重查 |
 | `internal/notify` | 不跟随重定向、拒绝链路本地 webhook、冷却期不丢弃待发告警 |
 | `internal/probe` | 跳过规则、去重、截断、错误文本清理 |
 | `internal/provider` | 错误响应解析与凭据脱敏 |
 | `internal/report` | 合并 Provider、暂停/失败 Provider 空数组、错误可见性不污染入参 |
-| `internal/storage` | 最新报告/历史/通知状态/运行时配置/任务生命周期、用量在历史裁剪后仍保留、写入失败回滚、文件权限 |
-| `internal/web` | 公开监听判定、认证限流与过期、JSON 边界（空/多值/超限）、token 角色边界 |
+| `internal/storage` | 最新报告/历史/通知状态/配置/任务、用量保留、写入回滚、文件权限、最后管理员保护、会话过期/撤销、密码变更并发 |
+| `internal/web` | Cookie、CSRF、认证限流、JSON 边界、账号角色、强制初始改密、用户管理、REST/SSE 登录保护及会话撤销 |
 
-CI（`.github/workflows/ci.yml`）跑 `go vet`、`go test -race`、`tsc --noEmit`；发布工作流额外在 Windows 上跑测试、在 Linux 上跑竞态与容器验证。
+CI（`.github/workflows/ci.yml`）跑 `go vet`、`go test -race`、前端单元测试和构建；发布工作流在 Windows 上跑单元测试、在 Linux 上跑竞态测试，测试通过后才能构建发布产物。跨平台编译不等于在每个平台上执行测试。
 
 提交前建议：
 
 ```bash
 go vet ./... && go test ./... -race
-cd frontend && npx tsc --noEmit && npm run build && cd ..
+cd frontend && npm test && npm run build && cd ..
 ```
 
 ## 5. 前端开发约定
@@ -91,7 +93,5 @@ cd frontend && npx tsc --noEmit && npm run build && cd ..
 ## 7. 发布
 
 - 在 GitHub 上游仓库推送 `v*` tag 后，GitHub Actions 立即产出 6 平台压缩包、发布 GitHub Release，并推送 Docker Hub 多架构镜像。
-- CNB 仓库每天北京时间 01:00、09:00、17:00 从 GitHub 同步源码与 tag；新 tag 同步到 CNB 后触发测试、6 平台构建和 CNB Release。
-- CNB 也支持 `tag_deploy.release` 发布环境事件，执行与 `tag_push` 相同的二进制发布流程。
 - 前端产物 `web/` 已提交到仓库，发布包内自带，无需用户本地构建。
-- 双仓库定位、触发器与产物说明见 [repositories.md](repositories.md)。
+- 触发器与产物说明见 [部署指南](deployment.md#8-发布流水线)。

@@ -1,7 +1,12 @@
 package probe
 
 import (
+	"context"
+	"net/http"
+	"net/http/httptest"
 	"testing"
+
+	"cg/internal/config"
 )
 
 func TestIsSkipped(t *testing.T) {
@@ -115,5 +120,34 @@ func TestSkipSet(t *testing.T) {
 	}
 	if len(set) != 3 {
 		t.Errorf("expected 3 entries, got %d", len(set))
+	}
+}
+
+func TestModelLimitAfterExclusionAndCurrentModel(t *testing.T) {
+	runner := NewRunner(config.Config{
+		MaxModelsPerProvider: 1,
+		SkipModels:           []string{"Display/skip"},
+		Providers: []config.ProviderConfig{{
+			ID: "p1", Name: "Display", Enabled: true, ProbeEnabled: true,
+			Models: []string{"skip", " skip ", "chosen", "other"},
+		}},
+	})
+	targets, failures := runner.collectTargets(context.Background())
+	if len(failures) != 0 || len(targets) != 1 || targets[0].Model != "chosen" || targets[0].CurrentModel != "chosen" {
+		t.Fatalf("wrong selected targets: %+v, %+v", targets, failures)
+	}
+}
+
+func TestFailedCompletionPreservesUsageInResult(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`{"choices":[{"message":{"content":""}}],"usage":{"total_tokens":8}}`))
+	}))
+	defer server.Close()
+	runner := NewRunner(config.Config{
+		Providers: []config.ProviderConfig{{ID: "p1", Enabled: true, ProbeEnabled: true, BaseURL: server.URL, Models: []string{"m1"}}},
+	})
+	results, _, err := runner.Run(context.Background())
+	if err != nil || len(results) != 1 || results[0].Status != "error" || results[0].TotalTokens != 8 || results[0].CheckedAt == "" {
+		t.Fatalf("wrong failed probe result: %+v, %v", results, err)
 	}
 }

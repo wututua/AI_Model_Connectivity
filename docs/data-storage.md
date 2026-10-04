@@ -1,6 +1,6 @@
 # 数据存储
 
-> [项目主页](../README.md) · [文档索引](README.md) · [GitHub 仓库](https://github.com/wututua/AI_Model_Connectivity) · [CNB 仓库](https://cnb.cool/ligzs/AI_Model_Connectivity) · [仓库与发布](repositories.md)
+> [项目主页](../README.md) · [文档索引](README.md) · [GitHub 仓库](https://github.com/wututua/AI_Model_Connectivity)
 
 所有状态保存在单个 SQLite 文件（默认 `data/cg.sqlite`，驱动 `modernc.org/sqlite`，纯 Go 无 CGO）。
 
@@ -18,7 +18,7 @@ PRAGMA temp_store = MEMORY;
 PRAGMA mmap_size = 30000000;
 ```
 
-连接池 `SetMaxOpenConns(1)`：SQLite 单写者模型，串行化写入避免 `database is locked`；WAL 仍支持并发读。
+连接池 `SetMaxOpenConns(1)`：本进程读写均排队使用一个连接，避免多写入者争用；WAL 支持其他连接上的并发读取，但不会让此连接池内部的查询并行。
 
 ## 2. 表结构
 
@@ -29,9 +29,9 @@ PRAGMA mmap_size = 30000000;
 | `id` | 自增主键 |
 | `provider` / `provider_type` / `provider_name` | Provider 标识 |
 | `model` | 模型名 |
-| `result` | `ok` / `slow` / `error` |
+| `result` | `ok` / `slow` / `error` / `unknown`（发现失败导致未检测） |
 | `latency_ms` | 延迟 |
-| `checked_at` | RFC3339 时间 |
+| `checked_at` | 实际探测结束时间，UTC RFC3339；旧记录的时区偏移仍可读取 |
 | `error_type` | `timeout` / `dns` / `auth` / `rate_limit` / `server` / `unknown` |
 | `error_message`、`response_preview` | 错误与响应预览 |
 | `history_key` | `provider::model` |
@@ -55,14 +55,25 @@ PRAGMA mmap_size = 30000000;
 | key | 值 |
 |-----|-----|
 | `runtime` | `{"settings":…,"providers":[…]}` 完整运行时配置 |
-| `admin_stored_token` | 自动生成的管理密钥 |
-| `admin_token_first_use` | `true` / `false` |
-| `admin_view_token` | 只读分享密钥（空串表示未设置） |
 | `usage_daily_migrated` | 用量表迁移标记 |
+
+旧版管理/只读 Token KV 在首次迁移到账号系统时删除；新的登录凭据不再写入此表。
+
+### `users`
+
+`id` 自增主键，`username` 大小写不敏感且唯一；`password_hash` 保存加盐的 PBKDF2-SHA256 哈希；`role` 为 `admin` 或 `user`；另有 `enabled`、`must_change_password`、`created_at`。
+
+### `sessions`
+
+`token_hash` 主键，仅保存随机 Cookie 的 SHA-256 哈希；`user_id` 外键关联用户并级联删除；`csrf_token` 为会话 CSRF 校验值；`expires_at` 为 Unix 秒。按用户与过期时间建索引。
+
+每个账号最多保留 10 个会话，登录时清理过期记录；请求读取时也检查有效期与账号状态。修改账号或密码会在同一事务中撤销旧会话；最后一个启用管理员的保护也在事务内执行。
 
 ### `check_tasks`
 
 任务记录（字段见 [api.md](api.md#8-任务历史)），索引：`(started_at DESC)`、`(status)`、`(status, provider_id)`。
+
+服务启动时将遗留 `running` 任务改为 `canceled`，写入结束时间和重启中断原因。单 Provider 任务不统计合并报告中其他 Provider 的结果。
 
 ### `usage_daily`（按日用量聚合）
 
@@ -72,7 +83,7 @@ PRAGMA mmap_size = 30000000;
 
 `RecordCheck` 在一个事务内完成：
 
-1. 写 `usage_daily`（`ON CONFLICT` 累加，无论探测成功与否都计）；
+1. 写 `usage_daily`（`ON CONFLICT` 累加，实际调用无论成功与否都计，`unknown` 不计）；
 2. `ENABLE_HISTORY=true` 时批量插入 `probe_results`；
 3. 删除 90 天前记录（`sqliteRetentionDays`）；
 4. 按 `history_key` 保留最近 `MAX_HISTORY_RECORDS` 条；
@@ -83,7 +94,7 @@ PRAGMA mmap_size = 30000000;
 
 ## 4. 历史读取与裁剪
 
-- `LoadHistory(limitPerKey, statsWindowDays)`：只取 `checked_at >= now - statsWindowDays` 的记录，每 key 保留最近 `limitPerKey` 条（默认 `MAX_HISTORY_RECORDS`）。
+- `LoadHistory(limitPerKey, statsWindowDays)`：按时间戳代表的实际时刻过滤统计窗口，通过 SQL 窗口函数限制每 key 最近 `limitPerKey` 条（默认 `MAX_HISTORY_RECORDS`）；时间相同按自增 ID 排序。
 - `report.Build` 追加本次结果后再次按 `MaxHistoryRecords` 截断。
 - `pruneHistory` 按统计窗口裁剪，但若裁剪后少于 `HISTORY_SIZE`，会回退保留最近 `HISTORY_SIZE` 条，保证曲线和状态灯仍有足够数据点。
 
@@ -94,11 +105,13 @@ PRAGMA mmap_size = 30000000;
 | `avg_latency_24h` | 24h 内 `ok`/`slow` 样本算术平均 |
 | `p50/p95/p99_latency_24h` | 升序后 Type-7 线性插值分位数（同 numpy / Excel `PERCENTILE`） |
 | `latency_samples_24h` | 24h 内有效样本数 |
-| `weekly_success_text` / `availability` | `STATS_WINDOW_DAYS` 窗口内 `(ok+slow)/总数` |
+| `weekly_success_text` / `availability` | `STATS_WINDOW_DAYS` 窗口内 `(ok+slow)/(ok+slow+error+unknown)`，表示检测成功率，不是连续在线时长比例 |
 | `history` | 最近 `HISTORY_SIZE` 条状态，左侧补 `empty` |
 | `svg_path_line` / `svg_path_area` | 100×40 视图内归一化后的三次贝塞尔平滑曲线，峰值按 max(1000, 最大延迟) 归一 |
 
 历史被裁剪或关闭不影响 `usage_daily`，因此关闭历史后用量统计仍完整。
+
+回复为空、缺失消息或因 token 上限被截断时，探测记为失败，但保留上游返回的有效 usage；未返回 usage 的消耗仍无法估算。
 
 ## 6. 迁移
 
@@ -111,6 +124,8 @@ PRAGMA mmap_size = 30000000;
 | `data/notify_state.txt` | `notify_state`（支持纯文本与 JSON 两种格式） |
 
 `usage_daily` 首次初始化时由 `probe_results` 聚合回填一次，并用 `usage_daily_migrated` 标记避免重复。
+
+账号系统首次启动创建 `users`、`sessions`。用户表为空时，管理员密码优先取 `ADMIN_PASSWORD`；否则迁移符合新规则的旧管理 Token，不符合时生成新密码。创建初始管理员和删除旧 Token KV 在同一事务提交，所有初始账号要求首次改密。已有账号不因重启被重置。迁移前应备份，回滚须恢复旧数据库备份。
 
 > 用量只能迁移数据库中仍存在的记录，已删除或取消检测产生的实际消耗无法还原，因此该统计**不是**供应商账单。
 
@@ -132,4 +147,4 @@ sqlite3 data/cg.sqlite ".backup backup.sqlite"   # 需要 sqlite3 CLI
 cp -a data data.bak
 ```
 
-备份包含自动生成的管理密钥、只读分享密钥、Provider API Key 和通知凭据。这些敏感值以可供服务读取的形式保存，并未进行静态加密，请按第 7 节的要求保护。
+备份包含账号密码哈希、会话记录、Provider API Key 和通知凭据。密码不存明文，Provider API Key 与通知凭据没有静态加密，请按第 7 节保护备份。配置导出不包含用户、密码或会话，不能替代数据库备份。

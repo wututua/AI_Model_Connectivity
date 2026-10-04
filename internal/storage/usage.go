@@ -31,7 +31,7 @@ func (s *SQLiteStore) initUsage(ctx context.Context) error {
 		if _, err := tx.ExecContext(ctx, `INSERT INTO usage_daily
 			SELECT date(checked_at), provider, model, MAX(provider_name), MAX(provider_type),
 			SUM(prompt_tokens), SUM(completion_tokens), SUM(total_tokens), COUNT(*)
-			FROM probe_results WHERE date(checked_at) IS NOT NULL
+			FROM probe_results WHERE date(checked_at) IS NOT NULL AND result != 'unknown'
 			GROUP BY date(checked_at), provider, model`); err != nil {
 			return err
 		}
@@ -57,7 +57,10 @@ func appendUsage(ctx context.Context, tx *sql.Tx, results []probe.Result, checke
 	}
 	defer statement.Close()
 	for _, result := range results {
-		if _, err := statement.ExecContext(ctx, checkedAt.UTC().Format(time.DateOnly), result.ProviderID, result.Model,
+		if result.Status == "unknown" {
+			continue
+		}
+		if _, err := statement.ExecContext(ctx, resultTime(result, checkedAt).Format(time.DateOnly), result.ProviderID, result.Model,
 			result.ProviderName, result.ProviderType, result.PromptTokens, result.CompletionTokens, result.TotalTokens); err != nil {
 			return err
 		}

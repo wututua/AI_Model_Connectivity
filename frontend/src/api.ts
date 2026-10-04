@@ -9,67 +9,57 @@ import type {
   RuntimeSettings,
   SafeProviderConfig,
   ProviderUpdate,
+  ModelDiscoveryRequest,
+  AuthSession, User, UserInput,
 } from './types'
 
-const TOKEN_KEY = 'cg_admin_token'
+try { localStorage.removeItem('cg_admin_token') } catch { /* Storage may be disabled. */ }
+let csrfToken = ''
+export function applySession(session: AuthSession) { csrfToken = session.csrf_token }
 
-export function getToken(): string {
-  return localStorage.getItem(TOKEN_KEY) ?? ''
-}
-
-export function setToken(token: string) {
-  if (token) {
-    localStorage.setItem(TOKEN_KEY, token)
-  } else {
-    localStorage.removeItem(TOKEN_KEY)
-  }
-}
-
-function adminHeaders(): Record<string, string> {
-  const token = getToken()
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-  if (token) headers['Authorization'] = `Bearer ${token}`
-  return headers
-}
-
-async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+async function request<T>(method: string, path: string, body?: unknown, silentAuth = false, signal?: AbortSignal): Promise<T> {
   const res = await fetch(path, {
     method,
-    headers: adminHeaders(),
+    credentials: 'same-origin',
+    signal,
+    headers: { 'Content-Type': 'application/json', ...(method !== 'GET' && csrfToken ? { 'X-CSRF-Token': csrfToken } : {}) },
     body: body != null ? JSON.stringify(body) : undefined,
   })
-  return decodeResponse<T>(res)
+  return decodeResponse<T>(res, silentAuth)
 }
 
-async function decodeResponse<T>(res: Response): Promise<T> {
+async function decodeResponse<T>(res: Response, silentAuth = false): Promise<T> {
   const data = await res.json().catch(() => null)
-  if (res.status === 401 && location.pathname.startsWith('/admin')) {
-    setToken('')
+  if (res.status === 401 && !silentAuth) {
+    csrfToken = ''
     window.dispatchEvent(new Event('cg:unauthorized'))
   }
+  if (res.status === 403 && data?.code === 'password_change_required') window.dispatchEvent(new Event('cg:session-refresh'))
   if (!res.ok) throw new Error((data as { error?: string } | null)?.error ?? `HTTP ${res.status}`)
   if (data === null) throw new Error('Invalid JSON response')
   return data as T
 }
 
+async function sessionRequest(method: string, path: string, body?: unknown): Promise<AuthSession> {
+  return request<AuthSession>(method, path, body, path.endsWith('/login'))
+}
+
 export const api = {
+  session: () => sessionRequest('GET', '/api/auth/session'),
+  login: (username: string, password: string) => sessionRequest('POST', '/api/auth/login', { username, password }),
+  logout: async () => { await request('POST', '/api/auth/logout'); csrfToken = '' },
+  changePassword: (current_password: string, password: string) => sessionRequest('POST', '/api/auth/password', { current_password, password }),
+  users: () => request<User[]>('GET', '/api/admin/users'),
+  createUser: (value: UserInput) => request<User>('POST', '/api/admin/users', value),
+  updateUser: (id: number, value: UserInput) => request<User>('PUT', `/api/admin/users/${id}`, value),
+  deleteUser: (id: number) => request('DELETE', `/api/admin/users/${id}`),
   status: (): Promise<Report> =>
-    fetch('/api/status').then(decodeResponse<Report>),
+    request<Report>('GET', '/api/status'),
 
   detection: (): Promise<RunningState> =>
     request<RunningState>('GET', '/api/admin/detection'),
-  changeToken: (token: string): Promise<void> =>
-    request('POST', '/api/admin/token', { token }),
-  getViewToken: (): Promise<{ ok: boolean; token: string }> =>
-    request('GET', '/api/admin/view-token'),
-  rotateViewToken: (token?: string): Promise<{ ok: boolean; token: string }> =>
-    request('POST', '/api/admin/view-token', token ? { token } : {}),
-  revokeViewToken: (): Promise<{ ok: boolean }> =>
-    request('DELETE', '/api/admin/view-token'),
   startDetection: (): Promise<unknown> =>
     request('POST', '/api/admin/detection/start'),
-  stopDetection: (): Promise<unknown> =>
-    request('POST', '/api/admin/detection/stop'),
   triggerCheck: (): Promise<unknown> =>
     request('POST', '/api/admin/check'),
 
@@ -80,6 +70,8 @@ export const api = {
 
   providers: (): Promise<SafeProviderConfig[]> =>
     request<SafeProviderConfig[]>('GET', '/api/admin/providers'),
+  discoverModels: (query: ModelDiscoveryRequest, signal?: AbortSignal): Promise<string[]> =>
+    request<string[]>('POST', '/api/admin/provider-models', query, false, signal),
   createProvider: (p: ProviderUpdate): Promise<SafeProviderConfig> =>
     request<SafeProviderConfig>('POST', '/api/admin/providers', p),
   updateProvider: (id: string, p: ProviderUpdate): Promise<SafeProviderConfig> =>
@@ -89,12 +81,12 @@ export const api = {
   rerunProvider: (id: string): Promise<unknown> =>
     request('POST', `/api/admin/providers/${encodeURIComponent(id)}/rerun`),
 
-  tasks: (params?: { limit?: number; offset?: number; status?: string }): Promise<CheckTask[]> => {
+  tasks: (params?: { limit?: number; offset?: number; status?: string }, signal?: AbortSignal): Promise<CheckTask[]> => {
     const qs = new URLSearchParams()
     if (params?.limit) qs.set('limit', String(params.limit))
     if (params?.offset) qs.set('offset', String(params.offset))
     if (params?.status) qs.set('status', params.status)
-    return request<CheckTask[]>('GET', `/api/admin/tasks?${qs}`)
+    return request<CheckTask[]>('GET', `/api/admin/tasks?${qs}`, undefined, false, signal)
   },
 
   billing: (days = 30): Promise<BillingSummary> =>

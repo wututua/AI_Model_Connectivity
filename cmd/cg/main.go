@@ -2,16 +2,14 @@ package main
 
 import (
 	"context"
-	crand "crypto/rand"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"log/slog"
 	mathrand "math/rand"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -41,16 +39,16 @@ func main() {
 		}
 		return
 	}
-	if web.IsPublicBindHost(baseCfg.AppHost) && strings.TrimSpace(baseCfg.AdminToken) == "" {
-		slog.Error("public bind requires ADMIN_TOKEN to be explicitly configured")
-		os.Exit(1)
-	}
 	store, err := storage.NewSQLite(context.Background(), baseCfg.DatabasePath, baseCfg.DataDir)
 	if err != nil {
 		slog.Error("open database", "err", err)
 		os.Exit(1)
 	}
 	defer store.Close()
+	if err := store.RecoverInterruptedTasks(context.Background()); err != nil {
+		slog.Error("recover interrupted tasks", "err", err)
+		os.Exit(1)
+	}
 	runtimeCfg, ok, err := store.LoadRuntimeConfig(context.Background())
 	if err != nil {
 		slog.Error("load runtime config", "err", err)
@@ -78,7 +76,7 @@ func main() {
 	}
 	app := &application{baseCfg: baseCfg, cfg: cfg, store: store, broker: broker, metrics: metrics.New(), schedulerWake: make(chan struct{}, 1)}
 
-	if err := app.initializeTokens(context.Background()); err != nil {
+	if err := app.initializeUsers(context.Background()); err != nil {
 		slog.Error("initialize authentication", "err", err)
 		os.Exit(1)
 	}
@@ -100,8 +98,11 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	var background sync.WaitGroup
 	if cfg.AutoCheckRunOnStart {
+		background.Add(1)
 		go func() {
+			defer background.Done()
 			if _, err := app.checkWithOptions(ctx, checkOptions{Kind: "startup", SaveLatest: true}); err != nil {
 				if errors.Is(err, web.ErrCheckAlreadyRunning) {
 					slog.Warn("startup check skipped", "err", err)
@@ -111,11 +112,16 @@ func main() {
 			}
 		}()
 	}
-	go app.scheduler(ctx)
+	background.Add(1)
+	go func() {
+		defer background.Done()
+		app.scheduler(ctx)
+	}()
 
 	srv := web.NewServer(cfg, store, app.check, broker, app)
 	srv.SetMetrics(app.metrics)
 	server := srv.HTTPServer()
+	server.BaseContext = func(net.Listener) context.Context { return ctx }
 	serverErr := make(chan error, 1)
 	go func() {
 		serverErr <- server.ListenAndServe()
@@ -128,9 +134,11 @@ func main() {
 			os.Exit(1)
 		}
 	case <-ctx.Done():
-		app.StopCheck()
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
+		if err := app.shutdown(shutdownCtx); err != nil {
+			slog.Error("wait for active check", "err", err)
+		}
 		if err := server.Shutdown(shutdownCtx); err != nil && !errors.Is(err, context.DeadlineExceeded) {
 			slog.Error("shutdown server", "err", err)
 			os.Exit(1)
@@ -142,6 +150,16 @@ func main() {
 		if err := <-serverErr; err != nil && !errors.Is(err, http.ErrServerClosed) {
 			slog.Error("server error", "err", err)
 			os.Exit(1)
+		}
+		backgroundDone := make(chan struct{})
+		go func() {
+			background.Wait()
+			close(backgroundDone)
+		}()
+		select {
+		case <-backgroundDone:
+		case <-shutdownCtx.Done():
+			slog.Warn("background shutdown timed out")
 		}
 	}
 }
@@ -155,15 +173,13 @@ type application struct {
 	schedulerWake  chan struct{}
 	mu             sync.RWMutex
 	configMu       sync.Mutex
-	tokenMu        sync.Mutex
 	running        bool
 	runCancel      context.CancelFunc
+	runDone        chan struct{}
+	shuttingDown   bool
 	taskID         int64
 	taskKind       string
 	taskProviderID string
-	adminToken     string
-	adminFirstUse  bool
-	viewToken      string
 }
 
 type checkOptions struct {
@@ -190,6 +206,25 @@ func (a *application) StopCheck() bool {
 	return true
 }
 
+func (a *application) shutdown(ctx context.Context) error {
+	a.mu.Lock()
+	a.shuttingDown = true
+	done := a.runDone
+	if a.runCancel != nil {
+		a.runCancel()
+	}
+	a.mu.Unlock()
+	if done == nil {
+		return nil
+	}
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 func (a *application) RunningState() web.RunningState {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
@@ -201,66 +236,11 @@ func (a *application) RunningState() web.RunningState {
 		ProviderID:                a.taskProviderID,
 		AutoCheckIntervalMinHours: cfg.AutoCheckIntervalMinHours,
 		AutoCheckIntervalMaxHours: cfg.AutoCheckIntervalMaxHours,
-		FirstUse:                  a.adminFirstUse,
 	}
 }
 
 func (a *application) AdminConfig(context.Context) (config.AdminConfig, error) {
 	return config.AdminConfigFromConfig(a.currentConfig()), nil
-}
-
-func (a *application) AdminToken() string {
-	a.mu.RLock()
-	defer a.mu.RUnlock()
-	return a.adminToken
-}
-
-func (a *application) ChangeAdminToken(ctx context.Context, newToken string) error {
-	a.tokenMu.Lock()
-	defer a.tokenMu.Unlock()
-	if a.currentConfig().AdminToken != "" {
-		return errors.New("ADMIN_TOKEN is configured externally; update the environment or .env and restart")
-	}
-	if err := config.ValidateToken(newToken); err != nil {
-		return err
-	}
-	if newToken == a.ViewToken() {
-		return errors.New("admin token and view token must differ")
-	}
-	if err := a.store.SetKVs(ctx, map[string]string{"admin_stored_token": newToken, "admin_token_first_use": "false"}); err != nil {
-		return err
-	}
-	a.mu.Lock()
-	a.adminToken = newToken
-	a.adminFirstUse = false
-	a.mu.Unlock()
-	return nil
-}
-
-func (a *application) ViewToken() string {
-	a.mu.RLock()
-	defer a.mu.RUnlock()
-	return a.viewToken
-}
-
-func (a *application) ChangeViewToken(ctx context.Context, newToken string) error {
-	a.tokenMu.Lock()
-	defer a.tokenMu.Unlock()
-	if newToken != "" {
-		if err := config.ValidateToken(newToken); err != nil {
-			return err
-		}
-		if newToken == a.AdminToken() {
-			return errors.New("admin token and view token must differ")
-		}
-	}
-	if err := a.store.SetKV(ctx, "admin_view_token", newToken); err != nil {
-		return err
-	}
-	a.mu.Lock()
-	a.viewToken = newToken
-	a.mu.Unlock()
-	return nil
 }
 
 func (a *application) UpdateSettings(ctx context.Context, settings config.RuntimeSettings) (config.AdminConfig, error) {
@@ -370,11 +350,8 @@ func (a *application) ReloadConfig(ctx context.Context) (config.AdminConfig, err
 		return config.AdminConfig{}, err
 	}
 	current := a.currentConfig()
-	if loaded.AppHost != current.AppHost || loaded.AppPort != current.AppPort || loaded.WebDir != current.WebDir || loaded.DatabasePath != current.DatabasePath || loaded.DataDir != current.DataDir || loaded.AdminToken != current.AdminToken {
-		return config.AdminConfig{}, errors.New("changes to listening address, paths or ADMIN_TOKEN require a restart")
-	}
-	if web.IsPublicBindHost(loaded.AppHost) && loaded.AdminToken == "" {
-		return config.AdminConfig{}, errors.New("public bind requires an explicitly configured ADMIN_TOKEN")
+	if loaded.AppHost != current.AppHost || loaded.AppPort != current.AppPort || loaded.WebDir != current.WebDir || loaded.DatabasePath != current.DatabasePath || loaded.DataDir != current.DataDir || loaded.SecureCookies != current.SecureCookies {
+		return config.AdminConfig{}, errors.New("changes to listening address, paths or SECURE_COOKIES require a restart")
 	}
 	runtimeCfg, ok, err := a.store.LoadRuntimeConfig(ctx)
 	if err != nil {
@@ -396,6 +373,7 @@ func (a *application) ReloadConfig(ctx context.Context) (config.AdminConfig, err
 	a.cfg = cfg
 	a.mu.Unlock()
 	a.wakeScheduler()
+	a.publishLatest(ctx)
 	return config.AdminConfigFromConfig(cfg), nil
 }
 
@@ -428,7 +406,22 @@ func (a *application) replaceRuntimeConfig(ctx context.Context, value config.Run
 	a.cfg = cfg
 	a.mu.Unlock()
 	a.wakeScheduler()
+	a.publishLatest(ctx)
 	return nil
+}
+
+func (a *application) publishLatest(ctx context.Context) {
+	if a.broker == nil {
+		return
+	}
+	value, err := a.store.LatestReport(ctx)
+	if err != nil {
+		slog.Warn("load report for settings update", "err", err)
+		return
+	}
+	if value.GeneratedAt != "" {
+		a.broker.Publish(report.WithErrorVisibility(value, a.currentConfig().ShowErrorDetail))
+	}
 }
 
 func (a *application) wakeScheduler() {
@@ -446,6 +439,11 @@ func (a *application) checkWithOptions(ctx context.Context, options checkOptions
 	runCtx, cancel := context.WithCancel(ctx)
 
 	a.mu.Lock()
+	if a.shuttingDown {
+		a.mu.Unlock()
+		cancel()
+		return report.Report{}, web.ErrShuttingDown
+	}
 	if a.running {
 		a.mu.Unlock()
 		cancel()
@@ -453,14 +451,15 @@ func (a *application) checkWithOptions(ctx context.Context, options checkOptions
 	}
 	a.running = true
 	a.runCancel = cancel
+	a.runDone = make(chan struct{})
 	a.taskKind = options.Kind
 	a.taskProviderID = options.ProviderID
 	a.mu.Unlock()
+	defer a.finishRunState()
+	defer cancel()
 
-	taskID, err := a.store.CreateCheckTask(ctx, storage.CheckTask{Kind: options.Kind, Status: "running", ProviderID: options.ProviderID, StartedAt: started.Format(time.RFC3339)})
+	taskID, err := a.store.CreateCheckTask(runCtx, storage.CheckTask{Kind: options.Kind, Status: "running", ProviderID: options.ProviderID, StartedAt: started.UTC().Format(time.RFC3339)})
 	if err != nil {
-		a.finishRunState()
-		cancel()
 		return report.Report{}, err
 	}
 	a.mu.Lock()
@@ -479,24 +478,28 @@ func (a *application) checkWithOptions(ctx context.Context, options checkOptions
 		}
 		errorMessage = runErr.Error()
 	}
-	if err := a.store.FinishCheckTask(context.Background(), taskID, storage.CheckTaskUpdate{
+	update := storage.CheckTaskUpdate{
 		Status:            status,
 		FinishedAt:        finished,
 		ElapsedMS:         int(finished.Sub(started).Milliseconds()),
-		OKCount:           value.OKCount,
-		SlowCount:         value.SlowCount,
-		ErrorCount:        value.ErrorCount,
-		Total:             value.Total,
 		ErrorMessage:      errorMessage,
 		ReportGeneratedAt: value.GeneratedAt,
-	}); err != nil {
+	}
+	for _, group := range value.Providers {
+		if options.ProviderID != "" && group.ProviderID != options.ProviderID {
+			continue
+		}
+		update.OKCount += group.OKCount
+		update.SlowCount += group.SlowCount
+		update.ErrorCount += group.ErrorCount
+	}
+	update.Total = update.OKCount + update.SlowCount + update.ErrorCount
+	if err := a.store.FinishCheckTask(context.Background(), taskID, update); err != nil {
 		slog.Error("finish check task failed", "err", err)
 	}
 	if a.metrics != nil {
 		a.metrics.RecordCheck(options.Kind, status, finished.Sub(started).Seconds())
 	}
-	a.finishRunState()
-	cancel()
 	return value, runErr
 }
 
@@ -507,6 +510,10 @@ func (a *application) finishRunState() {
 	a.taskID = 0
 	a.taskKind = ""
 	a.taskProviderID = ""
+	if a.runDone != nil {
+		close(a.runDone)
+		a.runDone = nil
+	}
 	a.mu.Unlock()
 }
 
@@ -525,6 +532,14 @@ func (a *application) runCheck(ctx context.Context, options checkOptions) (repor
 	if err != nil {
 		return report.Report{}, err
 	}
+	var previous report.Report
+	if len(providerErrors) > 0 || options.ProviderID != "" && options.SaveLatest {
+		previous, err = a.store.LatestReport(ctx)
+		if err != nil {
+			return report.Report{}, fmt.Errorf("load latest report: %w", err)
+		}
+		results = report.WithDiscoveryGaps(cfg, results, providerErrors, previous)
+	}
 	history := map[string][]report.HistoryRecord{}
 	if cfg.EnableHistory {
 		loaded, loadErr := a.store.LoadHistory(ctx, cfg.MaxHistoryRecords, cfg.StatsWindowDays)
@@ -536,16 +551,14 @@ func (a *application) runCheck(ctx context.Context, options checkOptions) (repor
 	}
 	value, _ := report.Build(cfg, results, providerErrors, history, started)
 	if options.ProviderID != "" && options.SaveLatest {
-		latest, latestErr := a.store.LatestReport(ctx)
-		if latestErr != nil {
-			slog.Warn("load latest report for provider rerun failed", "err", latestErr)
-		} else {
-			value = report.MergeProvider(latest, value, options.ProviderID)
-		}
+		value = report.MergeProvider(previous, value, options.ProviderID)
 	}
+	value = report.WithErrorVisibility(value, a.currentConfig().ShowErrorDetail)
 	if a.metrics != nil {
 		for _, result := range results {
-			a.metrics.RecordProbe(result)
+			if result.Status != "unknown" {
+				a.metrics.RecordProbe(result)
+			}
 		}
 	}
 	var latest *report.Report
@@ -559,7 +572,8 @@ func (a *application) runCheck(ctx context.Context, options checkOptions) (repor
 		if a.broker != nil {
 			a.broker.Publish(value)
 		}
-		if err := notify.New(cfg, storage.SQLiteNotifyStateStore{Store: a.store}).SendIfNeeded(ctx, value); err != nil {
+		notifyCfg := a.currentConfig()
+		if err := notify.New(notifyCfg, storage.SQLiteNotifyStateStore{Store: a.store}).SendIfNeeded(ctx, report.WithErrorVisibility(value, notifyCfg.ShowErrorDetail)); err != nil {
 			slog.Warn("send notify failed", "err", err)
 		}
 	}
@@ -592,14 +606,10 @@ func (a *application) scheduler(ctx context.Context) {
 				slog.Error("scheduled check failed", "err", err)
 			}
 		case <-a.schedulerWake:
-			if !timer.Stop() {
-				<-timer.C
-			}
+			timer.Stop()
 			continue
 		case <-ctx.Done():
-			if !timer.Stop() {
-				<-timer.C
-			}
+			timer.Stop()
 			return
 		}
 	}
@@ -655,14 +665,6 @@ func intervalRange(cfg config.Config) (float64, float64, bool) {
 		minHours, maxHours = maxHours, minHours
 	}
 	return minHours, maxHours, maxHours > 0
-}
-
-func generateAdminToken() (string, error) {
-	buf := make([]byte, 18)
-	if _, err := crand.Read(buf); err != nil {
-		return "", fmt.Errorf("generate admin token: %w", err)
-	}
-	return base64.RawURLEncoding.EncodeToString(buf), nil
 }
 
 func healthcheck(port int) error {

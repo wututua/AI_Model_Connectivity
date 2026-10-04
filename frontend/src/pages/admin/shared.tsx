@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
-import { Activity, AlertCircle, Loader2 } from 'lucide-react'
+import { Activity, AlertCircle, CheckCircle2, Loader2 } from 'lucide-react'
 import type { RuntimeSettings, SafeProviderConfig } from '../../types'
 import { cn } from '../../lib/utils'
 import { STATUS_LABEL, statusClass } from '../../utils/status'
@@ -8,6 +8,7 @@ import { Badge } from '../../components/ui/badge'
 import { Button, type ButtonProps } from '../../components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card'
 import { Label } from '../../components/ui/label'
+import { Skeleton } from '../../components/ui/skeleton'
 
 export function useAutoMsg(delay = 3000) {
   const [message, setMessageState] = useState('')
@@ -51,11 +52,18 @@ export function Feedback({ message }: { message: string }) {
   if (!message) return null
   const error = message.startsWith('错误') || message.startsWith('加载失败') || message.startsWith('修改失败')
   return (
-    <Alert variant={error ? 'destructive' : 'success'}>
-      <AlertCircle />
+    <Alert variant={error ? 'destructive' : 'success'} role={error ? 'alert' : 'status'} className="animate-enter">
+      {error ? <AlertCircle /> : <CheckCircle2 />}
       <AlertDescription>{message}</AlertDescription>
     </Alert>
   )
+}
+
+export function ListSkeleton({ label }: { label: string }) {
+  return <div role="status" aria-label={label} className="space-y-4 py-4">
+    <span className="sr-only">{label}</span>
+    {Array.from({ length: 4 }, (_, index) => <div key={index} className="flex items-center gap-3"><Skeleton className="size-9 shrink-0" /><div className="min-w-0 flex-1 space-y-2"><Skeleton className="h-4 w-2/3" /><Skeleton className="h-3 w-1/3" /></div><Skeleton className="h-6 w-14" /></div>)}
+  </div>
 }
 
 export function PageHeading({ title, description, actions }: { title: string; description: string; actions?: ReactNode }) {
@@ -76,6 +84,7 @@ export function fmtNum(value: number): string {
 export function normalizeSettings(settings: RuntimeSettings): RuntimeSettings {
   return {
     ...settings,
+    status_login_required: settings.status_login_required ?? false,
     notify_webhook_url: settings.notify_webhook_url ?? '',
     notify_telegram_bot_token: settings.notify_telegram_bot_token ?? '',
     notify_telegram_chat_id: settings.notify_telegram_chat_id ?? '',

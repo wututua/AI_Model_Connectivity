@@ -1,24 +1,125 @@
 package web
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"cg/internal/auth"
 	"cg/internal/config"
+	"cg/internal/probe"
 	"cg/internal/report"
 	"cg/internal/storage"
 )
 
 // stubAdmin satisfies AdminController with no-op implementations.
-type stubAdmin struct {
-	token     string
-	viewToken string
+type stubAdmin struct{}
+
+type visibilityAdmin struct {
+	stubAdmin
+	show atomic.Bool
+	fail atomic.Bool
+}
+
+func (a *visibilityAdmin) AdminConfig(context.Context) (config.AdminConfig, error) {
+	if a.fail.Load() {
+		return config.AdminConfig{}, errors.New("config unavailable")
+	}
+	return config.AdminConfig{Settings: config.RuntimeSettings{ShowErrorDetail: a.show.Load()}}, nil
+}
+
+func sensitiveReport() report.Report {
+	return report.Report{
+		GeneratedAt:    time.Now().UTC().Format(time.RFC3339),
+		Providers:      []report.ProviderReport{{ProviderID: "p1", Results: []report.ModelResult{{Result: probe.Result{Error: "private-model"}}}}},
+		ProviderErrors: []probe.ProviderError{{ProviderID: "p1", Error: "private-provider"}},
+	}
+}
+
+func TestStatusAppliesCurrentVisibilityToOldReport(t *testing.T) {
+	srv, store := newTestServer(t)
+	admin := &visibilityAdmin{}
+	srv.admin = admin
+	if err := store.SaveLatestReport(context.Background(), sensitiveReport()); err != nil {
+		t.Fatal(err)
+	}
+	for _, show := range []bool{true, false, true} {
+		admin.show.Store(show)
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/status", nil))
+		if strings.Contains(rec.Body.String(), "private-") != show || rec.Header().Get("Cache-Control") != "no-store" {
+			t.Fatalf("visibility=%v, body=%s", show, rec.Body)
+		}
+	}
+	admin.fail.Store(true)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/status", nil))
+	if strings.Contains(rec.Body.String(), "private-") {
+		t.Fatal("failed config lookup exposed details")
+	}
+}
+
+func TestSSEAppliesCurrentVisibilityToInitialAndPublishedReports(t *testing.T) {
+	srv, store := newTestServer(t)
+	admin := &visibilityAdmin{}
+	srv.admin = admin
+	value := sensitiveReport()
+	if err := store.SaveLatestReport(context.Background(), value); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(srv.Handler())
+	defer server.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/api/events", nil)
+	res, err := server.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	scanner := bufio.NewScanner(res.Body)
+	readEvent := func(show bool) {
+		t.Helper()
+		for scanner.Scan() {
+			if strings.HasPrefix(scanner.Text(), "data:") {
+				if strings.Contains(scanner.Text(), "private-") != show {
+					t.Fatalf("visibility=%v, event=%s", show, scanner.Text())
+				}
+				return
+			}
+		}
+		t.Fatalf("missing SSE event: %v", scanner.Err())
+	}
+	readEvent(false)
+	admin.show.Store(true)
+	srv.broker.Publish(value)
+	readEvent(true)
+	admin.show.Store(false)
+	srv.broker.Publish(value)
+	readEvent(false)
+	if value.ProviderErrors[0].Error == "" || value.Providers[0].Results[0].Error == "" {
+		t.Fatal("SSE modified shared report")
+	}
+}
+
+func TestBrokerReplacesPendingReportWithNewest(t *testing.T) {
+	broker := NewBroker()
+	updates, unsubscribe := broker.Subscribe()
+	defer unsubscribe()
+	broker.Publish(report.Report{Title: "old"})
+	broker.Publish(report.Report{Title: "new"})
+	if value := <-updates; value.Title != "new" {
+		t.Fatal("slow subscriber received stale report")
+	}
 }
 
 func TestPublicBindDetection(t *testing.T) {
@@ -38,8 +139,8 @@ func TestAuthenticationFailureRateLimit(t *testing.T) {
 	srv, _ := newTestServer(t)
 	handler := srv.Handler()
 	for attempt := 0; attempt <= authFailureLimit; attempt++ {
-		req := httptest.NewRequest(http.MethodGet, "/api/admin/config", nil)
-		req.Header.Set("Authorization", "Bearer wrong")
+		req := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(`{"username":"admin","password":"Wrong123"}`))
+		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("X-Forwarded-For", "203.0.113.99")
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
@@ -51,9 +152,9 @@ func TestAuthenticationFailureRateLimit(t *testing.T) {
 			t.Fatalf("attempt %d: got %d, want %d", attempt, rec.Code, want)
 		}
 	}
-	req := httptest.NewRequest(http.MethodGet, "/api/admin/config", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(`{"username":"admin","password":"TestPass1"}`))
 	req.RemoteAddr = "203.0.113.1:4321"
-	req.Header.Set("Authorization", "Bearer secret")
+	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -77,7 +178,7 @@ func TestAuthenticationLimitExpires(t *testing.T) {
 
 func TestAdminJSONBoundary(t *testing.T) {
 	srv, _ := newTestServer(t)
-	for _, path := range []string{"/api/admin/token", "/api/admin/view-token", "/api/admin/config/import", "/api/admin/providers"} {
+	for _, path := range []string{"/api/auth/password", "/api/admin/users", "/api/admin/config/import", "/api/admin/providers"} {
 		for _, test := range []struct {
 			body   string
 			status int
@@ -89,7 +190,7 @@ func TestAdminJSONBoundary(t *testing.T) {
 			{`{"token":`, http.StatusBadRequest},
 		} {
 			req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(test.body))
-			req.Header.Set("Authorization", "Bearer secret")
+			authenticateTestRequest(req, false)
 			rec := httptest.NewRecorder()
 			srv.Handler().ServeHTTP(rec, req)
 			if rec.Code != test.status {
@@ -113,6 +214,9 @@ func (stubAdmin) UpdateSettings(context.Context, config.RuntimeSettings) (config
 func (stubAdmin) UpsertProvider(context.Context, string, config.ProviderUpdate) (config.SafeProviderConfig, error) {
 	return config.SafeProviderConfig{}, nil
 }
+func (stubAdmin) DiscoverModels(context.Context, config.ModelDiscoveryRequest) ([]string, error) {
+	return []string{"test-model"}, nil
+}
 func (stubAdmin) DeleteProvider(context.Context, string) error { return nil }
 func (stubAdmin) ExportConfig(context.Context) (config.ConfigExport, error) {
 	return config.ConfigExport{}, nil
@@ -129,10 +233,6 @@ func (stubAdmin) ListTasks(context.Context, storage.TaskQuery) ([]storage.CheckT
 func (stubAdmin) GetTask(context.Context, int64) (storage.CheckTask, error) {
 	return storage.CheckTask{}, nil
 }
-func (s stubAdmin) AdminToken() string                           { return s.token }
-func (stubAdmin) ChangeAdminToken(context.Context, string) error { return nil }
-func (s stubAdmin) ViewToken() string                            { return s.viewToken }
-func (stubAdmin) ChangeViewToken(context.Context, string) error  { return nil }
 
 func newTestServer(t *testing.T) (*Server, *storage.SQLiteStore) {
 	t.Helper()
@@ -142,11 +242,37 @@ func newTestServer(t *testing.T) (*Server, *storage.SQLiteStore) {
 		t.Fatalf("new sqlite store: %v", err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	cfg := config.Config{AdminToken: "secret", AppHost: "127.0.0.1", AppPort: 8080}
+	hashOnce.Do(func() { testPasswordHash, _ = auth.HashPassword("TestPass1") })
+	for _, role := range []string{"admin", "user"} {
+		user, err := store.CreateUser(context.Background(), storage.User{Username: role, Role: role, Enabled: true, PasswordHash: testPasswordHash}, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := store.CreateSession(context.Background(), user, testSessionToken(role == "user"), "test-csrf", time.Now().Add(time.Hour)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cfg := config.Config{AppHost: "127.0.0.1", AppPort: 8080}
 	srv := NewServer(cfg, store, func(context.Context) (report.Report, error) {
 		return report.Report{}, nil
-	}, nil, stubAdmin{token: "secret"})
+	}, nil, stubAdmin{})
 	return srv, store
+}
+
+var hashOnce sync.Once
+var testPasswordHash string
+
+func testSessionToken(readOnly bool) string {
+	if readOnly {
+		return strings.Repeat("u", 43)
+	}
+	return strings.Repeat("a", 43)
+}
+
+func authenticateTestRequest(r *http.Request, readOnly bool) {
+	r.AddCookie(&http.Cookie{Name: sessionCookie, Value: testSessionToken(readOnly)})
+	r.Header.Set("X-CSRF-Token", "test-csrf")
+	r.Header.Set("Content-Type", "application/json")
 }
 
 func TestHealthEndpoint(t *testing.T) {
@@ -194,70 +320,68 @@ func TestStatusEndpointWithReport(t *testing.T) {
 	}
 }
 
-func TestAdminEndpointRequiresToken(t *testing.T) {
+func TestAdminEndpointRequiresSession(t *testing.T) {
 	srv, _ := newTestServer(t)
 	rec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/admin/config", nil))
 	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("expected 401 without token, got %d", rec.Code)
+		t.Fatalf("expected 401 without session, got %d", rec.Code)
 	}
 }
 
-func TestAdminEndpointAcceptsToken(t *testing.T) {
+func TestAdminEndpointAcceptsSession(t *testing.T) {
 	srv, _ := newTestServer(t)
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/config", nil)
-	req.Header.Set("Authorization", "Bearer secret")
+	authenticateTestRequest(req, false)
 	rec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200 with valid token, got %d", rec.Code)
+		t.Fatalf("expected 200 with valid session, got %d", rec.Code)
 	}
 }
 
-func TestViewTokenCannotReadSensitiveConfig(t *testing.T) {
+func TestOrdinaryUserCannotReadSensitiveConfig(t *testing.T) {
 	srv, _ := newTestServer(t)
-	srv.admin = stubAdmin{token: "secret", viewToken: "view-only"}
 	for _, path := range []string{"/api/admin/config", "/api/admin/config/export"} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
-		req.Header.Set("Authorization", "Bearer view-only")
+		authenticateTestRequest(req, true)
 		rec := httptest.NewRecorder()
 		srv.Handler().ServeHTTP(rec, req)
 		if rec.Code != http.StatusForbidden {
-			t.Fatalf("expected view token to be rejected for %s, got %d", path, rec.Code)
+			t.Fatalf("expected ordinary user to be rejected for %s, got %d", path, rec.Code)
 		}
 	}
 }
 
-func TestViewTokenRejectsShortToken(t *testing.T) {
+func TestNewUserRejectsWeakPassword(t *testing.T) {
 	srv, _ := newTestServer(t)
-	req := httptest.NewRequest(http.MethodPost, "/api/admin/view-token", strings.NewReader(`{"token":"short"}`))
-	req.Header.Set("Authorization", "Bearer secret")
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/users", strings.NewReader(`{"username":"newuser","password":"short","role":"user","enabled":true}`))
+	authenticateTestRequest(req, false)
 	rec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, req)
 	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected short view token to be rejected, got %d", rec.Code)
+		t.Fatalf("expected weak password to be rejected, got %d", rec.Code)
 	}
 }
 
-func TestViewTokenRoleAndMutationBoundary(t *testing.T) {
+func TestOrdinaryUserRoleAndMutationBoundary(t *testing.T) {
 	server, _ := newTestServer(t)
-	server.admin = stubAdmin{token: "secret", viewToken: "view-only"}
 	handler := server.Handler()
-	for _, path := range []string{"/api/admin/check", "/api/admin/detection/start", "/api/admin/detection/stop", "/api/admin/providers/p1/rerun", "/api/admin/token", "/api/admin/view-token", "/api/admin/config/reload", "/api/admin/config/import"} {
+	for _, path := range []string{"/api/admin/check", "/api/admin/detection/start", "/api/admin/detection/stop", "/api/admin/providers/p1/rerun", "/api/admin/users", "/api/admin/config/reload", "/api/admin/config/import"} {
 		request := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{}`))
-		request.Header.Set("Authorization", "Bearer view-only")
+		authenticateTestRequest(request, true)
 		response := httptest.NewRecorder()
 		handler.ServeHTTP(response, request)
 		if response.Code != http.StatusForbidden {
-			t.Errorf("view token mutation %s: %d", path, response.Code)
+			t.Errorf("ordinary user mutation %s: %d", path, response.Code)
 		}
 	}
 	request := httptest.NewRequest(http.MethodGet, "/api/admin/detection", nil)
-	request.Header.Set("Authorization", "Bearer view-only")
+	authenticateTestRequest(request, true)
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	var state RunningState
-	if err := json.Unmarshal(response.Body.Bytes(), &state); err != nil || !state.ReadOnly || state.FirstUse {
+	if err := json.Unmarshal(response.Body.Bytes(), &state); err != nil || !state.ReadOnly {
 		t.Fatalf("wrong read-only session: %+v, %v", state, err)
 	}
 }

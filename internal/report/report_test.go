@@ -39,6 +39,62 @@ func TestMergeProviderPreservesOtherProviders(t *testing.T) {
 	}
 }
 
+func TestReportTimestampsAndProviderFreshness(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	cfg := config.Config{HistorySize: 10, MaxHistoryRecords: 100, StatsWindowDays: 7, AutoCheckIntervalMaxHours: 12}
+	value, history := Build(cfg, []probe.Result{
+		{ProviderID: "p1", Model: "m1", HistoryKey: "p1::m1", Status: "ok", CheckedAt: now.Format(time.RFC3339)},
+		{ProviderID: "p1", Model: "m2", HistoryKey: "p1::m2", Status: "slow", CheckedAt: now.Add(-time.Minute).Format(time.RFC3339)},
+	}, nil, nil, now)
+	if _, err := time.Parse(time.RFC3339, value.GeneratedAt); err != nil {
+		t.Fatalf("ambiguous generated_at: %q", value.GeneratedAt)
+	}
+	if value.Providers[0].CheckedAt != now.Format(time.RFC3339) || history["p1::m2"][0].CheckedAt != now.Add(-time.Minute).Format(time.RFC3339) {
+		t.Fatal("report discarded actual probe timestamps")
+	}
+	if value.StaleAfterSeconds < 12*3600 {
+		t.Fatal("report becomes stale before next scheduled check")
+	}
+	update, _ := Build(cfg, []probe.Result{{ProviderID: "p2", Model: "m3", Status: "ok"}}, nil, nil, now)
+	merged := MergeProvider(value, update, "p2")
+	if merged.Providers[0].CheckedAt != value.Providers[0].CheckedAt {
+		t.Fatal("partial rerun refreshed untouched provider")
+	}
+}
+
+func TestErrorVisibilityDoesNotMutateSource(t *testing.T) {
+	original := Report{
+		Providers:      []ProviderReport{{Results: []ModelResult{{Result: probe.Result{Error: "private-model"}}}}},
+		ProviderErrors: []probe.ProviderError{{Error: "private-provider"}},
+	}
+	hidden := WithErrorVisibility(original, false)
+	if hidden.ProviderErrors[0].Error != "" || hidden.Providers[0].Results[0].Error != "" {
+		t.Fatal("details were not hidden")
+	}
+	if original.ProviderErrors[0].Error == "" || original.Providers[0].Results[0].Error == "" {
+		t.Fatal("redaction mutated shared report")
+	}
+}
+
+func TestDiscoveryGapsRespectConfiguredSelection(t *testing.T) {
+	cfg := config.Config{
+		Providers:  []config.ProviderConfig{{ID: "p1", Enabled: true, ProbeEnabled: true}},
+		SkipModels: []string{"skip"}, MaxModelsPerProvider: 1,
+	}
+	previous := Report{Providers: []ProviderReport{
+		{ProviderID: "p1", Results: []ModelResult{{Result: probe.Result{Model: "skip"}}, {Result: probe.Result{Model: "keep"}}, {Result: probe.Result{Model: "other"}}}},
+		{ProviderID: "removed", Results: []ModelResult{{Result: probe.Result{Model: "m1"}}}},
+	}}
+	failures := []probe.ProviderError{{ProviderID: "p1", Error: "discovery failed"}, {ProviderID: "removed"}}
+	results := WithDiscoveryGaps(cfg, nil, failures, previous)
+	if len(results) != 1 || results[0].Model != "keep" || results[0].Status != "unknown" || results[0].HistoryKey != "p1::keep" || !results[0].IsCurrent {
+		t.Fatalf("wrong discovery gaps: %+v", results)
+	}
+	if len(WithDiscoveryGaps(cfg, nil, failures, Report{})) != 0 {
+		t.Fatal("first failure invented model history")
+	}
+}
+
 func TestFailedAndPausedProvidersHaveEmptyResultArrays(t *testing.T) {
 	cfg := config.Config{Providers: []config.ProviderConfig{
 		{ID: "failed", Enabled: true, ProbeEnabled: true},

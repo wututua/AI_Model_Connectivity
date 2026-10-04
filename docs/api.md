@@ -1,39 +1,47 @@
 # HTTP API 参考
 
-> [项目主页](../README.md) · [文档索引](README.md) · [GitHub 仓库](https://github.com/wututua/AI_Model_Connectivity) · [CNB 仓库](https://cnb.cool/ligzs/AI_Model_Connectivity) · [仓库与发布](repositories.md)
+> [项目主页](../README.md) · [文档索引](README.md) · [GitHub 仓库](https://github.com/wututua/AI_Model_Connectivity)
 
 基础路径默认为 `http://127.0.0.1:8080`。所有响应为 UTF-8 JSON；受认证接口额外返回 `Cache-Control: no-store`。
 
 ## 1. 认证
 
-```
-Authorization: Bearer <ADMIN_TOKEN 或 只读分享密钥>
-```
+使用账号密码登录，服务端设置 `cg_session` Cookie（HttpOnly、SameSite=Strict、24 小时有效）。不再接受 Bearer Token。
 
-- 管理密钥：全部 `/api/admin/*`。
-- 只读密钥：仅 `GET /api/admin/detection`、`GET /api/admin/providers`、`GET /api/admin/tasks`、`GET /api/admin/tasks/{id}`、`GET /api/admin/billing`、`GET /metrics`。
-- 只读密钥访问写接口返回 `403`（不计入失败限流）。
-- 同一来源 IP 一分钟内 10 次认证失败后返回 `429`，响应带 `Retry-After`（秒）。
+- 管理员（`admin`）：全部管理接口。
+- 普通用户（`user`）：可读取 detection、providers、tasks、billing、metrics，并修改自己的密码；不能修改任何共享配置或管理其他账号。
+- `POST/PUT/DELETE` 等受认证写请求必须携带登录或 session 响应中的 `X-CSRF-Token`；浏览器请求还会检查来源。
+- 密码至少 8 位，包含大写字母、小写字母和数字；不强制特殊字符，最多 1024 字节。
+- 同一来源 IP 一分钟内 10 次未成功的密码验证尝试后返回 `429`，响应带 `Retry-After`（秒）；密码验证还有全局并发限制。
+
+```bash
+# 以下是 Bash 示例；初始密码需先通过 /api/auth/password 修改。
+curl -c cookies.txt -H 'Content-Type: application/json' \
+  -d '{"username":"admin","password":"<当前密码>"}' \
+  http://127.0.0.1:8080/api/auth/login
+# 将响应中的 csrf_token 赋给 CSRF。会话 Cookie 文件应限制权限。
+```
 
 ## 2. 错误码
 
 | 状态码 | 场景 |
 |--------|------|
 | 400 | 请求体非法、参数校验失败 |
-| 401 | 未认证或密钥错误 |
-| 403 | 只读密钥访问写接口 / 公网监听未配置 `ADMIN_TOKEN` |
+| 401 | 未登录、账号密码错误或会话失效 |
+| 403 | 权限不足、CSRF/来源校验失败或需要修改初始密码 |
 | 404 | `/api/status` 尚无报告；`/metrics` 未启用；任务不存在 |
 | 405 | 方法不允许 |
-| 409 | 已有检测任务运行（body: `check already running`） |
+| 409 | 已有检测任务运行（body: `check already running`）或账号已并发变更 |
 | 413 | 请求体超过 1 MiB |
+| 415 | 登录请求未使用 `application/json` |
 | 429 | 认证失败限流 |
 | 500 | 服务端错误 |
 
-错误体统一为 `{"ok": false, "error": "..."}`。
+错误体包含 `error`。强制改密返回 `{"error":"请先修改初始密码","code":"password_change_required"}`；认证依赖暂时不可用返回 `503`。
 
 ---
 
-## 3. 公开接口
+## 3. 状态与静态接口
 
 ### `GET /health`
 
@@ -45,13 +53,13 @@ Authorization: Bearer <ADMIN_TOKEN 或 只读分享密钥>
 
 ### `GET /api/status`
 
-返回最新 `Report`。无报告时返回 `404` + `{"ok":false,"error":"no report available"}`，前端展示空态并引导手动触发检测。
+返回最新 `Report`。`status_login_required=true` 时需要已完成初始改密的普通用户或管理员会话，否则允许匿名读取。无报告时返回 `404` + `{"ok":false,"error":"no report available"}`。
 
 ### `GET /api/events`（SSE）
 
-`Content-Type: text/event-stream`。连接建立后先补发一次最新报告，之后每次检测完成推送 `data: <Report JSON>\n\n`，每 25 秒发送 `: keep-alive`。
+`Content-Type: text/event-stream`。访问策略与 `/api/status` 相同。连接建立后先补发一次最新报告，之后每次检测完成推送 `data: <Report JSON>\n\n`，每 5 秒发送 `: keep-alive`。发送报告和心跳前重新校验权限；会话失效或匿名访问被关闭时发送 `event: auth-required` 并断开。
 
-### `GET /`、`GET /admin`
+### `GET /`、`GET /admin`、`GET /login`
 
 Web 静态资源。非 `/api/` 且磁盘上无对应文件的路径回退到 `index.html`，交给前端路由。
 
@@ -69,19 +77,18 @@ Web 静态资源。非 `/api/` 且磁盘上无对应文件的路径回退到 `in
   "provider_id": "",
   "auto_check_interval_min_hours": 6,
   "auto_check_interval_max_hours": 12,
-  "first_use": false,
   "read_only": false
 }
 ```
 
-前端用它做登录校验：`401` 停留在密钥输入页，`first_use=true` 强制改密，`read_only=true` 隐藏写操作标签页。
+`read_only=true` 表示普通用户。登录状态与初始改密要求由 `/api/auth/session` 返回。
 
 ### `POST /api/admin/detection/start`、`POST /api/admin/check`
 
 触发一次全量检测，**同步执行**（服务端上下文超时 30 分钟），返回 `{"ok":true,"report":{...}}`。已有任务运行时返回 `409`。
 
 ```bash
-curl -X POST -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8080/api/admin/check
+curl -X POST -b cookies.txt -H "X-CSRF-Token: $CSRF" http://127.0.0.1:8080/api/admin/check
 ```
 
 ### `POST /api/admin/detection/stop`
@@ -90,19 +97,30 @@ curl -X POST -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8080/api/admin/c
 
 ---
 
-## 5. 密钥管理
+## 5. 账号与用户管理
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| `POST` | `/api/admin/token` | `{"token":"新密钥"}`，16–256 位；外部已配置 `ADMIN_TOKEN` 时拒绝 |
-| `GET` | `/api/admin/view-token` | 返回 `{"ok":true,"token":"..."}`，未设置为空串 |
-| `POST` | `/api/admin/view-token` | 设置/轮换只读密钥；空 body 或空 token 时后端生成 16 字节随机值 |
-| `DELETE` | `/api/admin/view-token` | 吊销只读密钥，立即失效 |
+| `GET` | `/api/auth/session` | 返回当前会话；匿名时 `user=null`，仍返回状态页访问策略 |
+| `POST` | `/api/auth/login` | `{"username":"admin","password":"..."}`；返回会话并设置 Cookie |
+| `POST` | `/api/auth/logout` | 注销当前会话并清除 Cookie |
+| `POST` | `/api/auth/password` | `{"current_password":"...","password":"..."}`；吊销该用户旧会话并签发新会话 |
+| `GET` | `/api/admin/users` | 仅管理员，返回 `User[]` |
+| `POST` | `/api/admin/users` | 仅管理员，创建用户，返回 `User` |
+| `PUT` | `/api/admin/users/{id}` | 仅管理员，修改用户/重置密码并吊销其会话 |
+| `DELETE` | `/api/admin/users/{id}` | 仅管理员，删除用户并吊销其会话 |
+
+会话响应：`{"user":User|null,"csrf_token":"...","expires_at":Unix秒,"status_login_required":false}`。
+`User` 字段：`id`、`username`、`role`（`admin`/`user`）、`enabled`、`must_change_password`、`created_at`；不会返回密码或密码哈希。
+
+创建与修改用户请求：`{"username":"viewer","password":"Viewer123","role":"user","enabled":true}`。用户名为 3–32 位 ASCII 字母、数字、点、下划线或短横线，字母/数字开头，忽略大小写。修改时密码留空表示不变。初始密码与管理员重置密码均要求用户首次登录后修改。
+
+不能在用户管理中修改或删除当前账号，也不能禁用、删除或降级最后一个启用的管理员。个人改密使用 `/api/auth/password`。
 
 ```bash
-curl -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-  -d '{}' http://127.0.0.1:8080/api/admin/view-token
-# {"ok":true,"token":"xxxx..."}
+curl -X POST -b cookies.txt -H "X-CSRF-Token: $CSRF" -H 'Content-Type: application/json' \
+  -d '{"username":"viewer","password":"Viewer123","role":"user","enabled":true}' \
+  http://127.0.0.1:8080/api/admin/users
 ```
 
 ---
@@ -115,19 +133,20 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/jso
 
 ### `PUT /api/admin/settings`
 
-请求完整 `RuntimeSettings`，返回更新后的 `AdminConfig`。
+请求完整 `RuntimeSettings`，返回更新后的 `AdminConfig`。`status_login_required` 控制监控页是否要求登录，保存后立即生效。
 
 ```bash
-curl -X PUT -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-  -d '{"slow_threshold_ms":1200,"timeout_seconds":30,"concurrency":4,"provider_concurrency":2,"notify_platform":"dingtalk","notify_webhook_url":"https://oapi.dingtalk.com/robot/send?access_token=xxx"}' \
+# settings.json 应来自当前 config 响应的 settings，修改需要变更的字段后完整提交。
+curl -X PUT -b cookies.txt -H "X-CSRF-Token: $CSRF" -H 'Content-Type: application/json' \
+  --data-binary @settings.json \
   http://127.0.0.1:8080/api/admin/settings
 ```
 
 ### `GET /api/admin/config/export`、`POST /api/admin/config/import`、`POST /api/admin/config/reload`
 
-- 导出：`{"settings":…,"providers":[…]}`，不含 API Key 与通知凭据。
+- 导出：`{"settings":…,"providers":[…]}`，不含 API Key 与通知凭据，也不包含用户、密码和会话。
 - 导入：`{"settings":…,"providers":[ProviderUpdate…]}`。
-- 重载：重读 `.env`，成功后异步触发一次检测；监听地址/路径/`ADMIN_TOKEN` 变更会被拒绝。
+- 重载：重读 `.env`，成功后异步触发一次检测；监听地址、路径和 `SECURE_COOKIES` 变更会被拒绝。不会重置已有账号密码。
 
 ---
 
@@ -140,9 +159,14 @@ curl -X PUT -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json
 | `PUT` | `/api/admin/providers/{id}` | 修改（`api_key` 空保留，`clear_api_key` 清除） |
 | `DELETE` | `/api/admin/providers/{id}` | 删除 |
 | `POST` | `/api/admin/providers/{id}/rerun` | 单独重跑（同步，30 分钟超时） |
+| `POST` | `/api/admin/provider-models` | 仅管理员，读取编辑草稿对应的上游模型列表，不保存配置、不触发探测 |
+
+模型同步请求为 `{"provider_id":"已保存的ID，可省略","type":"openai","base_url":"https://example.test/v1","api_key":"","clear_api_key":false}`，返回模型 ID 数组。新 Provider 可不传 `provider_id`，无需先保存。已有 Provider 的 `api_key` 留空时复用存储的 Key；若同时变更 Base URL，必须重新填写 Key 或显式清除，避免把旧凭据发送到新地址。
+
+同步使用现有安全 HTTP 客户端，调用 `{base_url}/models`，超时为 `model_list_timeout_seconds` 且最多 30 秒。该接口同样要求会话与 CSRF，不返回凭据；前端只在保存 Provider 时提交选定的 `models`。
 
 ```bash
-curl -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+curl -X POST -b cookies.txt -H "X-CSRF-Token: $CSRF" -H 'Content-Type: application/json' \
   -d '{"id":"ollama-local","name":"Ollama","type":"ollama","base_url":"http://127.0.0.1:11434/v1","models":["llama3.1"],"enabled":true,"probe_enabled":true}' \
   http://127.0.0.1:8080/api/admin/providers
 ```
@@ -161,6 +185,10 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/jso
 
 `CheckTask` 字段：`id`、`kind`（manual/scheduled/startup/provider）、`status`（running/success/error/canceled）、`provider_id`、`started_at`、`finished_at`、`elapsed_ms`、`ok_count`、`slow_count`、`error_count`、`total`、`error_message`、`report_generated_at`。
 
+任务 `total` 只统计本任务实际执行的模型探测，不包含单 Provider 重测时保留的其他 Provider 结果，也不包含发现失败产生的 `unknown` 样本。服务重启后遗留的 `running` 任务会标记为 `canceled`。
+
+报告额外提供 `unknown_count`、`stale_after_seconds` 和 Provider/模型级 `checked_at`。`generated_at` 与 `checked_at` 为带时区的 RFC3339 时间；公开报告和 SSE 始终按当前 `show_error_detail` 设置过滤错误详情。
+
 ---
 
 ## 9. 用量统计
@@ -170,7 +198,7 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/jso
 `days` 默认 30、上限 365，返回 `BillingSummary`：`range_days`、`range_start`、`range_end`、`total_*`、`per_model[]`、`daily[]`。统计按 UTC 自然日，最多保留 365 天。
 
 ```bash
-curl -H "Authorization: Bearer $TOKEN" 'http://127.0.0.1:8080/api/admin/billing?days=7'
+curl -b cookies.txt 'http://127.0.0.1:8080/api/admin/billing?days=7'
 ```
 
 ---
@@ -179,7 +207,7 @@ curl -H "Authorization: Bearer $TOKEN" 'http://127.0.0.1:8080/api/admin/billing?
 
 ### `GET /metrics`（只读可用）
 
-需携带认证头。未通过 `SetMetrics` 启用时返回 `404`。指标清单见 [operations.md](operations.md#2-prometheus-指标)。
+需有效会话 Cookie，即使监控页公开也需要登录。未通过 `SetMetrics` 启用时返回 `404`。旧版静态 Bearer 抓取不再可用，见 [operations.md](operations.md#2-prometheus-指标)。
 
 ---
 
@@ -187,12 +215,11 @@ curl -H "Authorization: Bearer $TOKEN" 'http://127.0.0.1:8080/api/admin/billing?
 
 - 上限 1 MiB，超限返回 `413`。
 - 必须是单个 JSON 对象；多个 JSON 值或顶层非对象返回 `400`。
-- `/api/admin/view-token` 的 `POST` 允许空 body。
 
 ## 12. 数据结构
 
 字段为 snake_case，与 `frontend/src/types.ts` 完全对应：
 
-`Report`、`ProviderReport`、`ModelResult`、`ProviderError`、`RunningState`、`RuntimeSettings`、`SafeProviderConfig`、`ProviderUpdate`、`AdminConfig`、`CheckTask`、`ConfigExport`、`ConfigImport`、`BillingSummary`。
+`Report`、`ProviderReport`、`ModelResult`、`ProviderError`、`RunningState`、`RuntimeSettings`、`SafeProviderConfig`、`ProviderUpdate`、`AdminConfig`、`CheckTask`、`ConfigExport`、`ConfigImport`、`BillingSummary`、`User`、`UserInput`、`AuthSession`。
 
 完整字段说明与 TS 定义见 [backend-api.md](backend-api.md)。

@@ -35,7 +35,7 @@ export function useTheme() {
     const next: Theme = theme === 'dark' ? 'light' : theme === 'light' ? 'auto' : 'dark'
     const doApply = () => applyTheme(next)
 
-    if ('startViewTransition' in document) {
+    if ('startViewTransition' in document && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
       ;(document as unknown as { startViewTransition: (cb: () => void) => unknown })
         .startViewTransition(doApply)
     } else {

@@ -1,4 +1,5 @@
 export interface ModelResult {
+  checked_at?: string
   provider_id: string
   provider_name: string
   provider_type: string
@@ -27,6 +28,8 @@ export interface ModelResult {
 }
 
 export interface ProviderReport {
+  checked_at?: string
+  unknown_count?: number
   provider_id: string
   provider_type: string
   provider_name: string
@@ -48,6 +51,8 @@ export interface ProviderError {
 }
 
 export interface Report {
+  unknown_count?: number
+  stale_after_seconds?: number
   title: string
   generated_at: string
   elapsed_ms: number
@@ -75,11 +80,34 @@ export interface RunningState {
   provider_id: string
   auto_check_interval_min_hours: number
   auto_check_interval_max_hours: number
-  first_use: boolean
   read_only: boolean
 }
 
+export interface User {
+  id: number
+  username: string
+  role: 'admin' | 'user'
+  enabled: boolean
+  must_change_password: boolean
+  created_at: string
+}
+
+export interface AuthSession {
+  user: User | null
+  csrf_token: string
+  expires_at: number
+  status_login_required: boolean
+}
+
+export interface UserInput {
+  username: string
+  password: string
+  role: User['role']
+  enabled: boolean
+}
+
 export interface RuntimeSettings {
+  status_login_required: boolean
   dashboard_title: string
   timeout_seconds: number
   model_list_timeout_seconds: number
@@ -136,6 +164,14 @@ export interface ProviderUpdate {
   models: string[]
   enabled: boolean
   probe_enabled: boolean
+}
+
+export interface ModelDiscoveryRequest {
+  provider_id?: string
+  type: string
+  base_url: string
+  api_key: string
+  clear_api_key: boolean
 }
 
 export interface AdminConfig {

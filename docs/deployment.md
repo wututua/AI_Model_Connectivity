@@ -1,6 +1,6 @@
 # 部署指南
 
-> [项目主页](../README.md) · [文档索引](README.md) · [GitHub 仓库](https://github.com/wututua/AI_Model_Connectivity) · [CNB 仓库](https://cnb.cool/ligzs/AI_Model_Connectivity) · [仓库与发布](repositories.md)
+> [项目主页](../README.md) · [文档索引](README.md) · [GitHub 仓库](https://github.com/wututua/AI_Model_Connectivity)
 
 ## 1. 前置要求
 
@@ -15,11 +15,12 @@
 
 ```bash
 mkdir -p data
-export ADMIN_TOKEN='至少16位的随机字符串'
+export ADMIN_USERNAME=admin
+export ADMIN_PASSWORD='<设置至少8位且含大写、小写字母和数字的密码>'
 docker compose up -d
 ```
 
-- 镜像内 `APP_HOST=0.0.0.0`，Compose 会在 `ADMIN_TOKEN` 缺失时直接报错（`${ADMIN_TOKEN:?...}`）。
+- 镜像内 `APP_HOST=0.0.0.0`。未提供初始密码时会生成并打印到启动日志，首次登录要求修改。
 - 数据卷 `./data:/app/data` 持久化 SQLite。
 - 健康检查：容器内执行 `model-connectivity healthcheck`（30s 间隔，start_period 10s）。
 
@@ -41,7 +42,7 @@ docker build -t model-connectivity:local .
 
 ```bash
 docker run -d -p 8080:8080 \
-  -e ADMIN_TOKEN \
+  -e ADMIN_USERNAME -e ADMIN_PASSWORD \
   -e PROVIDER_1_ID=openai \
   -e PROVIDER_1_BASE_URL=https://api.openai.com/v1 \
   -e PROVIDER_1_API_KEY=sk-xxx \
@@ -57,8 +58,8 @@ GitHub Actions 会把多架构镜像推送到 `<DOCKERHUB_USERNAME>/model-connec
 
 ## 4. 二进制部署
 
-1. 从 [GitHub Releases](https://github.com/wututua/AI_Model_Connectivity/releases) 或 [CNB Releases](https://cnb.cool/ligzs/AI_Model_Connectivity/-/releases) 下载对应平台压缩包并解压（内含 `model-connectivity`、`.env.example`、`README.md`、`web/`）。
-2. `cp .env.example .env` 并填写 Provider 与 `ADMIN_TOKEN`。
+1. 从 [GitHub Releases](https://github.com/wututua/AI_Model_Connectivity/releases) 下载对应平台压缩包并解压（内含平台命名的二进制、`.env.example`、`README.md`、`web/`）。
+2. `cp .env.example .env` 并填写 Provider 与初始管理员 `ADMIN_USERNAME` / `ADMIN_PASSWORD`（也可使用启动日志生成的密码）。
 3. 启动：`./model-connectivity`（Windows：`model-connectivity.exe`）。
 
 常用子命令：
@@ -100,13 +101,14 @@ SSE 需要禁用缓冲（以 Nginx 为例）：
 location / {
     proxy_pass http://127.0.0.1:8080;
     proxy_http_version 1.1;
-    proxy_set_header Host $host;
+    proxy_set_header Host $http_host;
     proxy_set_header X-Real-IP $remote_addr;
 }
 
 location /api/events {
     proxy_pass http://127.0.0.1:8080;
     proxy_http_version 1.1;
+    proxy_set_header Host $http_host;
     proxy_set_header Connection '';
     proxy_buffering off;
     proxy_cache off;
@@ -118,7 +120,8 @@ location /api/events {
 注意事项：
 
 - 应用**不信任**客户端 `X-Forwarded-For`，认证限流以连接来源 IP 为准；反向代理后的用户会共享代理 IP 的限额。若要按真实 IP 限流，请在受信任的代理层实现。
-- 建议强制 HTTPS 并为 `Authorization` 头保密。
+- 正式部署应强制 HTTPS，设置 `SECURE_COOKIES=true` 后重启，并为密码、Cookie 与 CSRF 值保密。纯 HTTP 本地预览保持 false。
+- 代理必须保留原始 Host（含端口），否则同源校验会拒绝浏览器写请求。不要缓存 `/api/`；登录状态依赖同源 Cookie。
 - 后端已返回 `X-Accel-Buffering: no`，Nginx 会据此关闭缓冲。
 
 ## 7. 升级与回滚
@@ -126,23 +129,20 @@ location /api/events {
 1. 备份 `data/`（含 SQLite 与 WAL）。
 2. 替换二进制或镜像 tag，重启。
 3. 首次启动日志出现 `server started` 且 `/health` 返回 `{"ok":true}` 即成功。
-4. 回滚：恢复旧二进制 + 旧 `data/`；数据库 schema 变更是向后兼容的 `ALTER TABLE ADD COLUMN`。
+4. 旧版本升级账号系统：符合密码规则的旧管理 Token 迁移为初始管理员密码，否则生成新密码并打印到日志；首次登录必须改密。
+5. 旧 Bearer 和只读分享密钥停止工作；为只读访问者创建普通用户。Prometheus 抓取也需改为维护有效登录会话。
+6. 回滚：恢复旧二进制 + 升级前一致性数据库备份。账号迁移会删除旧 Token KV，不能只替换旧二进制。
+
+`ADMIN_PASSWORD` 不会重置已存在的管理员；日常密码维护使用账户安全或其他管理员的用户管理页面。
 
 ## 8. 发布流水线
-
-### CNB（`.cnb.yml`）
-
-- `tag_push` 与 `tag_deploy.release` 触发：单元测试 → 构建前端 → 6 个平台交叉编译（linux/windows/darwin × amd64/arm64）→ 打包（tar.gz / zip）→ 发布 CNB Release。
-- `main` 分支每日 UTC 01:00、09:00、17:00（北京时间 09:00、17:00、次日 01:00）从 GitHub 同步源码与 tag，tag 同步后自动触发发版。
-- 后端构建复用 Go module/build 缓存，前端只构建一次并由各平台任务复用。
-- CNB 当前发布二进制压缩包，不推送容器镜像。完整的双仓库与触发关系见 [repositories.md](repositories.md)。
 
 ### GitHub Actions
 
 | 工作流 | 触发 | 内容 |
 |--------|------|------|
-| `ci.yml` | push / PR（排除 `v*` tag） | `go vet`、`go test -race`、前端 `tsc --noEmit` |
-| `release.yml` | tag `v*` / main / 手动 | 前端构建、6 平台二进制构建与测试；打 tag 时发布 Release，tag 或 `main` 推送 Docker Hub 多架构镜像。具体测试和容器校验步骤以对应仓库的 workflow 文件为准 |
+| `ci.yml` | push / PR（排除 `v*` tag） | `go vet`、`go test -race`、前端单元测试和构建 |
+| `release.yml` | tag `v*` / main / 手动 | Linux 竞态测试、Windows 单元测试、前端单元测试和构建通过后，允许 6 平台交叉编译与镜像发布；打 tag 时发布 Release，tag 或 `main` 推送 Docker Hub 多架构镜像 |
 
 ## 9. 容量与性能建议
 

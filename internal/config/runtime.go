@@ -11,6 +11,7 @@ import (
 )
 
 type RuntimeSettings struct {
+	StatusLoginRequired         bool     `json:"status_login_required"`
 	DashboardTitle              string   `json:"dashboard_title"`
 	TimeoutSeconds              float64  `json:"timeout_seconds"`
 	ModelListTimeoutSeconds     float64  `json:"model_list_timeout_seconds"`
@@ -69,6 +70,14 @@ type ProviderUpdate struct {
 	ProbeEnabled bool     `json:"probe_enabled"`
 }
 
+type ModelDiscoveryRequest struct {
+	ProviderID  string `json:"provider_id"`
+	Type        string `json:"type"`
+	BaseURL     string `json:"base_url"`
+	APIKey      string `json:"api_key"`
+	ClearAPIKey bool   `json:"clear_api_key"`
+}
+
 type RuntimeConfig struct {
 	Settings  RuntimeSettings  `json:"settings"`
 	Providers []ProviderConfig `json:"providers"`
@@ -91,6 +100,7 @@ type AdminConfig struct {
 
 func SettingsFromConfig(cfg Config) RuntimeSettings {
 	return RuntimeSettings{
+		StatusLoginRequired:       cfg.StatusLoginRequired,
 		DashboardTitle:            cfg.DashboardTitle,
 		TimeoutSeconds:            cfg.TimeoutSeconds,
 		ModelListTimeoutSeconds:   cfg.ModelListTimeoutSeconds,
@@ -136,6 +146,7 @@ func ApplyRuntimeConfig(base Config, runtime RuntimeConfig) Config {
 }
 
 func ApplyRuntimeSettings(cfg Config, settings RuntimeSettings) Config {
+	cfg.StatusLoginRequired = settings.StatusLoginRequired
 	cfg.DashboardTitle = settings.DashboardTitle
 	cfg.TimeoutSeconds = settings.TimeoutSeconds
 	cfg.ModelListTimeoutSeconds = settings.ModelListTimeoutSeconds

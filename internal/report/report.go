@@ -49,6 +49,8 @@ type ProviderReport struct {
 	OKCount      int           `json:"ok_count"`
 	SlowCount    int           `json:"slow_count"`
 	ErrorCount   int           `json:"error_count"`
+	UnknownCount int           `json:"unknown_count"`
+	CheckedAt    string        `json:"checked_at"`
 	Status       string        `json:"status"`
 	StatusLabel  string        `json:"status_label"`
 	ModelCount   int           `json:"model_count"`
@@ -64,6 +66,7 @@ type Report struct {
 	OKCount             int                   `json:"ok_count"`
 	SlowCount           int                   `json:"slow_count"`
 	ErrorCount          int                   `json:"error_count"`
+	UnknownCount        int                   `json:"unknown_count"`
 	ProviderCount       int                   `json:"provider_count"`
 	Providers           []ProviderReport      `json:"providers"`
 	ProviderErrors      []probe.ProviderError `json:"provider_errors"`
@@ -73,6 +76,7 @@ type Report struct {
 	StatsWindowDays     int                   `json:"stats_window_days"`
 	Theme               string                `json:"theme"`
 	ThemeLabel          string                `json:"theme_label"`
+	StaleAfterSeconds   int                   `json:"stale_after_seconds"`
 }
 
 func Build(cfg config.Config, results []probe.Result, providerErrors []probe.ProviderError, history map[string][]HistoryRecord, started time.Time) (Report, map[string][]HistoryRecord) {
@@ -92,8 +96,11 @@ func Build(cfg config.Config, results []probe.Result, providerErrors []probe.Pro
 
 	modelResults := make([]ModelResult, 0, len(results))
 	for _, result := range results {
+		if result.CheckedAt == "" {
+			result.CheckedAt = now.UTC().Format(time.RFC3339)
+		}
 		records := pruneHistory(updatedHistory[result.HistoryKey], now, cfg.StatsWindowDays, cfg.HistorySize)
-		records = append(records, HistoryRecord{Status: result.Status, LatencyMS: result.LatencyMS, CheckedAt: now.Format(time.RFC3339)})
+		records = append(records, HistoryRecord{Status: result.Status, LatencyMS: result.LatencyMS, CheckedAt: result.CheckedAt})
 		limit := max(1, cfg.MaxHistoryRecords)
 		if len(records) > limit {
 			records = records[len(records)-limit:]
@@ -154,6 +161,9 @@ func Build(cfg config.Config, results []probe.Result, providerErrors []probe.Pro
 			order = append(order, result.ProviderID)
 		}
 		group.Results = append(group.Results, result)
+		if result.CheckedAt > group.CheckedAt {
+			group.CheckedAt = result.CheckedAt
+		}
 		switch result.Status {
 		case "ok":
 			group.OKCount++
@@ -161,6 +171,8 @@ func Build(cfg config.Config, results []probe.Result, providerErrors []probe.Pro
 			group.SlowCount++
 		case "error":
 			group.ErrorCount++
+		case "unknown":
+			group.UnknownCount++
 		}
 	}
 	failedProviders := map[string]bool{}
@@ -179,6 +191,7 @@ func Build(cfg config.Config, results []probe.Result, providerErrors []probe.Pro
 			Results:      []ModelResult{},
 			Status:       "paused",
 			StatusLabel:  "已暂停",
+			CheckedAt:    now.UTC().Format(time.RFC3339),
 		}
 		if failedProviders[provider.ID] {
 			grouped[provider.ID].Status = "error"
@@ -189,9 +202,12 @@ func Build(cfg config.Config, results []probe.Result, providerErrors []probe.Pro
 	providers := []ProviderReport{}
 	for _, key := range order {
 		group := grouped[key]
-		if group.ErrorCount > 0 {
+		if group.ErrorCount > 0 || failedProviders[group.ProviderID] {
 			group.Status = "error"
 			group.StatusLabel = "异常"
+		} else if group.UnknownCount > 0 {
+			group.Status = "unknown"
+			group.StatusLabel = "未检测"
 		} else if group.SlowCount > 0 {
 			group.Status = "slow"
 			group.StatusLabel = "较慢"
@@ -200,7 +216,7 @@ func Build(cfg config.Config, results []probe.Result, providerErrors []probe.Pro
 		providers = append(providers, *group)
 	}
 
-	okCount, slowCount, errorCount := 0, 0, 0
+	okCount, slowCount, errorCount, unknownCount := 0, 0, 0, 0
 	for _, result := range results {
 		switch result.Status {
 		case "ok":
@@ -209,17 +225,19 @@ func Build(cfg config.Config, results []probe.Result, providerErrors []probe.Pro
 			slowCount++
 		case "error":
 			errorCount++
+		case "unknown":
+			unknownCount++
 		}
 	}
 	overallStatus := "OPERATIONAL"
 	overallClass := "ok"
-	if errorCount > 0 || len(providerErrors) > 0 {
+	if errorCount > 0 || unknownCount > 0 || len(providerErrors) > 0 {
 		overallStatus = "DEGRADED"
 		overallClass = "error"
 	}
 	return Report{
 		Title:               cfg.DashboardTitle,
-		GeneratedAt:         now.Format("2006-01-02 15:04:05"),
+		GeneratedAt:         now.UTC().Format(time.RFC3339),
 		ElapsedMS:           int(time.Since(started).Milliseconds()),
 		GlobalConcurrency:   cfg.Concurrency,
 		ProviderConcurrency: cfg.ProviderConcurrency,
@@ -227,6 +245,7 @@ func Build(cfg config.Config, results []probe.Result, providerErrors []probe.Pro
 		OKCount:             okCount,
 		SlowCount:           slowCount,
 		ErrorCount:          errorCount,
+		UnknownCount:        unknownCount,
 		ProviderCount:       len(providers),
 		Providers:           providers,
 		ProviderErrors:      providerErrors,
@@ -236,7 +255,65 @@ func Build(cfg config.Config, results []probe.Result, providerErrors []probe.Pro
 		StatsWindowDays:     cfg.StatsWindowDays,
 		Theme:               theme,
 		ThemeLabel:          map[bool]string{true: "白天", false: "夜间"}[theme == "light"],
+		StaleAfterSeconds:   max(600, int(math.Max(cfg.AutoCheckIntervalMinHours, cfg.AutoCheckIntervalMaxHours)*3600)+int(time.Since(started).Seconds())+60),
 	}, updatedHistory
+}
+
+// WithErrorVisibility copies only the slices whose contents need redacting.
+func WithErrorVisibility(value Report, show bool) Report {
+	if show {
+		return value
+	}
+	value.ProviderErrors = append([]probe.ProviderError{}, value.ProviderErrors...)
+	for i := range value.ProviderErrors {
+		value.ProviderErrors[i].Error = ""
+	}
+	value.Providers = append([]ProviderReport{}, value.Providers...)
+	for i := range value.Providers {
+		value.Providers[i].Results = append([]ModelResult{}, value.Providers[i].Results...)
+		for j := range value.Providers[i].Results {
+			value.Providers[i].Results[j].Error = ""
+		}
+	}
+	return value
+}
+
+// WithDiscoveryGaps records unknown samples for previously discovered models.
+// A failed model listing does not prove that the chat endpoint itself is down.
+func WithDiscoveryGaps(cfg config.Config, results []probe.Result, failures []probe.ProviderError, previous Report) []probe.Result {
+	failed := map[string]string{}
+	for _, failure := range failures {
+		failed[failure.ProviderID] = failure.Error
+	}
+	configured := map[string]config.ProviderConfig{}
+	for _, provider := range cfg.Providers {
+		if provider.Enabled && provider.ProbeEnabled {
+			configured[provider.ID] = provider
+		}
+	}
+	for _, group := range previous.Providers {
+		failure, ok := failed[group.ProviderID]
+		provider, enabled := configured[group.ProviderID]
+		if !ok || !enabled {
+			continue
+		}
+		models := make([]string, 0, len(group.Results))
+		for _, item := range group.Results {
+			models = append(models, item.Model)
+		}
+		models = probe.SelectModels(models, cfg.SkipModels, provider.ID, provider.Name, cfg.MaxModelsPerProvider)
+		for _, model := range models {
+			results = append(results, probe.Result{
+				ProviderID: provider.ID, ProviderGroupID: provider.ID, ProviderType: provider.Type,
+				ProviderName: provider.Name, ProviderLogo: group.ProviderLogo,
+				ProviderInstanceID: provider.ID, ProviderInstanceName: provider.Name,
+				Model: model, CurrentModel: models[0], IsCurrent: model == models[0],
+				Status: "unknown", Error: failure,
+				HistoryKey: provider.ID + "::" + model, CheckedAt: time.Now().UTC().Format(time.RFC3339),
+			})
+		}
+	}
+	return results
 }
 
 // MergeProvider replaces one provider in a previously generated full report
@@ -262,7 +339,8 @@ func MergeProvider(base, update Report, providerID string) Report {
 				for _, failure := range update.ProviderErrors {
 					if failure.ProviderID == providerID {
 						item.Results = []ModelResult{}
-						item.OKCount, item.SlowCount, item.ErrorCount, item.ModelCount = 0, 0, 0, 0
+						item.OKCount, item.SlowCount, item.ErrorCount, item.UnknownCount, item.ModelCount = 0, 0, 0, 0, 0
+						item.CheckedAt = update.GeneratedAt
 						item.Status, item.StatusLabel = "error", "异常"
 						merged.Providers = append(merged.Providers, item)
 						replaced = true
@@ -293,15 +371,17 @@ func MergeProvider(base, update Report, providerID string) Report {
 	merged.OKCount = 0
 	merged.SlowCount = 0
 	merged.ErrorCount = 0
+	merged.UnknownCount = 0
 	for _, provider := range merged.Providers {
 		merged.Total += len(provider.Results)
 		merged.OKCount += provider.OKCount
 		merged.SlowCount += provider.SlowCount
 		merged.ErrorCount += provider.ErrorCount
+		merged.UnknownCount += provider.UnknownCount
 	}
 	merged.OverallStatus = "OPERATIONAL"
 	merged.OverallClass = "ok"
-	if merged.ErrorCount > 0 || len(merged.ProviderErrors) > 0 {
+	if merged.ErrorCount > 0 || merged.UnknownCount > 0 || len(merged.ProviderErrors) > 0 {
 		merged.OverallStatus = "DEGRADED"
 		merged.OverallClass = "error"
 	}
@@ -512,6 +592,8 @@ func statusLabel(status string) string {
 		return "较慢"
 	case "error":
 		return "错误"
+	case "unknown":
+		return "未检测"
 	default:
 		return "未知"
 	}

@@ -38,6 +38,10 @@ type Config struct {
 	AutoCheckIntervalMaxHours float64
 	AutoCheckRunOnStart       bool
 	AdminToken                string
+	AdminUsername             string
+	AdminPassword             string
+	SecureCookies             bool
+	StatusLoginRequired       bool
 	NotifyPlatform            string
 	NotifyWebhookURL          string
 	NotifyTelegramBotToken    string
@@ -107,6 +111,10 @@ func Load(path string) (Config, error) {
 	cfg.AutoCheckIntervalMaxHours = getFloat(values, "AUTO_CHECK_INTERVAL_MAX_HOURS", cfg.AutoCheckIntervalMaxHours)
 	cfg.AutoCheckRunOnStart = getBool(values, "AUTO_CHECK_RUN_ON_START", cfg.AutoCheckRunOnStart)
 	cfg.AdminToken = strings.TrimSpace(getString(values, "ADMIN_TOKEN", cfg.AdminToken))
+	cfg.AdminUsername = getString(values, "ADMIN_USERNAME", "admin")
+	cfg.AdminPassword = getString(values, "ADMIN_PASSWORD", "")
+	cfg.SecureCookies = getBool(values, "SECURE_COOKIES", false)
+	cfg.StatusLoginRequired = getBool(values, "STATUS_LOGIN_REQUIRED", false)
 	cfg.NotifyPlatform = strings.ToLower(getString(values, "NOTIFY_PLATFORM", cfg.NotifyPlatform))
 	cfg.NotifyWebhookURL = getString(values, "NOTIFY_WEBHOOK_URL", cfg.NotifyWebhookURL)
 	cfg.NotifyTelegramBotToken = getString(values, "NOTIFY_TELEGRAM_BOT_TOKEN", cfg.NotifyTelegramBotToken)
@@ -124,11 +132,6 @@ func Load(path string) (Config, error) {
 	}
 	if err := ValidateRuntimeSettings(SettingsFromConfig(cfg)); err != nil {
 		return cfg, err
-	}
-	if cfg.AdminToken != "" {
-		if err := ValidateToken(cfg.AdminToken); err != nil {
-			return cfg, fmt.Errorf("admin token: %w", err)
-		}
 	}
 	return cfg, nil
 }

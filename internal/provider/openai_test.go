@@ -29,3 +29,35 @@ func TestErrorResponsesAndCredentialRedaction(t *testing.T) {
 		server.Close()
 	}
 }
+
+func TestChatValidatesCompletionAndPreservesUsage(t *testing.T) {
+	for _, tc := range []struct {
+		name, choices, want string
+	}{
+		{"no choices", `[]`, ""},
+		{"missing message", `[{}]`, ""},
+		{"null message", `[{"message":null}]`, ""},
+		{"empty content", `[{"message":{"content":"  "}}]`, ""},
+		{"thinking only", `[{"message":{"content":"<think>reason</think>"}}]`, ""},
+		{"unfinished thinking", `[{"message":{"content":"<thinking>reason"}}]`, ""},
+		{"truncated", `[{"message":{"content":"partial"},"finish_reason":"length"}]`, ""},
+		{"valid", `[{"message":{"content":"pang"},"finish_reason":"stop"}]`, "pang"},
+		{"compatible", `[{"message":{"content":"<think>reason</think> pang"}}]`, "pang"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Write([]byte(`{"choices":` + tc.choices + `,"usage":{"prompt_tokens":3,"completion_tokens":5}}`))
+			}))
+			defer server.Close()
+			client := NewOpenAICompatible(config.ProviderConfig{BaseURL: server.URL})
+			defer client.CloseIdleConnections()
+			text, usage, err := client.Chat(context.Background(), "m1", "", "ping")
+			if (err == nil) != (tc.want != "") || text != tc.want {
+				t.Fatalf("text=%q err=%v", text, err)
+			}
+			if usage.PromptTokens != 3 || usage.CompletionTokens != 5 || usage.TotalTokens != 8 {
+				t.Fatalf("lost usage: %+v", usage)
+			}
+		})
+	}
+}
