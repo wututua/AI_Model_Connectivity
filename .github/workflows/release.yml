@@ -191,19 +191,35 @@ jobs:
           make_latest: ${{ contains(github.ref_name, '-') && 'false' || 'true' }}
           body_path: ${{ steps.release-notes.outputs.path }}
           body: |
-            ## Release 说明
+            ## 发布说明 / Release Notes
 
-            - 下载对应平台的压缩包
-            - 解压后可直接使用，内含固定名称的可执行文件、`.env.example`、`README.md`、`LICENSE`、`docs/`、`assets/` 和预构建 `web/`
-            - 可直接启动并在管理面板添加 Provider；使用 `--version` 查看构建信息
-            - `SHA256SUMS.txt` 用于校验下载文件
-            - 该项目会真实调用模型接口并消耗 token，建议把自动检测周期调长一点
+            - 下载与操作系统和架构相匹配的压缩包。
 
-            ## 启动方式
+              Download the archive matching your operating system and architecture.
+            - 完整解压后可直接使用，内含可执行文件、`.env.example`、`README.md`、`LICENSE`、`docs/`、`assets/` 和预构建的 `web/`。
 
-            - 二进制包：直接运行 `model-connectivity` 或 `model-connectivity.exe`
-            - 源码运行：`go run ./cmd/cg`
-            - Docker：`docker compose up -d`
+              Extract the complete archive to get the executable, `.env.example`, `README.md`, `LICENSE`, `docs/`, `assets/`, and prebuilt `web/`.
+            - 启动后可在管理面板添加 Provider；使用 `--version` 查看构建信息。
+
+              Start the service and add providers in the admin panel; use `--version` to inspect build information.
+            - 使用 `SHA256SUMS.txt` 校验下载文件。
+
+              Verify downloaded files against `SHA256SUMS.txt`.
+            - 检测会真实调用模型接口并消耗 token，建议适当延长自动检测间隔。
+
+              Checks make real model API requests and consume tokens. Consider a longer automatic check interval.
+
+            ## 启动方式 / Startup
+
+            - 二进制包：在解压目录中运行 `model-connectivity` 或 `model-connectivity.exe`。
+
+              Binary archive: run `model-connectivity` or `model-connectivity.exe` from the extracted directory.
+            - 源码运行：`go run ./cmd/cg`。
+
+              From source: `go run ./cmd/cg`.
+            - Docker：`docker compose up -d`。
+
+              Docker: `docker compose up -d`.
           files: |
             dist/*.zip
             dist/*.tar.gz
