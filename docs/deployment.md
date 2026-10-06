@@ -1,113 +1,188 @@
 # 部署指南
 
-> [项目主页](../README.md) · [文档索引](README.md) · [GitHub 仓库](https://github.com/wututua/AI_Model_Connectivity)
+[项目首页](../README.md) · [文档索引](README.md) · [配置参考](configuration.md) · [运维指南](operations.md)
 
-## 1. 前置要求
+本文说明发布包、容器和 Linux 服务部署。首次登录与添加 Provider 的步骤见[快速开始](../README.md#首次使用)。
+
+## 目录
+
+- [环境要求](#环境要求)
+- [二进制部署](#二进制部署)
+- [Docker Compose](#docker-compose)
+- [Docker Run](#docker-run)
+- [Systemd](#systemd)
+- [公网访问](#公网访问)
+- [升级与回滚](#升级与回滚)
+- [容量规划](#容量规划)
+- [发布流水线](#发布流水线)
+
+## 环境要求
 
 | 方式 | 要求 |
-|------|------|
-| 源码运行 | Go 1.26.8（与 `go.mod` 一致） |
-| 源码运行（前端） | Node 24 |
-| 二进制 | 无需依赖，发布包内含 `web/` |
-| Docker | Docker 20.10+（Compose v2 可选） |
+| --- | --- |
+| 发布包 | 对应系统和架构的压缩包，无需 Go 或 Node.js |
+| Docker | Docker 与 Compose v2；源码构建需能访问构建依赖 |
+| 源码运行 | Go 1.26.8，使用仓库已提交的 `web/` |
+| 修改前端 | Node.js 24，使用 `npm ci` 安装锁定依赖 |
 
-## 2. Docker Compose（推荐）
+默认监听 `127.0.0.1:8080`，数据库为工作目录下的 `data/cg.sqlite`。更换工作目录或数据路径会连接到不同数据库，请固定启动目录。
+
+## 二进制部署
+
+1. 从 [Releases](https://github.com/wututua/AI_Model_Connectivity/releases) 下载对应平台的压缩包和 `SHA256SUMS.txt`。
+2. 核对压缩包的 SHA-256，再完整解压。保留 `web/`、文档、资源和许可证，不要只复制可执行文件。
+3. 在解压目录启动。未预设初始密码时，请查看启动日志并完成首次改密。
+
+Linux / macOS：
+
+```bash
+./model-connectivity
+```
+
+Windows PowerShell：
+
+```powershell
+.\model-connectivity.exe
+```
+
+| 命令 | 用途 |
+| --- | --- |
+| `model-connectivity` / `serve` | 启动常驻服务 |
+| `model-connectivity check` / `once` | 执行一次真实检测后退出，会消耗 Token |
+| `model-connectivity healthcheck` | 请求本机 `/health`，不检测上游模型 |
+| `model-connectivity --version` | 输出版本、提交、工具链和目标平台，不打开数据库 |
+| `model-connectivity recover-admin <用户名>` | 停服后恢复已有管理员，详见[恢复流程](operations.md#管理员密码恢复) |
+
+发布包不需要额外创建配置文件。Provider、通知与运行设置通过管理面板维护。
+
+## Docker Compose
+
+仓库中的 [docker-compose.yml](../docker-compose.yml) 从源码构建镜像：
+
+```bash
+git clone https://github.com/wututua/AI_Model_Connectivity.git
+cd AI_Model_Connectivity
+```
+
+Linux 使用绑定挂载前，先准备数据目录。容器以 `65532:65532` 运行：
 
 ```bash
 mkdir -p data
-export ADMIN_USERNAME=admin
-export ADMIN_PASSWORD='<设置至少8位且含大写、小写字母和数字的密码>'
-docker compose up -d
+sudo chown 65532:65532 data
+sudo chmod 0700 data
 ```
 
-- 镜像内 `APP_HOST=0.0.0.0`。未提供初始密码时会生成并打印到启动日志，首次登录要求修改。
-- 数据卷 `./data:/app/data` 持久化 SQLite。
-- 启动变量通过 Compose 的 `environment` 配置；未列出的变量需显式添加，Provider 等日常配置通过后台维护。
-- 健康检查：容器内执行 `model-connectivity healthcheck`（30s 间隔，start_period 10s）。
-
-Linux 绑定挂载前请准备目录权限（容器以 `65532:65532` 运行）：
+然后启动：
 
 ```bash
-mkdir -p data && sudo chown 65532:65532 data && sudo chmod 0700 data
+docker compose up -d --build
+docker compose logs model-connectivity
 ```
 
-也可使用命名卷：`-v model-connectivity-data:/app/data`。
+- `./data:/app/data` 持久化 SQLite；不要在升级时删除此目录。
+- 容器内监听 `0.0.0.0:8080`，Compose 默认发布主机所有接口的 `8080` 端口。
+- Compose 通过 `environment` 注入启动变量；未列出的变量需要显式加入配置。
+- 不预设管理员密码时会生成随机密码并打印到日志，请限制日志访问。
+- 健康检查每 30 秒执行一次 `model-connectivity healthcheck`，启动宽限期为 10 秒。
 
-## 3. docker run
+如由同机反向代理提供外部访问，将 `ports` 改为 `"127.0.0.1:8080:8080"`。HTTPS 部署还需设置 `SECURE_COOKIES=true`，详见[公网访问](#公网访问)。
 
-先从当前源码构建本地镜像：
+## Docker Run
+
+先从仓库根目录构建本地镜像：
 
 ```bash
 docker build -t model-connectivity:local .
 ```
 
+以下示例使用 Docker 命名卷，并仅向本机发布端口：
+
 ```bash
-docker run -d -p 8080:8080 \
-  -e ADMIN_USERNAME -e ADMIN_PASSWORD \
-  -e PROVIDER_1_ID=openai \
-  -e PROVIDER_1_BASE_URL=https://api.openai.com/v1 \
-  -e PROVIDER_1_API_KEY=sk-xxx \
-  -e PROVIDER_1_MODELS=gpt-4o-mini \
-  -v $(pwd)/data:/app/data \
+docker run -d \
   --name model-connectivity \
+  --restart unless-stopped \
+  -p 127.0.0.1:8080:8080 \
+  -v model-connectivity-data:/app/data \
   model-connectivity:local
+docker logs model-connectivity
 ```
 
-镜像三阶段构建：Node 24 构建前端 → Go 1.26.8 编译（CGO_ENABLED=0）→ `gcr.io/distroless/static-debian12:nonroot` 运行时（无 shell、非 root）。
+首次登录后在后台添加 Provider。也可用 `-e` 注入[启动变量](configuration.md#配置优先级)；它们不会覆盖 SQLite 中已有的运行设置。
 
-GitHub Actions 会把多架构镜像推送到 `<DOCKERHUB_USERNAME>/model-connectivity`，其中用户名来自仓库 Secret。项目流水线未配置 GHCR 发布，因此本文不使用旧的 `ghcr.io` 地址。
+镜像使用 Node.js 构建前端、Go 编译后端，运行层为 `gcr.io/distroless/static-debian12:nonroot`，不包含 shell。需要维护数据时使用应用提供的命令或受控的宿主机工具，不要依赖 `docker exec ... sh`。
 
-## 4. 二进制部署
+发布流水线推送到 `<DOCKERHUB_USERNAME>/model-connectivity`，命名空间取自仓库 Secret，本文不假设固定的公共镜像地址。
 
-1. 从 [GitHub Releases](https://github.com/wututua/AI_Model_Connectivity/releases) 下载对应平台压缩包，核对 `SHA256SUMS.txt` 后解压（可执行文件统一命名 `model-connectivity`，Windows 加 `.exe`；另含 `README.md`、`LICENSE`、`docs/`、`assets/`、`web/` 及字体许可）。
-2. 可选：通过进程环境变量设置 `ADMIN_USERNAME` / `ADMIN_PASSWORD`；未指定密码时使用启动日志生成的密码。无需创建配置文件，Provider 稍后在管理面板添加。
-3. 启动：`./model-connectivity`（Windows：`model-connectivity.exe`）。
+## Systemd
 
-常用子命令：
+以下示例适用于使用 systemd 的 Linux。将发布包完整解压到 `/opt/model-connectivity`，二进制和 `web/` 放在同一目录；程序目录由 root 管理，服务只写入数据目录。
 
-| 命令 | 说明 |
-|------|------|
-| `model-connectivity` / `serve` | 常驻服务（默认） |
-| `model-connectivity check` / `once` | 跑一次检测后退出，适合 cron |
-| `model-connectivity healthcheck` | 请求本机 `/health`，用于容器健康检查 |
-| `model-connectivity --version` | 输出版本、提交、Go 工具链和目标平台，不打开数据库 |
-| `model-connectivity recover-admin <用户名>` | 停服后恢复已有管理员，生成临时密码并吊销该账号会话 |
+创建专用账户和数据目录（若账户已存在则跳过创建）：
 
-## 5. systemd 示例
+```bash
+sudo useradd --system --user-group --home-dir /var/lib/model-connectivity \
+  --shell /usr/sbin/nologin model-connectivity
+sudo install -d -o model-connectivity -g model-connectivity \
+  -m 0700 /var/lib/model-connectivity
+```
+
+在 `/etc/systemd/system/model-connectivity.service` 配置：
 
 ```ini
 [Unit]
 Description=AI Model Connectivity
+Wants=network-online.target
 After=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=/opt/cg
-ExecStart=/opt/cg/model-connectivity
-Restart=always
-RestartSec=5
+User=model-connectivity
+Group=model-connectivity
+WorkingDirectory=/opt/model-connectivity
+ExecStart=/opt/model-connectivity/model-connectivity
 Environment=APP_HOST=127.0.0.1
 Environment=APP_PORT=8080
-Environment=DATA_DIR=/opt/cg/data
+Environment=WEB_DIR=/opt/model-connectivity/web
+Environment=DATA_DIR=/var/lib/model-connectivity
+Restart=on-failure
+RestartSec=5
+UMask=0077
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
-ReadWritePaths=/opt/cg/data
+ProtectHome=true
+ReadWritePaths=/var/lib/model-connectivity
 
 [Install]
 WantedBy=multi-user.target
 ```
 
-## 6. 反向代理
+启动并查看日志：
 
-SSE 需要禁用缓冲（以 Nginx 为例）：
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now model-connectivity
+sudo journalctl -u model-connectivity -n 50 --no-pager
+```
+
+日志可能包含首次生成的密码。部署到 HTTPS 代理后，在服务配置中加入 `Environment=SECURE_COOKIES=true`，执行 `daemon-reload` 并重启。
+
+## 公网访问
+
+对外开放前请完成：
+
+- 使用 HTTPS，设置 `SECURE_COOKIES=true` 后重启。
+- 修改初始密码，在 **系统设置 → 访问控制** 确认实际生效的状态页登录要求。
+- 通过防火墙或反向代理限制管理入口，不直接暴露数据目录和启动日志。
+- 代理保留原始 Host（含端口），不缓存 `/api/` 响应，关闭 SSE 缓冲。
+
+以下 Nginx 片段放入已配置证书的 HTTPS `server` 中，不是完整 TLS 配置：
 
 ```nginx
 location / {
     proxy_pass http://127.0.0.1:8080;
     proxy_http_version 1.1;
     proxy_set_header Host $http_host;
-    proxy_set_header X-Real-IP $remote_addr;
 }
 
 location /api/events {
@@ -118,42 +193,35 @@ location /api/events {
     proxy_buffering off;
     proxy_cache off;
     proxy_read_timeout 3600s;
-    chunked_transfer_encoding on;
 }
 ```
 
-注意事项：
+应用不信任客户端的 `X-Forwarded-For` 和转发协议头，认证限流按连接来源 IP 计算。代理后所有用户可能共享限额；需要按真实 IP 限流时，在可信代理层实现。纯 HTTP 本地访问不要开启 Secure Cookie，否则浏览器可能无法保持会话。
 
-- 应用**不信任**客户端 `X-Forwarded-For`，认证限流以连接来源 IP 为准；反向代理后的用户会共享代理 IP 的限额。若要按真实 IP 限流，请在受信任的代理层实现。
-- 正式部署应强制 HTTPS，设置 `SECURE_COOKIES=true` 后重启，并为密码、Cookie 与 CSRF 值保密。纯 HTTP 本地预览保持 false。
-- 代理必须保留原始 Host（含端口），否则同源校验会拒绝浏览器写请求。不要缓存 `/api/`；登录状态依赖同源 Cookie。
-- 后端已返回 `X-Accel-Buffering: no`，Nginx 会据此关闭缓冲。
+## 升级与回滚
 
-## 7. 升级与回滚
+1. 阅读目标版本的 [Release 说明](releases/README.md)，记录当前版本、启动参数与数据路径。
+2. 按[备份与恢复](operations.md#备份与恢复)生成一致性数据库备份，并保留旧版本文件。不要在服务写入时直接复制数据库主文件。
+3. 停服，替换二进制及配套 `web/`，或更新容器镜像。保留原 `DATA_DIR`、`DATABASE_PATH`、监听配置与 `SECURE_COOKIES`。
+4. 重启后检查日志和 `/health`，再验证登录、Provider、运行设置、历史与用量。健康检查仅证明进程可响应，不代表升级或上游检测全部成功。
+5. 在可接受真实调用成本的前提下执行一次完整检测，独立确认状态与通知范围。
 
-1. 备份 `data/`（含 SQLite 与 WAL）。
-2. 将旧的文件式启动配置迁移到进程环境变量（Compose 使用 `environment`，systemd 使用 `Environment=`），确认 `DATA_DIR`、`DATABASE_PATH`、监听地址和 `SECURE_COOKIES` 保持原值，再替换二进制或镜像 tag 并重启。Provider 和运行设置继续读取原 SQLite 数据库，通过后台修改。
-3. 首次启动日志出现 `server started` 且 `/health` 返回 `{"ok":true}` 即成功。
-4. 旧版本升级账号系统：符合密码规则的旧管理 Token 迁移为初始管理员密码，否则生成新密码并打印到日志；首次登录必须改密。
-5. 旧 Bearer 和只读分享密钥停止工作；为只读访问者创建普通用户。Prometheus 抓取也需改为维护有效登录会话。
-6. 回滚：恢复旧二进制 + 升级前一致性数据库备份。账号迁移会删除旧 Token KV，不能只替换旧二进制。
+回滚时停止所有写入者，恢复旧版本程序和**升级前的一致性数据库备份**。数据库迁移不保证可逆，仅替换旧二进制可能无法回滚。
 
-`ADMIN_PASSWORD` 不会重置已存在的管理员；日常密码维护使用账户安全或其他管理员的用户管理页面。忘记密码使用[离线恢复命令](operations.md#9-管理员密码恢复)，不要删除数据库。
+旧账号系统升级会删除旧 Token KV。旧 Bearer 和只读分享密钥不再有效；只读访问需创建普通用户，指标采集需维护有效登录会话。`ADMIN_PASSWORD` 不会重置已有账号，忘记密码请使用[离线恢复命令](operations.md#管理员密码恢复)。
 
-## 8. 发布流水线
+## 容量规划
 
-### GitHub Actions
+- 默认串行探测；提高并发前确认上游限额、网络资源与调用预算。
+- 需要低成本巡检时可从 6–12 小时间隔开始，根据监控需求调整。
+- 探测历史同时受 90 天保留期及每模型 `MAX_HISTORY_RECORDS` 限制；用量按日最多保留 365 天。
+- 一个数据库只供一个服务或单次检测进程使用，不要让 cron `check` 与常驻服务并行写入同一数据库。
 
-| 工作流 | 触发 | 内容 |
-|--------|------|------|
-| `ci.yml` | push / PR（排除 `v*` tag） | Go 静态检查、竞态测试、govulncheck、npm audit、前端单元测试、构建和浏览器回归 |
-| `release.yml` | tag `v*` / main / 手动 | Linux 竞态、Windows 单元、安全扫描、前端测试/构建/浏览器回归通过后允许发布；tag 产出 6 平台压缩包、校验文件与镜像 |
+## 发布流水线
 
-带 `-` 的预发布 tag（如 `v2.0.0-rc.1`）标记为 GitHub prerelease，只发布对应 Docker 版本，不更新 `latest` 或 major.minor 别名。正式版本更新 `latest`；`main` 分支仅更新 `main` 镜像标签。版本与提交写入可执行文件和镜像，源码本地构建默认为 `dev`。实际版本以发布 tag 为准，前端私有包版本不作为发布号。
+| 工作流 | 触发 | 检查与产物 |
+| --- | --- | --- |
+| [ci.yml](../.github/workflows/ci.yml) | push / PR，排除 `v*` tag | Go 静态检查、竞态测试、安全扫描、前端测试、构建与浏览器回归 |
+| [release.yml](../.github/workflows/release.yml) | `v*` tag / `main` / 手动 | Linux 与 Windows 检查、前端检查；tag 产出六平台压缩包、校验文件及镜像 |
 
-## 9. 容量与性能建议
-
-- 默认 `CONCURRENCY=1` 串行探测；Provider 较多可适当提高，但注意上游限流。
-- 定时检测建议 6–12 小时一次，避免不必要的 token 消耗。
-- 每个模型最多保留 `MAX_HISTORY_RECORDS`（默认 500）条，`probe_results` 最长保留 90 天；有效统计窗口同时受天数和记录条数限制，不保证有完整 365 天探测历史。用量按日最多保留 365 天，数据库大小随模型数、频率与错误详情增长。
-- 一个数据库只能由一个服务实例或单次检测进程运行；不要让 cron `check` 与常驻服务共用同一数据库并行执行。
+带 `-` 的预发布 tag 不更新 Docker `latest` 或 major.minor 别名；正式版本更新 `latest`，`main` 只更新 `main` 镜像标签。版本和提交写入二进制与镜像，本地源码构建默认 `dev`。发布号以 Git tag 为准，不使用前端私有包的版本号。

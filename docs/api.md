@@ -1,10 +1,25 @@
 # HTTP API 参考
 
-> [项目主页](../README.md) · [文档索引](README.md) · [GitHub 仓库](https://github.com/wututua/AI_Model_Connectivity)
+[项目首页](../README.md) · [文档索引](README.md) · [前端集成](backend-api.md) · [安全与访问控制](security.md)
 
-基础路径默认为 `http://127.0.0.1:8080`。所有响应为 UTF-8 JSON；受认证接口额外返回 `Cache-Control: no-store`。
+基础地址默认为 `http://127.0.0.1:8080`。业务 REST 接口返回 UTF-8 JSON；SSE 使用事件流，`/metrics` 使用 Prometheus 文本格式，静态资源按文件类型响应。受认证接口返回 `Cache-Control: no-store`。
 
-## 1. 认证
+## 目录
+
+- [认证](#认证)
+- [错误码](#错误码)
+- [状态与静态接口](#状态与静态接口)
+- [检测控制](#检测控制)
+- [账号与用户管理](#账号与用户管理)
+- [配置](#配置)
+- [Provider 管理](#provider-管理)
+- [任务历史](#任务历史)
+- [用量统计](#用量统计)
+- [Prometheus 指标](#prometheus-指标)
+- [请求体限制](#请求体限制)
+- [数据结构](#数据结构)
+
+## 认证
 
 使用账号密码登录，服务端设置 `cg_session` Cookie（HttpOnly、SameSite=Strict、24 小时有效）。不再接受 Bearer Token。
 
@@ -14,34 +29,65 @@
 - 密码至少 8 位，包含大写字母、小写字母和数字；不强制特殊字符，最多 1024 字节。
 - 同一来源 IP 一分钟内 10 次未成功的密码验证尝试后返回 `429`，响应带 `Retry-After`（秒）；密码验证还有全局并发限制。
 
-```bash
-# 以下是 Bash 示例；初始密码需先通过 /api/auth/password 修改。
-curl -c cookies.txt -H 'Content-Type: application/json' \
-  -d '{"username":"admin","password":"<当前密码>"}' \
-  http://127.0.0.1:8080/api/auth/login
-# 将响应中的 csrf_token 赋给 CSRF。会话 Cookie 文件应限制权限。
+### 登录示例
+
+以下命令使用 Bash。在受限的本地目录操作，`login.json` 内容为：
+
+```json
+{"username":"admin","password":"<替换为当前密码>"}
 ```
 
-## 2. 错误码
+限制凭据文件权限后登录，Cookie 文件由 curl 创建：
+
+```bash
+umask 077
+chmod 600 login.json
+curl -c cookies.txt -H 'Content-Type: application/json' \
+  --data-binary @login.json \
+  http://127.0.0.1:8080/api/auth/login
+```
+
+将响应中的 `csrf_token` 设为后续请求使用的 `CSRF`：
+
+```bash
+CSRF='<替换为响应中的 csrf_token>'
+```
+
+若 `user.must_change_password=true`，先调用 `/api/auth/password`。受限的 `password.json` 内容为：
+
+```json
+{"current_password":"<当前密码>","password":"<符合规则的新密码>"}
+```
+
+```bash
+chmod 600 password.json
+curl -X POST -b cookies.txt -c cookies.txt \
+  -H "X-CSRF-Token: $CSRF" -H 'Content-Type: application/json' \
+  --data-binary @password.json \
+  http://127.0.0.1:8080/api/auth/password
+```
+
+改密后会话和 CSRF 都会轮换，更新 `CSRF` 再调用管理接口。示例文件与 Cookie 不可提交到 Git，也不要在共享终端记录真实密码；操作结束后注销并清理本地凭据文件。Windows 可使用 `curl.exe`，并通过 ACL 保护文件。
+
+## 错误码
 
 | 状态码 | 场景 |
 |--------|------|
 | 400 | 请求体非法、参数校验失败 |
 | 401 | 未登录、账号密码错误或会话失效 |
 | 403 | 权限不足、CSRF/来源校验失败或需要修改初始密码 |
-| 404 | `/metrics` 未启用；任务不存在 |
+| 404 | 任务或 Provider 不存在；自定义服务未注册指标 |
 | 405 | 方法不允许 |
 | 409 | 已有检测任务运行（body: `check already running`）或账号已并发变更 |
 | 413 | 请求体超过 1 MiB |
 | 415 | 登录请求未使用 `application/json` |
 | 429 | 认证失败限流 |
 | 500 | 服务端错误 |
+| 503 | 服务关闭中，或认证、访问策略暂时不可用 |
 
 错误体包含 `error`。强制改密返回 `{"error":"请先修改初始密码","code":"password_change_required"}`；认证依赖暂时不可用返回 `503`。
 
----
-
-## 3. 状态与静态接口
+## 状态与静态接口
 
 ### `GET /health`
 
@@ -49,7 +95,7 @@ curl -c cookies.txt -H 'Content-Type: application/json' \
 { "ok": true }
 ```
 
-容器健康检查入口（也可执行 `model-connectivity healthcheck`）。
+容器健康检查入口（也可执行 `model-connectivity healthcheck`），不检查上游模型、账单或报告时效。
 
 ### `GET /api/status`
 
@@ -63,9 +109,7 @@ curl -c cookies.txt -H 'Content-Type: application/json' \
 
 Web 静态资源。非 `/api/` 且磁盘上无对应文件的路径回退到 `index.html`，交给前端路由。
 
----
-
-## 4. 检测控制
+## 检测控制
 
 ### `GET /api/admin/detection`（只读可用）
 
@@ -73,7 +117,7 @@ Web 静态资源。非 `/api/` 且磁盘上无对应文件的路径回退到 `in
 {
   "running": false,
   "task_id": 0,
-  "kind": "manual",
+  "kind": "",
   "provider_id": "",
   "auto_check_interval_min_hours": 6,
   "auto_check_interval_max_hours": 12,
@@ -95,9 +139,7 @@ curl -X POST -b cookies.txt -H "X-CSRF-Token: $CSRF" http://127.0.0.1:8080/api/a
 
 仅保留管理员 API，前端不显示停止按钮。返回 `{"ok":true,"stopped":true}`。未完成任务标记 `canceled`，不更新报告/历史/告警，但已确认响应的用量仍会入账。正常停服也会取消并收尾后台任务。
 
----
-
-## 5. 账号与用户管理
+## 账号与用户管理
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
@@ -113,19 +155,17 @@ curl -X POST -b cookies.txt -H "X-CSRF-Token: $CSRF" http://127.0.0.1:8080/api/a
 会话响应：`{"user":User|null,"csrf_token":"...","expires_at":Unix秒,"status_login_required":false}`。
 `User` 字段：`id`、`username`、`role`（`admin`/`user`）、`enabled`、`must_change_password`、`created_at`；不会返回密码或密码哈希。
 
-创建与修改用户请求：`{"username":"viewer","password":"Viewer123","role":"user","enabled":true}`。用户名为 3–32 位 ASCII 字母、数字、点、下划线或短横线，字母/数字开头，忽略大小写。修改时密码留空表示不变。初始密码与管理员重置密码均要求用户首次登录后修改。
+创建与修改用户请求包含 `username`、`password`、`role`、`enabled`。用户名为 3–32 位 ASCII 字母、数字、点、下划线或短横线，字母/数字开头，忽略大小写。修改时密码留空表示不变。初始密码与管理员重置密码均要求用户首次登录后修改。
 
 不能在用户管理中修改或删除当前账号，也不能禁用、删除或降级最后一个启用的管理员。个人改密使用 `/api/auth/password`。
 
-```bash
-curl -X POST -b cookies.txt -H "X-CSRF-Token: $CSRF" -H 'Content-Type: application/json' \
-  -d '{"username":"viewer","password":"Viewer123","role":"user","enabled":true}' \
-  http://127.0.0.1:8080/api/admin/users
+创建普通用户的 JSON 请求示例，请使用自己生成的密码并保护请求文件：
+
+```json
+{"username":"viewer","password":"<符合规则的随机初始密码>","role":"user","enabled":true}
 ```
 
----
-
-## 6. 配置
+## 配置
 
 ### `GET /api/admin/config`（仅管理）
 
@@ -145,11 +185,11 @@ curl -X PUT -b cookies.txt -H "X-CSRF-Token: $CSRF" -H 'Content-Type: applicatio
 ### `GET /api/admin/config/export`、`POST /api/admin/config/import`
 
 - 导出：`{"settings":…,"providers":[…]}`，不含 API Key 与通知凭据，也不包含用户、密码和会话。
-- 导入：`{"settings":…,"providers":[ProviderUpdate…]}`。
+- 导入：`{"settings":…,"providers":[ProviderUpdate…]}`，整体替换运行配置，不是增量合并；先保存现有配置并检查 Provider 列表。
 
----
+敏感字段留空表示保留，显式 `clear_*=true` 清除；在全新数据库导入时需另行补充凭据。配置导出不含历史与用量，不能替代数据库备份。
 
-## 7. Provider 管理
+## Provider 管理
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
@@ -176,13 +216,11 @@ curl -X POST -b cookies.txt -H "X-CSRF-Token: $CSRF" -H 'Content-Type: applicati
 
 `{id}` 需 URL 编码。单 Provider 重跑会用 `report.MergeProvider` 把结果合并回上次完整报告，其余 Provider 数据保持不变。
 
----
-
-## 8. 任务历史
+## 任务历史
 
 ### `GET /api/admin/tasks?limit=&offset=&status=&provider_id=`（只读可用）
 
-`limit` 默认 50、上限 200；`offset` ≥ 0；按 `started_at DESC, id DESC` 返回 `CheckTask[]`。
+`limit` 默认 50、上限 200；`offset` ≥ 0；按 `started_at DESC, id DESC` 返回 `CheckTask[]`。状态值为 `running`、`success`、`error`、`canceled`，不是 `failed`。
 
 ### `GET /api/admin/tasks/{id}`（只读可用）
 
@@ -192,37 +230,31 @@ curl -X POST -b cookies.txt -H "X-CSRF-Token: $CSRF" -H 'Content-Type: applicati
 
 报告额外提供 `unknown_count`、`stale_after_seconds` 和 Provider/模型级 `checked_at`。`generated_at` 与 `checked_at` 为带时区的 RFC3339 时间；公开报告和 SSE 始终按当前 `show_error_detail` 设置过滤错误详情。
 
----
-
-## 9. 用量统计
+## 用量统计
 
 ### `GET /api/admin/billing?days=30`（只读可用）
 
-`days` 默认 30、上限 365，返回 `BillingSummary`：`range_days`、`range_start`、`range_end`、`total_*`、`per_model[]`、`daily[]`。统计按 UTC 自然日，最多保留 365 天。
+`days` 默认 30、上限 365，返回 `BillingSummary`：`range_days`、`range_start`、`range_end`、`total_*`、`per_model[]`、`daily[]`。统计按 UTC 自然日，最多保留 365 天；只计入已确认的上游用量，不能替代账单。
 
 ```bash
 curl -b cookies.txt 'http://127.0.0.1:8080/api/admin/billing?days=7'
 ```
 
----
-
-## 10. Prometheus 指标
+## Prometheus 指标
 
 ### `GET /metrics`（只读可用）
 
-需有效会话 Cookie，即使监控页公开也需要登录。未通过 `SetMetrics` 启用时返回 `404`。旧版静态 Bearer 抓取不再可用，见 [operations.md](operations.md#2-prometheus-指标)。
+需有效会话 Cookie，即使监控页公开也需要登录。常规启动默认注册；自定义嵌入服务未调用 `SetMetrics` 时返回 `404`。旧版静态 Bearer 抓取不再可用，见[指标采集](operations.md#prometheus-指标)。
 
----
-
-## 11. 请求体限制
+## 请求体限制
 
 - 上限 1 MiB，超限返回 `413`。
 - 必须是单个 JSON 对象；多个 JSON 值或顶层非对象返回 `400`。
 
-## 12. 数据结构
+## 数据结构
 
-字段为 snake_case，与 `frontend/src/types.ts` 完全对应：
+字段为 snake_case，前端使用的类型定义见 [types.ts](../frontend/src/types.ts)，完整响应以 Go JSON 定义为准，客户端应容忍额外字段：
 
 `Report`、`ProviderReport`、`ModelResult`、`ProviderError`、`RunningState`、`RuntimeSettings`、`SafeProviderConfig`、`ProviderUpdate`、`AdminConfig`、`CheckTask`、`ConfigExport`、`ConfigImport`、`BillingSummary`、`User`、`UserInput`、`AuthSession`。
 
-完整字段说明与 TS 定义见 [backend-api.md](backend-api.md)。
+字段语义和跨请求约定见[前端集成](backend-api.md#数据类型)。报告定义位于 [report.go](../internal/report/report.go)，配置定义位于 [runtime.go](../internal/config/runtime.go)，任务与用量定义位于 [sqlite.go](../internal/storage/sqlite.go)。

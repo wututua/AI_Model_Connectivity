@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 使用与部署文档
+    url: https://github.com/wututua/AI_Model_Connectivity/tree/main/docs
+    about: 配置、部署和常见问题请先查阅文档。
+  - name: 安全报告指南
+    url: https://github.com/wututua/AI_Model_Connectivity/blob/main/SECURITY.md
+    about: 漏洞和敏感信息泄露请按安全指南处理，不要公开利用细节。

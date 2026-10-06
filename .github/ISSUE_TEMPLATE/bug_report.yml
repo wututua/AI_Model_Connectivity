@@ -1,0 +1,43 @@
+name: 错误报告
+description: 提交可复现的功能问题。
+title: "[Bug] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        请先搜索已有 Issue。不要上传数据库、密码、API Key、Cookie、CSRF 值或带凭据的通知地址。
+        安全漏洞请先阅读仓库根目录的 SECURITY.md，不要公开利用细节。
+  - type: input
+    id: version
+    attributes:
+      label: 版本与提交
+      description: 使用 model-connectivity --version 获取；源码运行时请注明提交号。
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: 运行环境
+      description: 操作系统、架构、部署方式、浏览器，以及是否使用反向代理。
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      description: 提供最小复现步骤和必要的脱敏配置。
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 预期结果
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际结果
+      description: 可附截图或已脱敏日志。
+    validations:
+      required: true

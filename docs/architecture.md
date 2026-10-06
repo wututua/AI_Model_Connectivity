@@ -1,36 +1,35 @@
 # 系统架构
 
-> [项目主页](../README.md) · [文档索引](README.md) · [GitHub 仓库](https://github.com/wututua/AI_Model_Connectivity)
+[项目首页](../README.md) · [文档索引](README.md) · [开发指南](development.md) · [数据存储](data-storage.md)
 
-## 1. 概览
+本文介绍模块职责和关键流程。HTTP 协议见 [API 参考](api.md)，运行参数见[配置参考](configuration.md)。
 
+## 概览
+
+```mermaid
+flowchart TD
+    UI["React Web"] -->|HTTP / SSE| Web["internal/web"]
+    Web -->|AdminController| App["cmd/cg application"]
+    Scheduler["Scheduler / CLI"] --> App
+    App --> Probe["internal/probe"]
+    Probe --> Provider["internal/provider"]
+    Provider --> HTTP["internal/httpclient"]
+    HTTP -->|Probe| Upstream["OpenAI-compatible API"]
+    HTTP -->|Notify| Channels["Notification services"]
+    App --> Report["internal/report"]
+    App --> Storage["internal/storage: SQLite"]
+    App --> Notify["internal/notify"]
+    Notify --> HTTP
+    App --> Metrics["internal/metrics"]
+    App -->|Publish| Broker["SSE Broker"]
+    Broker --> Web
 ```
-┌──────────────────────────────────────────────────────────────┐
-│                        cmd/cg (main.go)                      │
-│  配置加载 → 账号初始化 → 调度器 goroutine → HTTP 服务器       │
-│  application 实现 AdminController，串联探测/存储/通知/推送      │
-└───────────┬───────────────────────────────────┬──────────────┘
-            │                                   │
-     ┌──────▼────────┐                   ┌──────▼─────────┐
-     │ internal/web  │  HTTP + SSE       │ internal/probe │  并发探测
-     │  Server/Broker│◄─────────────────►│    Runner      │
-     └──────┬────────┘                   └──────┬─────────┘
-            │                                   │
-     ┌──────▼────────┐                   ┌──────▼─────────┐
-     │internal/report│  报告聚合/统计    │internal/provider│ OpenAI 兼容客户端
-     └──────┬────────┘                   └──────┬─────────┘
-            │                                   │
-     ┌──────▼───────────────────────────────────▼─────────┐
-     │ internal/storage (SQLite) · internal/notify        │
-     │ internal/metrics (Prometheus)                       │
-     └────────────────────────────────────────────────────┘
-```
 
-运行在单个进程内，无外部依赖（数据库为本地 SQLite 文件）。
+后端运行在单个进程内，使用本地 SQLite，无需独立数据库或队列。上游模型与通知服务通过网络访问，单次检测会产生真实调用。
 
-## 2. 目录结构
+## 目录结构
 
-```
+```text
 cmd/cg/              程序入口
   main.go            application：配置、调度、HTTP 生命周期
   users.go           初始管理员与旧版 Token 迁移
@@ -49,7 +48,7 @@ web/                 前端构建产物（Go 直接托管，已提交到仓库�
 docs/                本目录
 ```
 
-## 3. 核心概念
+## 核心概念
 
 | 概念 | 说明 |
 |------|------|
@@ -60,21 +59,25 @@ docs/                本目录
 | Report | 一次检测的完整快照，按 Provider 分组并附统计 |
 | Task | 一次检测运行记录（manual / scheduled / startup / provider） |
 
-## 4. 启动流程（`cmd/cg/main.go`）
+## 启动流程
 
-1. `config.Load()` — 读取进程环境变量，未提供的配置使用代码默认值，不读取本地配置文件。
-2. `healthcheck` 子命令：请求 `127.0.0.1:<port>/health`，成功退出 0（供容器健康检查使用）。
-3. 打开 SQLite，将上次异常退出遗留的 `running` 任务标记为 `canceled`。
-4. 若已有运行时配置则用其覆盖基础配置中的同名值，否则把当前配置写入。
-5. 校验持久化的运行时参数与 Provider，任一非法即退出（避免脏配置带病启动）。
-6. `initializeUsers`：用户表非空则保留现有账号；否则按 `ADMIN_PASSWORD`、符合规则的旧管理 Token、随机密码的优先级创建初始管理员，并标记首次改密。创建账号和删除旧 Token KV 在同一事务内完成；后续认证只接受账号会话。
-7. 按子命令分叉：`check` / `once` 跑一次就退出；`serve`（默认）常驻。
-8. 常驻模式：`AUTO_CHECK_RUN_ON_START=true` 时异步跑一次启动检测；启动调度器 goroutine；启动 HTTP 服务。
-9. 收到 SIGINT/SIGTERM：拒绝新检测，取消并等待正在运行的任务，在 5 秒总宽限期内关闭 HTTP、等待启动任务和调度器退出，最后关闭数据库。
+入口为 [cmd/cg/main.go](../cmd/cg/main.go)：
 
-## 5. 一次检测的时序
+1. 单独的 `--version` / `version` 直接输出构建信息，不读取配置或打开数据库。
+2. `config.Load()` 读取进程环境变量与默认值；`healthcheck` 请求本机健康接口后退出，不打开数据库。
+3. 打开 SQLite；若为 `recover-admin`，执行离线恢复后退出。
+4. 正常启动将遗留的 `running` 任务标记为 `canceled`，加载 SQLite 运行配置；不存在时写入初始化配置。
+5. 校验设置与 Provider，补齐连接版本；非法配置使启动失败，不静默忽略。
+6. 初始化账号：保留已有用户，否则按环境密码、符合规则的旧凭据、随机密码的顺序创建管理员并要求改密。
+7. `check` / `once` 执行一次检测后退出；`serve`（默认）进入常驻模式。
+8. 按配置启动首次检测、调度器与 HTTP 服务，注册指标。
+9. 收到退出信号后拒绝新任务，取消检测，在 5 秒总宽限期内等待后台收尾并关闭服务与数据库。
 
-```
+账号创建与旧 Token KV 删除在同一事务内完成，后续认证只接受账号会话。
+
+## 检测流程
+
+```text
 触发源：HTTP(manual) / 调度器(scheduled) / 启动(startup) / 单 Provider(provider)
         │
         ▼
@@ -102,22 +105,24 @@ HTTP 接受任务后用服务端独立上下文执行，断开连接不会取消
 
 配置更新与最新快照写入通过 `configMu` 串行化；`report.WithConfig` 将报告投影到当前启用的 Provider/模型，删除或停用立即反映到持久快照和 SSE，防止在途检测把已删除项目重新放回监控页。
 
-## 6. 状态模型
+## 状态模型
 
 | 状态 | 触发条件 | 展示 |
 |------|----------|------|
 | `ok` | 请求成功且延迟 < `SLOW_THRESHOLD_MS` | 正常（绿） |
 | `slow` | 请求成功且延迟 ≥ `SLOW_THRESHOLD_MS` | 较慢（黄） |
 | `error` | 请求失败/超时/解析失败 | 异常（红） |
-| `unknown` | 模型发现失败，无法检测上次已知的模型 | 未检测（历史灯为灰） |
+| `unknown` | 无当前有效检测证据，如新增配置、连接变更或发现失败 | 未检测（灰） |
 | `paused` | `ENABLED=true` 且 `PROBE_ENABLED=false` | 已暂停（黄） |
 
-- Provider 状态：有 error 或 Provider 级错误（模型列表失败）→ `error`；否则有 unknown → `unknown`；否则有 slow → `slow`；否则 `ok`；暂停探测 → `paused`。
-- 全局状态：存在 error、unknown 或 Provider 级错误 → `DEGRADED`，否则 `OPERATIONAL`。
-- `unknown` 说明本轮未能验证响应，不代表聊天接口已证实故障；计入检测成功率分母，但不计入实际调用次数或用量。首次发现失败且没有已知模型时，仅记录 Provider 错误。
+- Provider 状态：暂停时为 `paused`；否则依次检查明确错误、未检测或空模型结果、较慢响应，分别为 `error`、`unknown`、`slow`，其余为 `ok`。
+- 全局状态：存在 error、unknown 或 Provider 级错误时为 `DEGRADED`，否则为 `OPERATIONAL`。界面还需优先识别 `state=unconfigured/pending`，不能把空态当作请求失败。
+- `unknown` 不证明聊天接口已故障。模型发现失败生成的历史样本计入成功率分母，但新增配置或连接变化的状态投影不会凭空增加历史、调用次数或用量。
 - 报告 `generated_at` 与模型/Provider `checked_at` 使用 UTC RFC3339。单 Provider 重测保留其他 Provider 原时间，任务计数只统计实际重测目标。
 
-## 7. 实时推送
+通知使用独立的范围与状态计算，未知且无检测证据的 Provider 不应触发恢复通知，详见[告警通知](configuration.md#告警通知)。
+
+## 实时推送
 
 `web.Broker` 维护订阅者 channel 集合（`internal/web/server.go`）：
 
@@ -127,13 +132,8 @@ HTTP 接受任务后用服务端独立上下文执行，断开连接不会取消
 - 每 5 秒发 `: keep-alive` 注释帧；每次发送报告和心跳前按当前 `status_login_required` 检查会话，失效则推送 `auth-required` 后断开；
 - 前端 `EventSource` 不可用或出错时，指数退避轮询 `/api/status`（30s → 60s → 120s）。
 
-## 8. 配置优先级
+## 配置优先级
 
-```
-管理面板 / PUT /api/admin/settings  ──►  SQLite runtime_config（持久）
-导入配置 / POST /api/admin/config/import ─┘        │
-                                                  ▼
-代码默认值 ──► 进程环境变量覆盖 ──► 基础配置 ──► 生效配置
-```
+默认值和环境变量形成基础配置，SQLite 中已保存的运行设置与 Provider 覆盖同名值。管理面板和配置导入更新 SQLite，并立即应用至运行状态。
 
-监听地址、静态/数据路径、`SECURE_COOKIES`、探测提示词及 `AUTO_CHECK_RUN_ON_START` 只在启动时读取，变更需重启。其余可管理参数（含监控登录开关）由 SQLite 持久化，后台保存或 JSON 导入后即时生效。环境账号密码仅在初次创建管理员时使用。详见 [configuration.md](configuration.md)。
+监听地址、静态/数据路径、`SECURE_COOKIES`、探测提示词及 `AUTO_CHECK_RUN_ON_START` 只在启动时读取，变更需重启。环境账号密码仅用于初次创建管理员。字段归属见[配置优先级](configuration.md#配置优先级)与[运行时修改](configuration.md#运行时修改与重启)。

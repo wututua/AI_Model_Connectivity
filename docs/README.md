@@ -1,54 +1,54 @@
-# 项目文档
+# 文档
 
-> [项目主页](../README.md) · [GitHub 仓库](https://github.com/wututua/AI_Model_Connectivity) · [GitHub Releases](https://github.com/wututua/AI_Model_Connectivity/releases)
+[项目首页](../README.md) · [更新日志](../CHANGELOG.md) · [参与贡献](../CONTRIBUTING.md)
 
-AI Model Connectivity（简称 CG，Go module 名为 `cg`）是一个用于检测 OpenAI 兼容接口连通性的独立 Web 服务。Go 后端负责探测、聚合、告警和 API，React 前端提供可选登录保护的仪表盘与账号管理面板，运行数据保存在本地 SQLite。
+这里是 AI Model Connectivity 的使用和开发文档。首次使用请从项目首页的[快速开始](../README.md#快速开始)进入；以下文档按当前分支维护，已发布版本的行为请结合对应的 [Release 说明](releases/README.md)阅读。
 
-## 选择阅读路径
-
-| 读者 | 建议顺序 |
-|------|----------|
-| 初次使用 | [根 README](../README.md) → [配置参考](configuration.md) → [部署指南](deployment.md) |
-| 运维人员 | [部署指南](deployment.md) → [安全说明](security.md) → [运维指南](operations.md) → [数据存储](data-storage.md) |
-| 后端/API 开发 | [系统架构](architecture.md) → [HTTP API](api.md) → [数据存储](data-storage.md) → [开发指南](development.md) |
-| 前端开发 | [前端说明](frontend.md) → [前后端对接](backend-api.md) → [HTTP API](api.md) → [开发指南](development.md) |
-| 发布维护 | [部署指南](deployment.md#8-发布流水线) → [开发指南](development.md#7-发布) |
-
-## 文档目录
+## 使用与部署
 
 | 文档 | 内容 |
-|------|------|
-| [系统架构](architecture.md) | 模块边界、目录结构、启动流程、检测时序和状态模型 |
-| [配置参考](configuration.md) | 环境变量、Provider 配置、校验规则和配置生效方式 |
-| [HTTP API](api.md) | 认证、错误码、全部端点、curl 示例和数据结构索引 |
-| [前后端对接](backend-api.md) | 前端视角的 API、SSE、权限状态和 TypeScript 数据契约 |
-| [数据存储](data-storage.md) | SQLite 表结构、事务、历史/用量聚合、迁移和备份 |
-| [前端说明](frontend.md) | React + shadcn/ui 结构、路由、主题组件和构建产物 |
-| [部署指南](deployment.md) | Docker、Compose、二进制、systemd、反向代理和 CI |
-| [安全说明](security.md) | 认证授权、限流、SSRF、防泄漏和部署加固 |
-| [运维指南](operations.md) | 健康检查、Prometheus、日志、告警、备份和故障排查 |
-| [开发指南](development.md) | 本地环境、常用命令、测试约定和发布流程 |
-| [v1.0.0-beta.2](releases/v1.0.0-beta.2.md) | 第二个预发布版本的修复、验证范围和升级注意事项 |
+| --- | --- |
+| [部署指南](deployment.md) | 发布包、容器、systemd、反向代理、升级与回滚 |
+| [配置参考](configuration.md) | 启动变量、运行时设置、Provider 和通知规则 |
+| [运维指南](operations.md) | 健康检查、任务、日志、备份、密码恢复与排障 |
+| [安全与访问控制](security.md) | 认证、权限、网络访问和数据保护边界 |
 
-## 一分钟上手
+## API 与开发
 
-```bash
-go run ./cmd/cg
-```
+| 文档 | 内容 |
+| --- | --- |
+| [HTTP API](api.md) | 认证、端点、错误码和请求示例 |
+| [前端集成](backend-api.md) | 会话、SSE、后台任务及响应类型 |
+| [开发指南](development.md) | 本地环境、测试、代码约定和发布流程 |
+| [系统架构](architecture.md) | 模块职责、启动流程、检测流程和状态模型 |
+| [前端开发](frontend.md) | 路由、组件、主题、构建和浏览器测试 |
+| [数据存储](data-storage.md) | SQLite 表结构、事务、统计、迁移及备份 |
 
-首次启动会创建管理员（默认账号 `admin`）；未设置 `ADMIN_PASSWORD` 且没有可迁移的旧密码时，终端会打印随机初始密码。随后访问：
+## 项目协作
 
-- 仪表盘：<http://127.0.0.1:8080>
-- 管理面板：<http://127.0.0.1:8080/admin>
+- [贡献指南](../CONTRIBUTING.md)：提交 Issue、Pull Request 和文档改进。
+- [安全报告](../SECURITY.md)：如何报告漏洞而不公开敏感信息。
+- [更新日志](../CHANGELOG.md)：版本摘要与升级注意事项。
+- [Release 说明](releases/README.md)：按版本归档的完整中文和英文说明。
+- [许可证](../LICENSE)：项目代码的许可条款。
 
-首次登录需要修改初始密码，至少 8 位且包含大写字母、小写字母和数字。然后在 **Provider** 页面添加 OpenAI 兼容服务，并在 **运行概览** 中触发检测。管理员可在 **用户管理** 添加管理员/普通用户，在 **系统设置 → 访问控制** 开启监控页登录保护。普通用户只能查看共享数据和修改自己的密码。
+## 常用入口
 
-## 文档约定
+| 问题 | 入口 |
+| --- | --- |
+| 环境变量修改后为什么没有生效？ | [配置优先级](configuration.md#配置优先级) |
+| 如何限制模型数量和探测成本？ | [探测参数](configuration.md#探测) |
+| 如何给状态页加登录保护？ | [运行时修改与重启](configuration.md#运行时修改与重启) |
+| 管理员密码忘了怎么办？ | [管理员密码恢复](operations.md#管理员密码恢复) |
+| 如何正确备份和回滚？ | [备份与恢复](operations.md#备份与恢复) |
+| 收不到通知或检测结果异常？ | [常见故障](operations.md#常见故障) |
 
-- 命令默认从仓库根目录执行；需要切换目录时会在代码块中明确写出。
-- 配置名以 [配置参考](configuration.md) 和 `internal/config` 为准；SQLite 中已保存的运行时配置会覆盖同名运行时初始值。
-- 状态统一使用 `ok`（正常）、`slow`（较慢）、`error`（异常）、`unknown`（未检测）和 `paused`（暂停）。
-- 报告、模型和历史记录时间使用带时区的 RFC3339，前端按浏览器本地时区展示，用量按 UTC 自然日聚合。
-- 涉及 API Key、账号密码、会话 Cookie、Webhook 和日志的示例均为占位值，提交 Issue 前必须脱敏。
+## 阅读约定
 
-发现文档与代码不一致时，请以当前分支源码和自动化测试为准，并在 [GitHub Issues](https://github.com/wututua/AI_Model_Connectivity/issues) 提交可复现的问题。
+- 命令默认从仓库根目录运行；发布包命令从解压目录运行。
+- 发布包不包含开发源码；查看源码链接时，请在 GitHub 对应版本标签下阅读文档。
+- Shell 示例默认使用 Bash，PowerShell 示例会单独标注。
+- 示例中的密码、密钥、URL 和模型 ID 请替换为自己的值，不要直接用于生产。
+- `ok`、`slow`、`error`、`unknown`、`paused` 分别表示正常、较慢、异常、未检测和暂停。
+- 时间戳使用带时区的 RFC3339，用量按 UTC 自然日聚合；界面按浏览器本地时区展示时间。
+- 文档示例与源码不一致时，请附上版本及最小复现步骤提交 Issue，勿附真实凭据。

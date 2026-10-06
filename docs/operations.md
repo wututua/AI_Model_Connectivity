@@ -1,118 +1,180 @@
-# 运维与可观测
+# 运维指南
 
-> [项目主页](../README.md) · [文档索引](README.md) · [GitHub 仓库](https://github.com/wututua/AI_Model_Connectivity)
+[项目首页](../README.md) · [文档索引](README.md) · [部署指南](deployment.md) · [配置参考](configuration.md)
 
-## 1. 健康检查
+## 目录
 
-| 方式 | 说明 |
-|------|------|
-| `GET /health` | 返回 `{"ok": true}`，无需认证 |
-| `model-connectivity healthcheck` | 请求 `http://127.0.0.1:<APP_PORT>/health`，非 2xx 退出码 1（容器健康检查用） |
-| `GET /api/status` | 返回 200；`state=unconfigured/pending` 为正常首用空态，`ready` 为已有报告；启用登录开关后需要账号会话 |
+- [健康检查](#健康检查)
+- [Prometheus 指标](#prometheus-指标)
+- [日志](#日志)
+- [告警验证](#告警验证)
+- [任务历史](#任务历史)
+- [备份与恢复](#备份与恢复)
+- [管理员密码恢复](#管理员密码恢复)
+- [常见故障](#常见故障)
+- [成本控制](#成本控制)
 
-## 2. Prometheus 指标
+## 健康检查
 
-`GET /metrics` 需携带已完成初始改密的普通用户或管理员会话 Cookie，未启用时返回 `404`。注册在自己的 `prometheus.Registry`（含 Go/进程收集器）。
+| 入口 | 含义 |
+| --- | --- |
+| `GET /health` | 无需认证，返回 `{"ok":true}`，仅证明 HTTP 进程可响应 |
+| `model-connectivity healthcheck` | 请求 `http://127.0.0.1:<APP_PORT>/health`，失败时非零退出 |
+| `GET /api/status` | 最新报告；开启登录要求后需要有效会话 |
+
+首次使用的 `unconfigured`（无启用 Provider）与 `pending`（等待检测）均为正常空态，返回 200。`ready` 不代表结果健康，还需检查模型状态、Provider 错误、`generated_at` 与 `checked_at`。
+
+## Prometheus 指标
+
+常规服务启动会注册 `GET /metrics`，需要已完成初始改密的普通用户或管理员会话。仅自定义嵌入服务未调用 `SetMetrics` 时返回 404，没有对应的运行时启用开关。
 
 | 指标 | 类型 | 标签 | 说明 |
-|------|------|------|------|
-| `cg_probe_latency_ms` | Histogram | `provider`,`model`,`status` | 单次探测延迟，桶 50/100/250/500/1000/2000/5000/10000/30000 ms |
+| --- | --- | --- | --- |
+| `cg_probe_latency_ms` | Histogram | `provider`,`model`,`status` | 探测延迟；桶为 50/100/250/500/1000/2000/5000/10000/30000 ms |
 | `cg_probe_total` | Counter | `provider`,`model`,`status` | 探测次数 |
-| `cg_probe_tokens_total` | Counter | `provider`,`model`,`kind` | token 消耗，`kind` 为 `prompt`/`completion`；上游未上报时不计 |
-| `cg_check_runs_total` | Counter | `kind`,`status` | 检测任务次数，`status` 为 `success`/`error`/`canceled` |
-| `cg_check_duration_seconds` | Histogram | `kind`,`status` | 一次检测耗时，桶 1/5/10/30/60/120/300/600 s |
+| `cg_probe_tokens_total` | Counter | `provider`,`model`,`kind` | 上游返回的 Token 数，`kind` 为 `prompt` / `completion` |
+| `cg_check_runs_total` | Counter | `kind`,`status` | 任务数，状态为 `success` / `error` / `canceled` |
+| `cg_check_duration_seconds` | Histogram | `kind`,`status` | 任务耗时；桶为 1/5/10/30/60/120/300/600 秒 |
 
-`kind` 取值：`manual`（手动）、`scheduled`（定时）、`startup`（启动）、`provider`（单 Provider 重跑）。
+任务 `kind` 为 `manual`、`scheduled`、`startup` 或 `provider`。服务使用独立 Registry，并包含 Go 与进程收集器。
 
-手动查询（登录方式见 [API 参考](api.md#1-认证)）：
+完成 [API 登录](api.md#认证)后可手动查询：
 
 ```bash
 curl -b cookies.txt http://127.0.0.1:8080/metrics
 ```
 
-**兼容性变化**：旧版 `authorization: Bearer` 配置已失效。当前没有永久指标密钥，自动抓取需要由受信任的本地采集程序登录普通用户账号、保存 Cookie 并在 24 小时会话过期时重新登录；不要直接填写一个不会更新的 Cookie，也不要公开暴露无认证的代理端点。
+当前没有永久指标密钥，旧 Bearer 配置不再有效。自动采集程序需要保护账号及 Cookie，并在 24 小时绝对会话过期后重新登录；不要配置不会更新的静态 Cookie，也不要通过无认证代理公开指标。
 
-建议告警规则：
+以下规则片段可加入 Prometheus 规则组的 `rules` 列表：
 
 ```yaml
 - alert: ModelConnectivityProbeFailing
   expr: increase(cg_probe_total{status="error"}[30m]) > 5
 ```
 
-`cg_check_runs_total` 是计数器，不包含最后报告时间，不能直接用于 stale-report 告警。报告过期检测应由外部探针读取 `/api/status` 的 `generated_at`，或根据部署计划监控长时间没有新增 `cg_check_runs_total` 的情况。
+计数器不是报告更新时间。过期告警应读取 `/api/status` 的时间戳，或结合调度计划检查长时间没有新增检测的情况。
 
-## 3. 日志
+## 日志
 
-`slog` JSON 输出到 stdout，关键事件：
+应用通过 `slog` 输出 JSON 日志；初始化账号和密码提示可能另外写入终端。关键事件：
 
-| 日志 | 含义 |
-|------|------|
-| `server started` | 监听地址与 `web_dir` |
-| `Administrator account: …` / `Initial administrator password: …` | 初始管理员和随机生成密码；请保护启动日志 |
-| `next scheduled check` | 下一次定时检测时间与间隔 |
-| `check finished` | ok/slow/error/total 计数 |
-| `send notify failed` | 告警发送失败（不影响检测结果） |
-| `scheduled check skipped` | 上一轮未完成，被 `ErrCheckAlreadyRunning` 跳过 |
+| 事件 | 含义 |
+| --- | --- |
+| `server started` | 监听地址与静态资源路径 |
+| `Administrator account: ...` / `Initial administrator password: ...` | 初始化账号与随机密码，请勿公开 |
+| `next scheduled check` | 下次定时检测时间与间隔 |
+| `check finished` | 正常、较慢、异常与总数 |
+| `send notify failed` | 通知失败，不改变检测结果 |
+| `scheduled check skipped` | 已有任务运行，本轮调度跳过 |
 
-上游错误中的 API Key 会脱敏；首次启动生成密码会显示于终端，日志应限制读取权限。
+上游错误会做凭据脱敏，但这不代表所有日志都可公开。提交 Issue 前仍需检查密码、Cookie、CSRF、通知地址与业务信息。
 
-## 4. 告警配置与验证
+## 告警验证
 
-1. 在管理面板 **设置** 填写平台与 Webhook；Telegram 需 token + chat id。
-2. 冷却时间建议 30 分钟，避免抖动刷屏。
-3. 验证：临时把某 Provider 的 API Key 改错后触发检测，应收到 `DEGRADED` 通知；恢复后（开启 `NOTIFY_ON_RECOVERY`）收到恢复通知。
-4. 无通知的常见原因：平台设为 `disabled` / Webhook 为空 / 状态未变化 / 首次启动即正常 / 处于冷却期。
+1. 在设置中选择通知平台，填写 Webhook；Telegram 使用 Bot Token 与 Chat ID。
+2. 建立独立测试 Provider 和通知过滤范围，避免更改生产凭据或干扰真实告警。
+3. 在测试范围内模拟失败并检测，确认异常通知；恢复后再次检测，确认恢复通知设置。
+4. 测试结束后还原过滤范围与冷却时间，重新核对正式配置。
 
-企业微信/钉钉要求 `errcode=0`，Telegram 要求 `ok=true`，Bark 要求 `code=200`；HTTP 200 但平台拒绝时仍记为失败，不推进已发送状态，下次检测会继续尝试（仍遵守冷却配置）。通用 Webhook 与 Discord 按 HTTP 2xx 判断。失败回执不写入日志，避免回显凭据。这不是独立重试队列：未再执行检测时不会自动重发。
+没有通知时检查平台是否禁用、凭据是否完整、过滤范围是否匹配、状态是否变化，以及是否仍在冷却期。首次检测即正常不会发送恢复通知；未检测、空范围或全部暂停也不能作为恢复证据。
 
-## 5. 任务历史排查
+企业微信与钉钉要求 `errcode=0`，Telegram 要求 `ok=true`，Bark 要求 `code=200`；通用 Webhook 与 Discord 按 HTTP 2xx 判断。平台拒绝时不会推进已发送状态，后续检测会再次尝试，但没有独立的自动重试队列。具体范围规则见[告警通知](configuration.md#告警通知)。
+
+## 任务历史
 
 ```bash
 curl -b cookies.txt \
   'http://127.0.0.1:8080/api/admin/tasks?status=error&limit=20'
 ```
 
-`error_message` 与 `status=canceled` 可区分失败与取消/停服；`elapsed_ms` 用于定位整体变慢。后台任务受服务进程管理，离开页面不会取消。强制终止进程仍可能丢失尚未落库的用量，统计不能替代供应商账单。
+结合 `status`、`error_message` 和 `elapsed_ms` 判断失败、取消或变慢。后台任务不因离开页面而取消；API 返回 202 仅表示已接受，需查询任务终态。
 
-## 6. 备份与恢复
+正常取消会保留已确认的用量，强杀进程或数据库不可写仍可能丢失未落库数据。任务次数与报告中保留的模型总数不同，字段语义见[任务 API](api.md#任务历史)。
+
+## 备份与恢复
+
+备份包含密码哈希、会话记录、Provider API Key 和通知凭据。配置导出不含这些数据，也不含历史，**不能替代数据库备份**。
+
+### 在线备份
+
+需要 `sqlite3` CLI，以有权访问数据库的服务账户执行。以下 Bash 示例从原工作目录备份默认数据库；自定义路径请相应替换：
 
 ```bash
-# 在线一致性备份（需 sqlite3 CLI）
-sqlite3 data/cg.sqlite ".backup /backup/cg-$(date +%F).sqlite"
-# 或停服后复制整个 data 目录
-systemctl stop model-connectivity && cp -a data data.bak && systemctl start model-connectivity
+umask 077
+mkdir -p backups
+sqlite3 data/cg.sqlite ".backup 'backups/cg-$(date +%F-%H%M%S).sqlite'"
 ```
 
-备份文件含账号密码哈希、会话记录、Provider API Key 和通知凭据，权限应设为 `0600` 或存入加密介质。账号系统升级会删除旧 Token KV，回滚必须恢复升级前备份。
+`.backup` 生成一致性快照。不要在写入期间只复制 `cg.sqlite`，也不要分别复制不断变化的 WAL 文件来拼接备份。
 
-## 7. 常见故障
+### 停服备份
 
-| 现象 | 排查 |
-|------|------|
-| 仪表盘一直空 | 尚未检测过；在管理面板触发一次，或设置 `AUTO_CHECK_RUN_ON_START=true` |
-| 模型列表为空 | `PROVIDER_N_MODELS` 留空时依赖 `/models`；检查 base_url 与鉴权，或显式指定模型 |
-| 全部 `slow` | 调高 `SLOW_THRESHOLD_MS`，或检查上游/网络延迟 |
-| 触发检测返回 409 | 上一轮仍在进行；等待或调用 `detection/stop` |
-| 登录失败 / 401 | 检查账号密码、账号是否禁用以及会话是否过期；首次使用可查启动日志或旧 Token 迁移说明，已有账号不会被 `ADMIN_PASSWORD` 重置 |
-| 写操作 403 | 普通用户无修改权限；检查初始改密、CSRF、反向代理 Host 和 `SECURE_COOKIES` 是否与 HTTPS 部署一致 |
-| 429 | 一分钟内失败 10 次；等待 `Retry-After` 或重启服务清空计数 |
-| 通知收不到 | 见第 4 节检查清单 |
-| 数据库 locked | 单写者设计，确认未用同一文件的多实例；必要时检查是否有外部进程占用 |
-| 上游返回 401/403 | API Key 无效或 base_url 不匹配；错误详情在仪表盘（需 `SHOW_ERROR_DETAIL=true`） |
+停止所有服务、单次检测与其他写入者后，复制完整数据目录。以[本文档的 systemd 部署](deployment.md#systemd)为例：
 
-## 8. 成本提示
+```bash
+sudo systemctl stop model-connectivity
+sudo install -d -m 0700 /var/backups/model-connectivity
+sudo cp -a /var/lib/model-connectivity \
+  "/var/backups/model-connectivity/data-$(date +%F-%H%M%S)"
+sudo systemctl start model-connectivity
+```
 
-探测会真实消耗 token。默认提示词下每模型约 40 token；建议：
+Compose 部署先 `docker compose stop`，复制绑定挂载的数据目录后再启动。命名卷需使用具备该卷访问权限的备份方式；distroless 应用容器没有 shell。
 
-- 使用 `SKIP_MODELS` / `MAX_MODELS_PER_PROVIDER` 缩小探测面；
-- 定时检测间隔设为 6–12 小时；
-- 在管理面板 **检测控制** 查看「Token 消耗估算」，在 **用量** 页查看实际统计。
+### 恢复检查
 
-## 9. 管理员密码恢复
+1. 停止所有写入者，保留当前数据副本供排查。
+2. 将备份恢复到干净的目标目录，不混入另一份数据库遗留的 `-wal` / `-shm`。
+3. 恢复服务账户的所有权和权限；Unix 数据库与备份使用 `0600`，目录使用 `0700`，Windows 使用受限 ACL。
+4. 使用匹配的应用版本启动，检查登录、配置、历史与用量，必要时轮换备份中的旧凭据。
 
-1. 停止所有使用该数据库的服务实例，备份数据目录。
-2. 在原工作目录、相同 `DATA_DIR` / `DATABASE_PATH` 环境下运行 `model-connectivity recover-admin admin`（用户名替换为实际管理员；Windows 使用 `.\model-connectivity.exe`，源码使用 `go run ./cmd/cg recover-admin admin`）。
-3. 命令仅为已有管理员生成并显示临时密码，重新启用账号并撤销其所有会话；不清除配置、历史、用量或其他用户，不会提升普通用户权限。
-4. 重启服务，用临时密码登录并完成强制改密。输出包含密码，勿录屏、上传或写入共享日志。
+升级回滚需恢复升级前备份。备份应保存在受限或加密介质，并定期在隔离环境验证可恢复性。
 
-Docker Compose 使用同样的数据卷和服务账户：`docker compose stop`，随后 `docker compose run --rm model-connectivity recover-admin admin`，最后 `docker compose up -d`。若改过服务名，请相应替换。命令不接受明文密码参数，避免泄露在进程列表中；拥有数据库读取/写入权限等同于可信运维权限。
+## 管理员密码恢复
+
+1. 停止所有使用该数据库的进程，并备份数据。
+2. 使用原工作目录、原 `DATA_DIR` / `DATABASE_PATH` 和有访问权限的服务账户运行恢复命令。
+3. 重启，用生成的临时密码登录，完成强制改密。
+
+发布包示例，`admin` 替换为实际管理员用户名：
+
+```bash
+./model-connectivity recover-admin admin
+```
+
+Windows 使用 `.\model-connectivity.exe recover-admin admin`，源码使用 `go run ./cmd/cg recover-admin admin`。
+
+Compose 使用同一数据卷和服务账户：
+
+```bash
+docker compose stop
+docker compose run --rm model-connectivity recover-admin admin
+docker compose up -d
+```
+
+命令只恢复已有管理员，重新启用账号并撤销其会话，不提升普通用户权限，不清除配置、历史或其他账号。输出包含临时密码，不要录屏、上传或写入共享日志。修改 `ADMIN_PASSWORD` 不能替代此流程。
+
+## 常见故障
+
+| 现象 | 排查方向 |
+| --- | --- |
+| 状态页一直为空 | 确认有启用的 Provider，并执行首次检测 |
+| 模型列表为空 | 检查 `{base_url}/models` 与鉴权，或手动指定模型 |
+| 全部显示较慢 | 检查网络、上游延迟和 `SLOW_THRESHOLD_MS` |
+| 检测返回 409 | 已有任务运行，查询其状态；确需取消时使用管理员停止 API |
+| 登录失败或 401 | 检查账号是否禁用、密码与会话；已有账号不会被环境密码重置 |
+| 写操作返回 403 | 检查角色、初始改密、CSRF、代理 Host 与 Secure Cookie 配置 |
+| 认证返回 429 | 按 `Retry-After` 等待，检查失败尝试与代理共享 IP；不要通过重启绕过限流 |
+| 收不到通知 | 检查[告警验证](#告警验证)与通知过滤条件 |
+| 数据库锁定或不可写 | 确认只有一个实例，检查服务账户、挂载与磁盘权限 |
+| 上游返回 401/403 | 检查 API Key、接口地址和账号权限，不要将真实密钥粘贴到 Issue |
+| 修改环境变量未生效 | 检查是否属于[SQLite 持久化运行设置](configuration.md#配置优先级) |
+
+## 成本控制
+
+探测会真实消耗 Token，固定短提示词不保证固定费用。前端的每模型约 40 Token 只是粗略估算，不同模型的分词、推理与计费策略可能不同。
+
+- 显式选择模型，或使用 `SKIP_MODELS` / `MAX_MODELS_PER_PROVIDER` 限制探测范围。
+- 根据监控目标设置检测周期，避免不必要的高频轮询上游。
+- 用量页仅统计上游已返回的数据，最终费用以供应商账单为准。

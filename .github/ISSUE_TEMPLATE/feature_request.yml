@@ -1,0 +1,23 @@
+name: 功能建议
+description: 描述使用场景和希望解决的问题。
+title: "[Feature] "
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: 使用场景与问题
+      description: 当前流程有什么不足，影响哪些使用者？
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 建议方案
+      description: 描述预期行为，以及是否影响已有配置、API 或数据。
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 替代方案与补充说明
+      description: 可以附脱敏示例或参考资料。

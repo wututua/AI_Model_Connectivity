@@ -1,12 +1,23 @@
 # 数据存储
 
-> [项目主页](../README.md) · [文档索引](README.md) · [GitHub 仓库](https://github.com/wututua/AI_Model_Connectivity)
+[项目首页](../README.md) · [文档索引](README.md) · [系统架构](architecture.md) · [备份与恢复](operations.md#备份与恢复)
 
 所有状态保存在单个 SQLite 文件（默认 `data/cg.sqlite`，驱动 `modernc.org/sqlite`，纯 Go 无 CGO）。
 
-## 1. 连接与 PRAGMA
+## 目录
 
-`internal/storage/sqlite.go` 打开时执行：
+- [连接与 PRAGMA](#连接与-pragma)
+- [表结构](#表结构)
+- [写入事务](#写入事务)
+- [历史读取与裁剪](#历史读取与裁剪)
+- [统计口径](#统计口径)
+- [迁移](#迁移)
+- [文件权限](#文件权限)
+- [备份](#备份)
+
+## 连接与 PRAGMA
+
+[sqlite.go](../internal/storage/sqlite.go) 打开时执行：
 
 ```sql
 PRAGMA journal_mode = WAL;
@@ -20,7 +31,7 @@ PRAGMA mmap_size = 30000000;
 
 连接池 `SetMaxOpenConns(1)`：本进程读写均排队使用一个连接，避免多写入者争用；WAL 支持其他连接上的并发读取，但不会让此连接池内部的查询并行。
 
-## 2. 表结构
+## 表结构
 
 ### `probe_results`（探测历史）
 
@@ -73,7 +84,7 @@ PRAGMA mmap_size = 30000000;
 
 ### `check_tasks`
 
-任务记录（字段见 [api.md](api.md#8-任务历史)），索引：`(started_at DESC)`、`(status)`、`(status, provider_id)`。
+任务记录（字段见[任务历史](api.md#任务历史)），索引：`(started_at DESC)`、`(status)`、`(status, provider_id)`。
 
 服务启动时将遗留 `running` 任务改为 `canceled`，写入结束时间和重启中断原因。单 Provider 任务不统计合并报告中其他 Provider 的结果。
 
@@ -81,7 +92,7 @@ PRAGMA mmap_size = 30000000;
 
 主键 `(day, provider, model)`，列为 `provider_name`、`provider_type`、`prompt_tokens`、`completion_tokens`、`total_tokens`、`probe_count`。
 
-## 3. 写入事务
+## 写入事务
 
 `RecordCheck` 在一个事务内完成：
 
@@ -96,29 +107,29 @@ PRAGMA mmap_size = 30000000;
 
 应用层在批次取消或主事务失败后，会用独立的 5 秒收尾上下文尝试单独保存已确认探测的用量，不替换报告或历史，也不重复保存已提交的批次。数据库不可写或进程被强杀时无法保证收尾成功；未开始及取消中未收到响应的探测不估算用量。
 
-## 4. 历史读取与裁剪
+## 历史读取与裁剪
 
 - `LoadHistory(limitPerKey, statsWindowDays)`：按时间戳代表的实际时刻过滤统计窗口，通过 SQL 窗口函数限制每 `(provider, model)` 最近 `limitPerKey` 条（默认 `MAX_HISTORY_RECORDS`），再生成身份键；时间相同按自增 ID 排序。
 - `report.Build` 追加本次结果后再次按 `MaxHistoryRecords` 截断。
 - 有效窗口是配置天数、90 天保留策略及每模型条数上限的交集；扩大显示窗口不能恢复已裁剪样本。
 - `pruneHistory` 按统计窗口裁剪，但若裁剪后少于 `HISTORY_SIZE`，会回退保留最近 `HISTORY_SIZE` 条，保证曲线和状态灯仍有足够数据点。
 
-## 5. 统计口径
+## 统计口径
 
 | 指标 | 口径 |
 |------|------|
 | `avg_latency_24h` | 24h 内 `ok`/`slow` 样本算术平均 |
-| `p50/p95/p99_latency_24h` | 升序后 Type-7 线性插值分位数（同 numpy / Excel `PERCENTILE`） |
+| `p50/p95/p99_latency_24h` | 升序后使用 Type-7 线性插值计算分位数 |
 | `latency_samples_24h` | 24h 内有效样本数 |
 | `weekly_success_text` / `availability` | `STATS_WINDOW_DAYS` 窗口内 `(ok+slow)/(ok+slow+error+unknown)`，表示检测成功率，不是连续在线时长比例 |
 | `history` | 最近 `HISTORY_SIZE` 条状态，左侧补 `empty` |
 | `svg_path_line` / `svg_path_area` | 100×40 视图内归一化后的三次贝塞尔平滑曲线，峰值按 max(1000, 最大延迟) 归一 |
 
-历史被裁剪或关闭不影响 `usage_daily`，因此关闭历史后用量统计仍完整。
+历史被裁剪或关闭不影响独立的 `usage_daily`，已确认的用量仍可累加。它不保证覆盖全部真实费用：上游未上报、进程强杀或写库失败均可能造成缺失。
 
 HTTP 错误、成功 HTTP 状态中的错误信封，以及回复为空、缺失消息或因 token 上限被截断时，探测记为失败，但保留上游返回的有效 usage；未返回 usage 的消耗仍无法估算。
 
-## 6. 迁移
+## 迁移
 
 启动时 `importLegacy` 在数据目录存在旧版 JSON 且目标表为空时自动导入（旧文件保留不删）：
 
@@ -136,24 +147,18 @@ HTTP 错误、成功 HTTP 状态中的错误信封，以及回复为空、缺失
 
 Provider 的随机 `connection_revision` 随运行配置及最新报告 JSON 保存，不需要新增 SQL 表。升级时，为没有版本的 Provider 分配新版本，旧快照的当前状态保守地变为“未检测”，下一次检测后恢复；历史与用量不会清除。版本随连接或凭据变更轮换，重启与仅名称修改不轮换。
 
-> 用量只能迁移数据库中仍存在的记录，已删除或取消检测产生的实际消耗无法还原，因此该统计**不是**供应商账单。
+> 用量只能迁移仍存在的记录。当前版本取消任务时会尝试保存已确认的用量，但无法补回旧版本丢失、已删除或上游未报告的消耗，因此统计不是供应商账单。
 
-## 7. 文件权限
+## 文件权限
 
 - 数据目录：不存在时以 `0700` 创建。
-- 数据库文件及 `-wal` / `-shm` / `-journal`：
-  - Unix → `chmod 0600`；
-  - Windows → 受限 ACL，仅当前服务账户与 SYSTEM 可访问。
+- Unix 数据库及 `-wal` / `-shm` / `-journal`：`0600`。
+- Windows 数据库及附属文件：受限 ACL，仅当前服务账户与 SYSTEM 可访问。
 
 这属于文件访问控制而非加密；服务账户仍可读取其中凭据，备份文件应使用同等级权限或加密介质。
 
-## 8. 备份
+## 备份
 
-```bash
-# 推荐：在线一致性备份
-sqlite3 data/cg.sqlite ".backup backup.sqlite"   # 需要 sqlite3 CLI
-# 或停服后直接复制整目录
-cp -a data data.bak
-```
+在线使用 SQLite 一致性备份；文件复制必须先停止所有写入者。不要只复制正在写入的数据库主文件，也不要混用不同快照的 WAL。
 
-备份包含账号密码哈希、会话记录、Provider API Key 和通知凭据。密码不存明文，Provider API Key 与通知凭据没有静态加密，请按第 7 节保护备份。配置导出不包含用户、密码或会话，不能替代数据库备份。
+备份包含账号密码哈希、会话、Provider API Key 与通知凭据，应按[文件权限](#文件权限)保护或存入加密介质。配置导出不能替代数据库备份，完整操作步骤集中在[运维指南](operations.md#备份与恢复)。
