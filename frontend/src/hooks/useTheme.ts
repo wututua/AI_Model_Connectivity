@@ -1,25 +1,16 @@
 import { useState, useEffect } from 'react'
-
-export type Theme = 'dark' | 'light' | 'auto'
-
-function getSystemTheme(): 'dark' | 'light' {
-  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
-}
-
-function applyTheme(theme: Theme) {
-  const resolved = theme === 'auto' ? getSystemTheme() : theme
-  document.body.setAttribute('data-theme', resolved)
-}
+import { applyTheme, nextTheme, readTheme, saveTheme, type Theme } from '../utils/theme'
+export type { Theme } from '../utils/theme'
 
 export function useTheme() {
   const [theme, setTheme] = useState<Theme>(() => {
-    const stored = (localStorage.getItem('theme') as Theme) ?? 'dark'
+    const stored = readTheme()
     applyTheme(stored)
     return stored
   })
 
   useEffect(() => {
-    localStorage.setItem('theme', theme)
+    saveTheme(theme)
 
     if (theme === 'auto') {
       const mq = window.matchMedia('(prefers-color-scheme: dark)')
@@ -32,7 +23,7 @@ export function useTheme() {
   // 循环：dark → light → auto → dark
   // 使用 View Transitions API 在截图层级做交叉淡入，避免 backdrop-filter 实时重绘
   const cycle = () => {
-    const next: Theme = theme === 'dark' ? 'light' : theme === 'light' ? 'auto' : 'dark'
+    const next = nextTheme(theme)
     const doApply = () => applyTheme(next)
 
     if ('startViewTransition' in document && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {

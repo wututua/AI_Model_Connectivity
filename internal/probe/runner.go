@@ -23,6 +23,7 @@ type Target struct {
 }
 
 type Result struct {
+	Completed            bool   `json:"-"`
 	ProviderID           string `json:"provider_id"`
 	ProviderGroupID      string `json:"provider_group_id"`
 	ProviderType         string `json:"provider_type"`
@@ -168,7 +169,12 @@ func (r *Runner) probeTargets(ctx context.Context, targets []Target) []Result {
 	return results
 }
 
-func (r *Runner) probeOne(ctx context.Context, target Target) Result {
+func (r *Runner) probeOne(ctx context.Context, target Target) (result Result) {
+	// Keep confirmed responses even when another probe cancels the batch.
+	defer func() {
+		result.Completed = ctx.Err() == nil || result.Status == "ok" || result.Status == "slow" ||
+			result.PromptTokens > 0 || result.CompletionTokens > 0 || result.TotalTokens > 0
+	}()
 	started := time.Now()
 	probeCtx, cancel := context.WithTimeout(ctx, durationSeconds(r.cfg.TimeoutSeconds))
 	defer cancel()

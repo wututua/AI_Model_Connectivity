@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -25,13 +26,17 @@ import (
 
 func main() {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
+	args := os.Args[1:]
+	if len(args) == 1 && (args[0] == "--version" || args[0] == "version") {
+		fmt.Println(versionString())
+		return
+	}
 
 	baseCfg, err := config.Load(".env")
 	if err != nil {
 		slog.Error("load config", "err", err)
 		os.Exit(1)
 	}
-	args := os.Args[1:]
 	if len(args) > 0 && args[0] == "healthcheck" {
 		if err := healthcheck(baseCfg.AppPort); err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -45,6 +50,20 @@ func main() {
 		os.Exit(1)
 	}
 	defer store.Close()
+	if len(args) > 0 && args[0] == "recover-admin" {
+		if len(args) != 2 {
+			fmt.Fprintln(os.Stderr, "usage: model-connectivity recover-admin <existing-admin-username> (stop the service first)")
+			os.Exit(1)
+		}
+		password, err := recoverAdmin(context.Background(), store, args[1])
+		if err != nil {
+			slog.Error("recover administrator", "err", err)
+			os.Exit(1)
+		}
+		fmt.Println("Temporary administrator password:", password)
+		fmt.Println("Old sessions revoked. Change this password on first login. Keep this output private.")
+		return
+	}
 	if err := store.RecoverInterruptedTasks(context.Background()); err != nil {
 		slog.Error("recover interrupted tasks", "err", err)
 		os.Exit(1)
@@ -74,6 +93,11 @@ func main() {
 		slog.Error("invalid persisted providers", "err", err)
 		os.Exit(1)
 	}
+	cfg.Providers = config.ReconcileProviderRevisions(cfg.Providers, cfg.Providers)
+	if err := store.SaveRuntimeConfig(context.Background(), config.RuntimeConfigFromConfig(cfg)); err != nil {
+		slog.Error("save provider revisions", "err", err)
+		os.Exit(1)
+	}
 	app := &application{baseCfg: baseCfg, cfg: cfg, store: store, broker: broker, metrics: metrics.New(), schedulerWake: make(chan struct{}, 1)}
 
 	if err := app.initializeUsers(context.Background()); err != nil {
@@ -91,7 +115,7 @@ func main() {
 		case "serve":
 			// fall through
 		default:
-			slog.Error("unknown command", "cmd", args[0], "hint", "use serve or check")
+			slog.Error("unknown command", "cmd", args[0], "hint", "use serve, check, healthcheck, --version or recover-admin")
 			os.Exit(1)
 		}
 	}
@@ -188,6 +212,41 @@ type checkOptions struct {
 	SaveLatest bool
 }
 
+type checkRun struct {
+	ctx     context.Context
+	cancel  context.CancelFunc
+	started time.Time
+	task    storage.CheckTask
+}
+
+func (a *application) StartCheck(ctx context.Context, providerID string) (storage.CheckTask, error) {
+	if err := ctx.Err(); err != nil {
+		return storage.CheckTask{}, err
+	}
+	options := checkOptions{Kind: "manual", ProviderID: providerID, SaveLatest: true}
+	if providerID != "" {
+		cfg, ok := filterProvider(a.currentConfig(), providerID)
+		if !ok || !cfg.Providers[0].Enabled || !cfg.Providers[0].ProbeEnabled {
+			return storage.CheckTask{}, web.ErrProviderUnavailable
+		}
+		options.Kind = "provider"
+	}
+	// Acceptance is synchronous; execution belongs to the service, not the HTTP connection.
+	background, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	run, err := a.beginCheck(background, options)
+	if err != nil {
+		cancel()
+		return storage.CheckTask{}, err
+	}
+	go func() {
+		defer cancel()
+		if _, err := a.executeCheck(run, options); err != nil && !errors.Is(err, context.Canceled) {
+			slog.Error("background check failed", "task_id", run.task.ID, "err", err)
+		}
+	}()
+	return run.task, nil
+}
+
 func (a *application) check(ctx context.Context) (report.Report, error) {
 	return a.checkWithOptions(ctx, checkOptions{Kind: "manual", SaveLatest: true})
 }
@@ -265,16 +324,25 @@ func (a *application) UpsertProvider(ctx context.Context, id string, update conf
 	providers := append([]config.ProviderConfig(nil), current.Providers...)
 	found := -1
 	for i, provider := range providers {
-		if provider.ID == id || (id == "" && provider.ID == update.ID) {
+		if id == "" && strings.EqualFold(provider.ID, strings.TrimSpace(update.ID)) {
+			return config.SafeProviderConfig{}, config.ErrProviderExists
+		}
+		if id != "" && provider.ID == id {
 			found = i
 			break
 		}
+	}
+	if id != "" && found < 0 {
+		return config.SafeProviderConfig{}, config.ErrProviderNotFound
 	}
 	existing := config.ProviderConfig{Enabled: true}
 	if found >= 0 {
 		existing = providers[found]
 	}
-	provider := config.ApplyProviderUpdate(existing, update)
+	provider, err := config.ApplyProviderUpdate(existing, update)
+	if err != nil {
+		return config.SafeProviderConfig{}, err
+	}
 	if id != "" {
 		provider.ID = id
 	}
@@ -307,7 +375,7 @@ func (a *application) DeleteProvider(ctx context.Context, id string) error {
 		providers = append(providers, provider)
 	}
 	if !found {
-		return fmt.Errorf("provider %q not found", id)
+		return fmt.Errorf("%w: %q", config.ErrProviderNotFound, id)
 	}
 	return a.replaceRuntimeConfig(ctx, config.RuntimeConfig{Settings: config.SettingsFromConfig(current), Providers: providers})
 }
@@ -327,11 +395,15 @@ func (a *application) ImportConfig(ctx context.Context, value config.ConfigImpor
 	}
 	existing := map[string]config.ProviderConfig{}
 	for _, provider := range current.Providers {
-		existing[provider.ID] = provider
+		existing[strings.ToLower(provider.ID)] = provider
 	}
 	providers := make([]config.ProviderConfig, 0, len(value.Providers))
 	for _, item := range value.Providers {
-		providers = append(providers, config.ApplyProviderUpdate(existing[item.ID], item))
+		provider, err := config.ApplyProviderUpdate(existing[strings.ToLower(strings.TrimSpace(item.ID))], item)
+		if err != nil {
+			return config.AdminConfig{}, err
+		}
+		providers = append(providers, provider)
 	}
 	if err := config.ValidateProviders(providers); err != nil {
 		return config.AdminConfig{}, err
@@ -362,11 +434,17 @@ func (a *application) ReloadConfig(ctx context.Context) (config.AdminConfig, err
 		cfg = config.ApplyRuntimeConfig(loaded, runtimeCfg)
 		if len(loaded.Providers) > 0 {
 			cfg.Providers = append([]config.ProviderConfig(nil), loaded.Providers...)
-			runtimeCfg.Providers = append([]config.ProviderConfig(nil), loaded.Providers...)
-			if err := a.store.SaveRuntimeConfig(ctx, runtimeCfg); err != nil {
-				return config.AdminConfig{}, err
-			}
 		}
+	}
+	if err := config.ValidateRuntimeSettings(config.SettingsFromConfig(cfg)); err != nil {
+		return config.AdminConfig{}, err
+	}
+	if err := config.ValidateProviders(cfg.Providers); err != nil {
+		return config.AdminConfig{}, err
+	}
+	cfg.Providers = config.ReconcileProviderRevisions(current.Providers, cfg.Providers)
+	if err := a.store.SaveRuntimeConfig(ctx, config.RuntimeConfigFromConfig(cfg)); err != nil {
+		return config.AdminConfig{}, err
 	}
 	a.mu.Lock()
 	a.baseCfg = loaded
@@ -392,6 +470,7 @@ func (a *application) currentConfig() config.Config {
 }
 
 func (a *application) replaceRuntimeConfig(ctx context.Context, value config.RuntimeConfig) error {
+	value.Providers = config.ReconcileProviderRevisions(a.currentConfig().Providers, value.Providers)
 	cfg := config.ApplyRuntimeConfig(a.baseCfg, value)
 	if err := config.ValidateRuntimeSettings(value.Settings); err != nil {
 		return err
@@ -411,16 +490,19 @@ func (a *application) replaceRuntimeConfig(ctx context.Context, value config.Run
 }
 
 func (a *application) publishLatest(ctx context.Context) {
-	if a.broker == nil {
-		return
-	}
 	value, err := a.store.LatestReport(ctx)
 	if err != nil {
 		slog.Warn("load report for settings update", "err", err)
 		return
 	}
+	value = report.WithConfig(value, config.AdminConfigFromConfig(a.currentConfig()))
 	if value.GeneratedAt != "" {
-		a.broker.Publish(report.WithErrorVisibility(value, a.currentConfig().ShowErrorDetail))
+		if err := a.store.SaveLatestReport(ctx, value); err != nil {
+			slog.Warn("save updated status snapshot", "err", err)
+		}
+	}
+	if a.broker != nil {
+		a.broker.Publish(value)
 	}
 }
 
@@ -435,19 +517,28 @@ func (a *application) checkWithOptions(ctx context.Context, options checkOptions
 	if options.Kind == "" {
 		options.Kind = "manual"
 	}
-	started := time.Now()
+	run, err := a.beginCheck(ctx, options)
+	if err != nil {
+		return report.Report{}, err
+	}
+	return a.executeCheck(run, options)
+}
+
+func (a *application) beginCheck(ctx context.Context, options checkOptions) (checkRun, error) {
+	run := checkRun{started: time.Now()}
 	runCtx, cancel := context.WithCancel(ctx)
+	run.ctx, run.cancel = runCtx, cancel
 
 	a.mu.Lock()
 	if a.shuttingDown {
 		a.mu.Unlock()
 		cancel()
-		return report.Report{}, web.ErrShuttingDown
+		return checkRun{}, web.ErrShuttingDown
 	}
 	if a.running {
 		a.mu.Unlock()
 		cancel()
-		return report.Report{}, web.ErrCheckAlreadyRunning
+		return checkRun{}, web.ErrCheckAlreadyRunning
 	}
 	a.running = true
 	a.runCancel = cancel
@@ -455,50 +546,46 @@ func (a *application) checkWithOptions(ctx context.Context, options checkOptions
 	a.taskKind = options.Kind
 	a.taskProviderID = options.ProviderID
 	a.mu.Unlock()
-	defer a.finishRunState()
-	defer cancel()
-
-	taskID, err := a.store.CreateCheckTask(runCtx, storage.CheckTask{Kind: options.Kind, Status: "running", ProviderID: options.ProviderID, StartedAt: started.UTC().Format(time.RFC3339)})
+	run.task = storage.CheckTask{Kind: options.Kind, Status: "running", ProviderID: options.ProviderID, StartedAt: run.started.UTC().Format(time.RFC3339)}
+	taskID, err := a.store.CreateCheckTask(runCtx, run.task)
 	if err != nil {
-		return report.Report{}, err
+		cancel()
+		a.finishRunState()
+		return checkRun{}, err
 	}
+	run.task.ID = taskID
 	a.mu.Lock()
 	a.taskID = taskID
 	a.mu.Unlock()
+	return run, nil
+}
 
-	value, runErr := a.runCheck(runCtx, options)
+func (a *application) executeCheck(run checkRun, options checkOptions) (report.Report, error) {
+	defer a.finishRunState()
+	defer run.cancel()
+	update := storage.CheckTaskUpdate{}
+	value, runErr := a.runCheck(run.ctx, options, &update)
 	finished := time.Now()
 	status := "success"
 	errorMessage := ""
 	if runErr != nil {
-		if errors.Is(runCtx.Err(), context.Canceled) {
+		if errors.Is(run.ctx.Err(), context.Canceled) {
 			status = "canceled"
 		} else {
 			status = "error"
 		}
 		errorMessage = runErr.Error()
 	}
-	update := storage.CheckTaskUpdate{
-		Status:            status,
-		FinishedAt:        finished,
-		ElapsedMS:         int(finished.Sub(started).Milliseconds()),
-		ErrorMessage:      errorMessage,
-		ReportGeneratedAt: value.GeneratedAt,
-	}
-	for _, group := range value.Providers {
-		if options.ProviderID != "" && group.ProviderID != options.ProviderID {
-			continue
-		}
-		update.OKCount += group.OKCount
-		update.SlowCount += group.SlowCount
-		update.ErrorCount += group.ErrorCount
-	}
-	update.Total = update.OKCount + update.SlowCount + update.ErrorCount
-	if err := a.store.FinishCheckTask(context.Background(), taskID, update); err != nil {
+	update.Status, update.FinishedAt = status, finished
+	update.ElapsedMS = int(finished.Sub(run.started).Milliseconds())
+	update.ErrorMessage, update.ReportGeneratedAt = errorMessage, value.GeneratedAt
+	finishCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := a.store.FinishCheckTask(finishCtx, run.task.ID, update); err != nil {
 		slog.Error("finish check task failed", "err", err)
 	}
 	if a.metrics != nil {
-		a.metrics.RecordCheck(options.Kind, status, finished.Sub(started).Seconds())
+		a.metrics.RecordCheck(options.Kind, status, finished.Sub(run.started).Seconds())
 	}
 	return value, runErr
 }
@@ -517,7 +604,7 @@ func (a *application) finishRunState() {
 	a.mu.Unlock()
 }
 
-func (a *application) runCheck(ctx context.Context, options checkOptions) (report.Report, error) {
+func (a *application) runCheck(ctx context.Context, options checkOptions, counts *storage.CheckTaskUpdate) (value report.Report, runErr error) {
 	started := time.Now()
 	cfg := a.currentConfig()
 	if options.ProviderID != "" {
@@ -529,6 +616,44 @@ func (a *application) runCheck(ctx context.Context, options checkOptions) (repor
 	}
 	runner := probe.NewRunner(cfg)
 	results, providerErrors, err := runner.Run(ctx)
+	for _, result := range results {
+		if !result.Completed {
+			continue
+		}
+		switch result.Status {
+		case "ok":
+			counts.OKCount++
+		case "slow":
+			counts.SlowCount++
+		case "error":
+			counts.ErrorCount++
+		}
+		if a.metrics != nil {
+			a.metrics.RecordProbe(result)
+		}
+	}
+	counts.Total = counts.OKCount + counts.SlowCount + counts.ErrorCount
+	usageSaved := false
+	defer func() {
+		if usageSaved {
+			return
+		}
+		completed := make([]probe.Result, 0, len(results))
+		for _, result := range results {
+			if result.Completed {
+				completed = append(completed, result)
+			}
+		}
+		if len(completed) == 0 {
+			return
+		}
+		// An interrupted batch must not replace the report or history, but usage is real.
+		saveCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := a.store.RecordResults(saveCtx, completed, time.Now(), cfg.MaxHistoryRecords, false); err != nil {
+			runErr = errors.Join(runErr, fmt.Errorf("save completed probe usage: %w", err))
+		}
+	}()
 	if err != nil {
 		return report.Report{}, err
 	}
@@ -549,31 +674,28 @@ func (a *application) runCheck(ctx context.Context, options checkOptions) (repor
 			history = loaded
 		}
 	}
-	value, _ := report.Build(cfg, results, providerErrors, history, started)
+	value, _ = report.Build(cfg, results, providerErrors, history, started)
 	if options.ProviderID != "" && options.SaveLatest {
 		value = report.MergeProvider(previous, value, options.ProviderID)
 	}
-	value = report.WithErrorVisibility(value, a.currentConfig().ShowErrorDetail)
-	if a.metrics != nil {
-		for _, result := range results {
-			if result.Status != "unknown" {
-				a.metrics.RecordProbe(result)
-			}
-		}
-	}
+	a.configMu.Lock()
+	value = report.WithConfig(value, config.AdminConfigFromConfig(a.currentConfig()))
 	var latest *report.Report
 	if options.SaveLatest {
 		latest = &value
 	}
 	if err := a.store.RecordCheck(ctx, results, time.Now(), cfg.MaxHistoryRecords, cfg.EnableHistory, latest); err != nil {
+		a.configMu.Unlock()
 		return report.Report{}, fmt.Errorf("save probe results: %w", err)
 	}
+	usageSaved = true
+	if options.SaveLatest && a.broker != nil {
+		a.broker.Publish(value)
+	}
+	a.configMu.Unlock()
 	if options.SaveLatest {
-		if a.broker != nil {
-			a.broker.Publish(value)
-		}
 		notifyCfg := a.currentConfig()
-		if err := notify.New(notifyCfg, storage.SQLiteNotifyStateStore{Store: a.store}).SendIfNeeded(ctx, report.WithErrorVisibility(value, notifyCfg.ShowErrorDetail)); err != nil {
+		if err := notify.New(notifyCfg, storage.SQLiteNotifyStateStore{Store: a.store}).SendIfNeeded(ctx, report.WithConfig(value, config.AdminConfigFromConfig(notifyCfg))); err != nil {
 			slog.Warn("send notify failed", "err", err)
 		}
 	}

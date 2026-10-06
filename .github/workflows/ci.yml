@@ -26,6 +26,9 @@ jobs:
       - name: go test
         run: go test -v -race ./...
 
+      - name: Go vulnerability scan
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
+
   test-frontend:
     name: Frontend test & build
     runs-on: ubuntu-latest
@@ -35,7 +38,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "24"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
@@ -46,6 +49,10 @@ jobs:
       - name: Unit tests
         working-directory: frontend
         run: npm test
+
+      - name: Dependency audit
+        working-directory: frontend
+        run: npm audit --audit-level=low
 
       - name: TypeScript check and build
         working-directory: frontend

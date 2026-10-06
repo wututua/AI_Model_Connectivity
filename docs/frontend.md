@@ -6,10 +6,10 @@
 
 | 项 | 选择 |
 |---|---|
-| 框架 | React 18 + TypeScript + Vite 5 |
-| 路由 | React Router 6（`createBrowserRouter`，支持未保存更改拦截） |
+| 框架 | React 18 + TypeScript + Vite 7 + React Router 7 |
+| 路由 | React Router 7（`createBrowserRouter`，支持未保存更改拦截） |
 | 组件 | shadcn/ui 源码组件 + Radix UI 基础件 |
-| 样式 | Tailwind CSS 3 + HSL CSS 变量主题 |
+| 样式 | Tailwind CSS 4 + HSL CSS 变量主题 |
 | 图标 | Lucide React |
 | 构建 | `npm run build`，产物输出到仓库根目录 `web/` |
 
@@ -113,7 +113,7 @@ Token 趋势支持鼠标、触摸和键盘选择日期（方向键、Home、End�
 
 ### 浏览器回归
 
-在 `frontend` 下运行 `npm run build` 后，执行 `npm run test:browser`。默认使用本机 Chrome，也可先执行 `npx playwright install chromium`，再设置 `PLAYWRIGHT_CHANNEL=chromium`。测试直接读取 `web/` 构建产物，拦截所有网络与 API 请求，不启动真实检测、不读写业务数据库。截图默认保存到临时目录，可用 `BROWSER_ARTIFACT_DIR` 指定输出位置。CI 同样执行这组测试，覆盖设置编辑、会话恢复、导航拦截、请求竞态、移动端操作、状态文案、详情按需挂载、字体请求与视图偏好。
+在 `frontend` 下运行 `npm run build` 后，执行 `npm run test:browser`。默认使用本机 Chrome，也可先执行 `npx playwright install chromium`，再设置 `PLAYWRIGHT_CHANNEL=chromium`。测试直接读取 `web/` 构建产物，拦截所有网络与 API 请求，不启动真实检测、不读写业务数据库。截图默认保存到临时目录，可用 `BROWSER_ARTIFACT_DIR` 指定输出位置。CI 同样执行这组测试，覆盖设置编辑、会话恢复、导航拦截、请求竞态、移动端操作、状态文案、详情按需挂载、字体请求与视图偏好，以及切页后任务快速完成、完成后报告请求失败重试。
 
 `frontend/src/index.css` 定义 shadcn/ui 兼容的 HSL 颜色令牌，包括 `background`、`foreground`、`card`、`primary`、`muted`、`destructive`、`success` 和 `warning`。界面以中性灰为基础，浅色主题使用高对比度蓝色主色；健康、较慢、异常分别使用绿色、琥珀色、红色，未检测使用中性灰色，不要用主色替代状态语义。
 
@@ -153,4 +153,14 @@ npm test
 npm run build
 ```
 
-构建会先运行 TypeScript 检查，再将 `app.js`、`vendor.js`、`icons.js` 和 `index.css` 写入 `web/assets/`。发布包依赖这些预构建文件，因此前端源码和 `web/` 产物需要同步提交。
+构建会先运行 TypeScript 检查，再将 `app.js`、`vendor.js`、`icons.js` 和 `index.css` 写入 `web/assets/`。Tailwind 4 通过 `@tailwindcss/postcss` 编译，显式加载已有主题配置。发布包依赖这些预构建文件，因此前端源码和 `web/` 产物需要同步提交。
+
+构建还为 Regular/Bold 生成内容寻址的 gzip 副本；Go 根据 `Accept-Encoding` 协商，提供 `Vary` 与分离的 ETag，范围请求回退原文件。解压字节与原始字体相同，没有裁剪或格式转换。未运行新构建时可安全回退原字体。
+
+首次安装的 `unconfigured/pending` 展示中性空态，不显示请求失败。后台检测返回任务 ID 后轮询运行状态和终态，任务历史中的运行记录自动刷新；接受请求不等于检测完成，切页不会取消任务。
+
+运行概览首次加载时即跟踪正在执行的任务，因此任务在下一次轮询前结束也能显示终态。任务完成后若报告请求暂时失败，保留任务 ID 并继续重试；只有报告刷新成功才结束跟踪，迟到的旧任务响应不会清除新任务的跟踪状态。
+
+监控页的首次请求、轮询及手动刷新共用 `startStatusUpdates` 控制器。新的 SSE 或请求会使更早的请求失效（包括错误响应），不依赖 `generated_at` 排序，因此同一检测时间的配置变更也不会被旧响应覆盖。
+
+主题只接受 `dark/light/auto`。HTML 启动脚本与 React 均容忍本地存储访问异常，默认深色；存储不可用时，用户选择在页面内导航期间仍保留，`auto` 继续响应系统主题变化。`npm run test:browser` 包含这些异常及刷新竞态回归。

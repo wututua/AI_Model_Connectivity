@@ -54,14 +54,15 @@ type Config struct {
 }
 
 type ProviderConfig struct {
-	ID           string   `json:"id"`
-	Name         string   `json:"name"`
-	Type         string   `json:"type"`
-	BaseURL      string   `json:"base_url"`
-	APIKey       string   `json:"api_key,omitempty"`
-	Models       []string `json:"models"`
-	Enabled      bool     `json:"enabled"`
-	ProbeEnabled bool     `json:"probe_enabled"`
+	ConnectionRevision string   `json:"connection_revision,omitempty"`
+	ID                 string   `json:"id"`
+	Name               string   `json:"name"`
+	Type               string   `json:"type"`
+	BaseURL            string   `json:"base_url"`
+	APIKey             string   `json:"api_key,omitempty"`
+	Models             []string `json:"models"`
+	Enabled            bool     `json:"enabled"`
+	ProbeEnabled       bool     `json:"probe_enabled"`
 }
 
 func Load(path string) (Config, error) {

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Activity, CheckCircle2, Clock3, Play, RefreshCw, Server, Timer } from 'lucide-react'
 import { api } from '../../api'
 import type { Report, RunningState, RuntimeSettings, SafeProviderConfig } from '../../types'
@@ -18,12 +18,14 @@ export function OverviewTab({ readOnly = false }: { readOnly?: boolean }) {
   const [loading, setLoading] = useState(false)
   const [starting, setStarting] = useState(false)
   const [message, setMessage] = useAutoMsg()
+  const watchedTask = useRef<number | null>(null)
 
   const load = useCallback(() => {
     setLoading(true)
     Promise.all([api.detection(), readOnly ? Promise.resolve(null) : api.config(), api.status().catch(() => null)])
       .then(([runningState, adminConfig, report]) => {
         setState(runningState)
+        if (runningState.running && !watchedTask.current) watchedTask.current = runningState.task_id
         setConfig(adminConfig ? { providers: adminConfig.providers, settings: normalizeSettings(adminConfig.settings) } : null)
         setSummary(report)
       })
@@ -34,13 +36,40 @@ export function OverviewTab({ readOnly = false }: { readOnly?: boolean }) {
   useEffect(() => { load() }, [load])
   useEffect(() => {
     let active = true
-    const timer = setInterval(() => api.detection().then(value => { if (active) setState(value) }).catch(() => undefined), 2000)
+    let pending = false
+    const timer = setInterval(async () => {
+      if (pending) return
+      pending = true
+      try {
+        const value = await api.detection()
+        if (!active) return
+        setState(value)
+        if (value.running && !watchedTask.current) watchedTask.current = value.task_id
+        if (watchedTask.current) {
+          const taskId = watchedTask.current
+          const task = await api.task(taskId)
+          if (!active || watchedTask.current !== taskId || task.status === 'running') return
+          const report = await api.status()
+          if (!active || watchedTask.current !== taskId) return
+          watchedTask.current = null
+          setMessage(task.status === 'success' ? `检测任务 #${task.id} 已完成` : `错误：检测任务 #${task.id} ${task.status === 'canceled' ? '已取消' : '失败'}${task.error_message ? `：${task.error_message}` : ''}`)
+          setSummary(report)
+        }
+      } catch {
+        // Keep the accepted task ID and retry after a transient connection failure.
+      } finally { pending = false }
+    }, 2000)
     return () => { active = false; clearInterval(timer) }
-  }, [])
+  }, [setMessage])
 
   const run = async () => {
     setStarting(true); setMessage('')
-    try { await api.triggerCheck(); setMessage('检测任务已完成'); load() }
+    try {
+      const { task } = await api.triggerCheck()
+      watchedTask.current = task.id
+      setMessage(`检测任务 #${task.id} 已启动`)
+      load()
+    }
     catch (cause) { setMessage(`错误：${(cause as Error).message}`) }
     finally { setStarting(false) }
   }

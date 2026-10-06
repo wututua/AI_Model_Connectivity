@@ -78,7 +78,7 @@ docs/                本目录
 触发源：HTTP(manual) / 调度器(scheduled) / 启动(startup) / 单 Provider(provider)
         │
         ▼
-application.checkWithOptions
+application.StartCheck（HTTP 202）/ checkWithOptions（CLI、调度）
    ├─ 抢占 running 标志（已有任务 → ErrCheckAlreadyRunning → HTTP 409）
    ├─ 创建 check_tasks 记录（status=running）
    ├─ probe.Runner.Run
@@ -98,7 +98,9 @@ application.checkWithOptions
    └─ 完成 check_tasks（success / error / canceled）
 ```
 
-取消（`POST /api/admin/detection/stop`）：任务标记 `canceled`，**不**更新最新报告、**不**写历史、**不**发告警。
+HTTP 接受任务后用服务端独立上下文执行，断开连接不会取消；最长运行 30 分钟，停服会取消并等待收尾。取消时不更新最新报告、历史或告警，已确认响应的用量使用独立上下文保存。停止 API 仅作运维兼容，前端没有停止按钮。
+
+配置更新与最新快照写入通过 `configMu` 串行化；`report.WithConfig` 将报告投影到当前启用的 Provider/模型，删除或停用立即反映到持久快照和 SSE，防止在途检测把已删除项目重新放回监控页。
 
 ## 6. 状态模型
 

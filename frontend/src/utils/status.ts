@@ -1,6 +1,6 @@
 export type StatusTone = 'ok' | 'slow' | 'error'
 
-export function reportPresentation(report: { total: number; error_count: number; slow_count: number; unknown_count?: number; provider_errors?: unknown[] }) {
+export function reportPresentation(report: { total: number; error_count: number; slow_count: number; unknown_count?: number; provider_errors?: unknown[]; providers?: { status: string }[] }) {
   if (report.error_count > 0) return { status: 'error', label: '异常', headline: '检测到服务异常' }
   if (report.provider_errors?.length) return { status: 'error', label: '请求失败', headline: '部分 Provider 请求失败' }
   if (report.total === 0) return { status: 'unknown', label: '暂无数据', headline: '暂无检测结果' }
@@ -8,6 +8,7 @@ export function reportPresentation(report: { total: number; error_count: number;
     status: 'unknown', label: '未检测',
     headline: report.unknown_count === report.total ? '所有模型尚未检测' : '部分模型尚未检测',
   }
+  if (report.providers?.some(provider => provider.status === 'unknown')) return { status: 'unknown', label: '未检测', headline: '部分 Provider 尚未检测' }
   if (report.slow_count > 0) return { status: 'slow', label: '较慢', headline: '部分服务响应较慢' }
   return { status: 'ok', label: '正常', headline: '所有服务运行正常' }
 }

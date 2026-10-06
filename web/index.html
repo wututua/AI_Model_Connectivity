@@ -19,7 +19,11 @@
   <body>
     <script>
       (function(){
-        var t = localStorage.getItem('theme') || 'dark';
+        var t = 'dark';
+        try {
+          var stored = localStorage.getItem('theme');
+          if (stored === 'dark' || stored === 'light' || stored === 'auto') t = stored;
+        } catch (_) {}
         if (t === 'auto') {
           t = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
         }

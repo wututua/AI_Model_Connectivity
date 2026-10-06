@@ -92,10 +92,13 @@ PRAGMA mmap_size = 30000000;
 
 任一步失败即回滚：**历史、用量与最新报告要么一起成功，要么一起失败**（测试 `TestReportWriteFailureRollsBackHistoryAndUsage`）。
 
+应用层在批次取消或主事务失败后，会用独立的 5 秒收尾上下文尝试单独保存已确认探测的用量，不替换报告或历史，也不重复保存已提交的批次。数据库不可写或进程被强杀时无法保证收尾成功；未开始及取消中未收到响应的探测不估算用量。
+
 ## 4. 历史读取与裁剪
 
 - `LoadHistory(limitPerKey, statsWindowDays)`：按时间戳代表的实际时刻过滤统计窗口，通过 SQL 窗口函数限制每 key 最近 `limitPerKey` 条（默认 `MAX_HISTORY_RECORDS`）；时间相同按自增 ID 排序。
 - `report.Build` 追加本次结果后再次按 `MaxHistoryRecords` 截断。
+- 有效窗口是配置天数、90 天保留策略及每模型条数上限的交集；扩大显示窗口不能恢复已裁剪样本。
 - `pruneHistory` 按统计窗口裁剪，但若裁剪后少于 `HISTORY_SIZE`，会回退保留最近 `HISTORY_SIZE` 条，保证曲线和状态灯仍有足够数据点。
 
 ## 5. 统计口径
@@ -126,6 +129,8 @@ PRAGMA mmap_size = 30000000;
 `usage_daily` 首次初始化时由 `probe_results` 聚合回填一次，并用 `usage_daily_migrated` 标记避免重复。
 
 账号系统首次启动创建 `users`、`sessions`。用户表为空时，管理员密码优先取 `ADMIN_PASSWORD`；否则迁移符合新规则的旧管理 Token，不符合时生成新密码。创建初始管理员和删除旧 Token KV 在同一事务提交，所有初始账号要求首次改密。已有账号不因重启被重置。迁移前应备份，回滚须恢复旧数据库备份。
+
+Provider 的随机 `connection_revision` 随运行配置及最新报告 JSON 保存，不需要新增 SQL 表。升级时，为没有版本的 Provider 分配新版本，旧快照的当前状态保守地变为“未检测”，下一次检测后恢复；历史与用量不会清除。版本随连接或凭据变更轮换，重启与仅名称修改不轮换。
 
 > 用量只能迁移数据库中仍存在的记录，已删除或取消检测产生的实际消耗无法还原，因此该统计**不是**供应商账单。
 

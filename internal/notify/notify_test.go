@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -105,5 +106,65 @@ func TestProviderNameFilterPreservesDiscoveryFailure(t *testing.T) {
 	}
 	if sent.Load() != 0 || store.state.Status != "error" {
 		t.Fatal("discovery failure produced a false recovery")
+	}
+}
+
+func TestPlatformReceipts(t *testing.T) {
+	for _, test := range []struct {
+		platform string
+		body     string
+		status   int
+		ok       bool
+	}{
+		{"wecom", `{"errcode":0}`, 200, true},
+		{"wechat_work", `{"errcode":93000}`, 200, false},
+		{"dingtalk", `{"errcode":310000,"errmsg":"secret"}`, 200, false},
+		{"dingtalk", `{"errcode":0}`, 200, true},
+		{"telegram", `{"ok":true}`, 200, true},
+		{"telegram", `{"ok":false}`, 200, false},
+		{"bark", `{"code":200}`, 200, true},
+		{"bark", `{"code":400}`, 200, false},
+		{"wecom", `{}`, 200, false},
+		{"wecom", `not-json`, 200, false},
+		{"wecom", strings.Repeat(" ", 64<<10) + `{}`, 200, false},
+		{"webhook", "", 204, true},
+		{"discord", "", 204, true},
+		{"webhook", "", 500, false},
+	} {
+		t.Run(test.platform+"/"+test.body[:min(len(test.body), 40)], func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(test.status)
+				w.Write([]byte(test.body))
+			}))
+			defer server.Close()
+			client := New(config.Config{NotifyPlatform: test.platform}, nil)
+			defer client.httpClient.CloseIdleConnections()
+			request, _ := http.NewRequest(http.MethodPost, server.URL, nil)
+			err := client.do(request)
+			if (err == nil) != test.ok || err != nil && strings.Contains(err.Error(), "secret") {
+				t.Fatalf("unexpected receipt result: %v", err)
+			}
+		})
+	}
+}
+
+func TestBusinessFailureRemainsPendingForRetry(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if calls.Add(1) == 1 {
+			w.Write([]byte(`{"errcode":93000,"errmsg":"invalid key"}`))
+		} else {
+			w.Write([]byte(`{"errcode":0}`))
+		}
+	}))
+	defer server.Close()
+	store := &memoryState{state: State{Status: "ok"}}
+	client := New(config.Config{NotifyPlatform: "wecom", NotifyWebhookURL: server.URL}, store)
+	value := report.Report{ErrorCount: 1}
+	if err := client.SendIfNeeded(context.Background(), value); err == nil || store.state.Status != "ok" {
+		t.Fatal("failed notification was marked as delivered")
+	}
+	if err := client.SendIfNeeded(context.Background(), value); err != nil || store.state.Status != "error" || calls.Load() != 2 {
+		t.Fatalf("failed notification was not retried: %v", err)
 	}
 }

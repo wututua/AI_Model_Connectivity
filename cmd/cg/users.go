@@ -69,3 +69,27 @@ func generateInitialPassword() (string, error) {
 	}
 	return "Aa1" + base64.RawURLEncoding.EncodeToString(buf), nil
 }
+
+// Offline recovery changes only an existing administrator and revokes its sessions.
+func recoverAdmin(ctx context.Context, store *storage.SQLiteStore, username string) (string, error) {
+	user, err := store.FindUser(ctx, auth.NormalizeUsername(username))
+	if err != nil {
+		return "", err
+	}
+	if user.Role != "admin" {
+		return "", fmt.Errorf("account is not an administrator")
+	}
+	password, err := generateInitialPassword()
+	if err != nil {
+		return "", err
+	}
+	user.PasswordHash, err = auth.HashPassword(password)
+	if err != nil {
+		return "", err
+	}
+	user.Enabled, user.MustChangePassword = true, true
+	if _, err := store.UpdateUser(ctx, user.ID, user, false); err != nil {
+		return "", err
+	}
+	return password, nil
+}

@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"crypto/rand"
+	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -12,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -27,6 +29,7 @@ import (
 type CheckFunc func(context.Context) (report.Report, error)
 
 type AdminController interface {
+	StartCheck(context.Context, string) (storage.CheckTask, error)
 	CheckProvider(context.Context, string) (report.Report, error)
 	StopCheck() bool
 	RunningState() RunningState
@@ -54,6 +57,7 @@ type RunningState struct {
 
 var ErrCheckAlreadyRunning = errors.New("check already running")
 var ErrShuttingDown = errors.New("service is shutting down")
+var ErrProviderUnavailable = errors.New("provider is missing, disabled or paused")
 
 type Broker struct {
 	mu      sync.Mutex
@@ -176,21 +180,20 @@ func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
 		return
 	}
-	if value.GeneratedAt == "" {
-		writeJSON(w, http.StatusNotFound, map[string]any{"ok": false, "error": "no report available"})
-		return
-	}
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusOK, s.publicReport(r.Context(), value))
 }
 
 func (s *Server) publicReport(ctx context.Context, value report.Report) report.Report {
-	show := s.cfg.ShowErrorDetail
+	cfg := config.AdminConfigFromConfig(s.cfg)
 	if s.admin != nil {
-		cfg, err := s.admin.AdminConfig(ctx)
-		show = err == nil && cfg.Settings.ShowErrorDetail
+		var err error
+		cfg, err = s.admin.AdminConfig(ctx)
+		if err != nil {
+			return report.WithConfig(report.Report{}, config.AdminConfig{})
+		}
 	}
-	return report.WithErrorVisibility(value, show)
+	return report.WithConfig(value, cfg)
 }
 
 func (s *Server) events(w http.ResponseWriter, r *http.Request) {
@@ -214,7 +217,7 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 	ch, unsubscribe := s.broker.Subscribe()
 	defer unsubscribe()
 
-	if value, err := s.store.LatestReport(r.Context()); err == nil && value.GeneratedAt != "" {
+	if value, err := s.store.LatestReport(r.Context()); err == nil {
 		if !s.streamAuthorized(r) {
 			fmt.Fprint(w, "event: auth-required\ndata: {}\n\n")
 			flusher.Flush()
@@ -268,14 +271,7 @@ func (s *Server) checkNow(w http.ResponseWriter, r *http.Request) {
 	if !s.requireAdmin(w, r) {
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Minute)
-	defer cancel()
-	value, err := s.check(ctx)
-	if err != nil {
-		s.writeCheckError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "report": value})
+	s.acceptCheck(w, r, "")
 }
 
 func (s *Server) adminDetection(w http.ResponseWriter, r *http.Request) {
@@ -299,14 +295,17 @@ func (s *Server) adminDetectionStart(w http.ResponseWriter, r *http.Request) {
 		methodNotAllowed(w)
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Minute)
-	defer cancel()
-	value, err := s.check(ctx)
+	s.acceptCheck(w, r, "")
+}
+
+func (s *Server) acceptCheck(w http.ResponseWriter, r *http.Request, providerID string) {
+	value, err := s.admin.StartCheck(r.Context(), providerID)
 	if err != nil {
 		s.writeCheckError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "report": value})
+	w.Header().Set("Location", fmt.Sprintf("/api/admin/tasks/%d", value.ID))
+	writeJSON(w, http.StatusAccepted, map[string]any{"ok": true, "task": value})
 }
 
 func (s *Server) adminDetectionStop(w http.ResponseWriter, r *http.Request) {
@@ -406,14 +405,7 @@ func (s *Server) adminProviderItem(w http.ResponseWriter, r *http.Request) {
 			methodNotAllowed(w)
 			return
 		}
-		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Minute)
-		defer cancel()
-		value, err := s.admin.CheckProvider(ctx, id)
-		if err != nil {
-			s.writeCheckError(w, err)
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "report": value})
+		s.acceptCheck(w, r, id)
 		return
 	}
 	switch r.Method {
@@ -469,17 +461,11 @@ func (s *Server) adminConfigReload(w http.ResponseWriter, r *http.Request) {
 	}
 	result, err := s.admin.ReloadConfig(r.Context())
 	if err == nil {
-		go s.checkAfterReload()
+		if _, startErr := s.admin.StartCheck(r.Context(), ""); startErr != nil {
+			slog.Warn("reload check not started", "err", startErr)
+		}
 	}
 	writeResult(w, result, err)
-}
-
-func (s *Server) checkAfterReload() {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
-	defer cancel()
-	if _, err := s.check(ctx); err != nil {
-		slog.Warn("reload check failed", "err", err)
-	}
 }
 
 func (s *Server) adminTasks(w http.ResponseWriter, r *http.Request) {
@@ -541,6 +527,10 @@ func (s *Server) adminTaskItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	value, err := s.admin.GetTask(r.Context(), id)
+	if errors.Is(err, sql.ErrNoRows) {
+		writeErrorText(w, http.StatusNotFound, "task not found")
+		return
+	}
 	writeResult(w, value, err)
 }
 
@@ -558,6 +548,10 @@ func randomToken(bytes int) (string, error) {
 }
 
 func (s *Server) writeCheckError(w http.ResponseWriter, err error) {
+	if errors.Is(err, ErrProviderUnavailable) {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
 	if errors.Is(err, ErrShuttingDown) {
 		writeError(w, http.StatusServiceUnavailable, err)
 		return
@@ -593,14 +587,18 @@ func spaHandler(webDir string) http.Handler {
 			return
 		}
 		// If the file exists on disk, serve it directly (assets, index.html, etc.).
-		fpath := filepath.Join(webDir, filepath.Clean(r.URL.Path))
+		fpath := filepath.Join(webDir, filepath.FromSlash(strings.TrimPrefix(path.Clean("/"+r.URL.Path), "/")))
 		w.Header().Set("Cache-Control", "no-cache")
 		if info, err := os.Stat(fpath); err == nil {
 			if !info.IsDir() && strings.HasPrefix(r.URL.Path, "/fonts/") && strings.EqualFold(filepath.Ext(fpath), ".ttf") {
 				if digest := fonts.digest(fpath, info); digest != "" {
 					w.Header().Set("ETag", `"`+digest+`"`)
+					w.Header().Add("Vary", "Accept-Encoding")
 					if r.URL.Query().Get("v") == digest {
 						w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+					}
+					if serveCompressedFont(w, r, fpath, digest) {
+						return
 					}
 				}
 			}
@@ -673,7 +671,13 @@ func decodeRequestJSON(w http.ResponseWriter, r *http.Request, value any, allowE
 
 func writeResult(w http.ResponseWriter, value any, err error) {
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
+		status := http.StatusBadRequest
+		if errors.Is(err, config.ErrProviderExists) {
+			status = http.StatusConflict
+		} else if errors.Is(err, config.ErrProviderNotFound) {
+			status = http.StatusNotFound
+		}
+		writeError(w, status, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, value)

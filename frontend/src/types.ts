@@ -28,6 +28,7 @@ export interface ModelResult {
 }
 
 export interface ProviderReport {
+  connection_revision?: string
   checked_at?: string
   unknown_count?: number
   provider_id: string
@@ -51,6 +52,7 @@ export interface ProviderError {
 }
 
 export interface Report {
+  state?: 'ready' | 'pending' | 'unconfigured'
   unknown_count?: number
   stale_after_seconds?: number
   title: string
@@ -193,6 +195,11 @@ export interface CheckTask {
   total: number
   error_message: string
   report_generated_at: string
+}
+
+export interface AcceptedCheck {
+  ok: boolean
+  task: CheckTask
 }
 
 export interface ConfigExport {

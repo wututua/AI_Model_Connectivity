@@ -56,6 +56,10 @@ async function main() {
   let taskDelays = false
   let saveFails = false
   let writes = 0
+  let acceptedTask = null
+  let reportFailures = 0
+  let finishTaskOnDetection = false
+  let providerWrites = 0
   const delayed = []
   try {
     const context = await browser.newContext({ viewport: { width: 1440, height: 960 } })
@@ -69,7 +73,24 @@ async function main() {
       if (url.pathname.startsWith('/api/')) {
         const respond = (body, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) })
         if (route.request().method() !== 'GET') {
-          assert.equal(url.pathname, '/api/admin/settings', 'No real detection or provider mutations are allowed')
+          if (url.pathname === '/api/admin/providers') {
+            assert.equal(route.request().method(), 'POST')
+            assert.equal(route.request().postDataJSON().id, 'production-main')
+            return respond({ error: 'provider id already exists' }, 409)
+          }
+          if (url.pathname === '/api/admin/providers/production-main') {
+            assert.equal(route.request().method(), 'PUT')
+            const draft = route.request().postDataJSON()
+            assert.equal(draft.api_key, 'explicit-replacement')
+            providerWrites++
+            return respond(providers[0])
+          }
+          if (url.pathname === '/api/admin/check' || url.pathname === '/api/admin/providers/production-main/rerun') {
+            assert.equal(route.request().method(), 'POST')
+            acceptedTask = { id: 101, kind: 'manual', status: 'running', provider_id: url.pathname.includes('providers') ? 'production-main' : '', started_at: now, elapsed_ms: 0, total: 0, ok_count: 0, slow_count: 0, error_count: 0 }
+            return respond({ ok: true, task: acceptedTask }, 202)
+          }
+          assert.equal(url.pathname, '/api/admin/settings', 'Only mocked settings/check mutations are allowed')
           assert.equal(route.request().method(), 'PUT')
           if (saveFails) return respond({ error: 'Mock save failure' }, 500)
           writes++
@@ -79,10 +100,24 @@ async function main() {
         if (url.pathname === '/api/auth/session') return sessionFailure
           ? respond({ error: 'Mock session failure' }, 503)
           : respond({ user: signedIn ? { id: 1, username: 'audit-admin', role, enabled: true, must_change_password: false } : null, csrf_token: 'audit', status_login_required: false, expires_at: 9999999999 })
-        if (url.pathname === '/api/status') return respond(report)
+        if (url.pathname === '/api/status') {
+          if (reportFailures > 0) {
+            reportFailures--
+            return respond({ error: 'Mock report failure' }, 503)
+          }
+          return respond(report)
+        }
         if (url.pathname === '/api/admin/config') return respond({ settings, providers })
         if (url.pathname === '/api/admin/providers') return respond(providers)
-        if (url.pathname === '/api/admin/detection') return respond({ running: false, auto_check_interval_min_hours: 0, auto_check_interval_max_hours: 0 })
+        if (url.pathname === '/api/admin/detection') {
+          const state = { running: acceptedTask?.status === 'running', task_id: acceptedTask?.id || 0, provider_id: acceptedTask?.provider_id || '', auto_check_interval_min_hours: 0, auto_check_interval_max_hours: 0 }
+          if (finishTaskOnDetection && acceptedTask) {
+            finishTaskOnDetection = false
+            acceptedTask.status = 'success'
+          }
+          return respond(state)
+        }
+        if (url.pathname === '/api/admin/tasks/101') return respond(acceptedTask)
         if (url.pathname === '/api/admin/tasks') {
           const offset = Number(url.searchParams.get('offset') || 0)
           const status = url.searchParams.get('status') || 'success'
@@ -203,6 +238,36 @@ async function main() {
     await page.setViewportSize({ width: 1440, height: 960 })
     console.log('PASS settings tags, pending input, save retry, navigation guard, browser back, transient session failure and real session expiry')
 
+    await navigate('运行概览')
+    await page.getByRole('button', { name: '立即检测', exact: true }).click()
+    await page.getByText('检测任务 #101 已启动', { exact: true }).waitFor()
+    await page.waitForFunction(() => [...document.querySelectorAll('button')].some(button => button.textContent.includes('立即检测') && button.disabled))
+    assert.equal(await page.getByText('检测任务 #101 已完成', { exact: true }).count(), 0)
+    await capture('task-running-desktop')
+    report = { ...makeReport(), elapsed_ms: 2468 }
+    reportFailures = 1
+    acceptedTask.status = 'success'
+    await page.getByText('检测任务 #101 已完成', { exact: true }).waitFor()
+    await page.getByText('2468 ms', { exact: true }).waitFor()
+    assert.equal(reportFailures, 0)
+    await navigate('Provider')
+    await page.waitForFunction(() => !document.querySelector('button[aria-label="重新检测 Production Gateway"]')?.disabled)
+    await page.getByRole('button', { name: '重新检测 Production Gateway', exact: true }).click()
+    await page.getByText('「Production Gateway」检测任务 #101 已启动', { exact: true }).waitFor()
+    assert.equal(await page.getByRole('button', { name: '重新检测 Backup Gateway', exact: true }).isDisabled(), true)
+    finishTaskOnDetection = true
+    report = { ...makeReport(), elapsed_ms: 3579 }
+    await navigate('运行概览')
+    await page.getByText('检测任务 #101 已完成', { exact: true }).waitFor()
+    await page.getByText('3579 ms', { exact: true }).waitFor()
+    assert.equal(finishTaskOnDetection, false)
+    await page.getByRole('button', { name: '立即检测', exact: true }).click()
+    await page.getByText('检测任务 #101 已启动', { exact: true }).waitFor()
+    acceptedTask.status = 'error'
+    await page.getByText('错误：检测任务 #101 失败', { exact: true }).waitFor()
+    acceptedTask = null
+    console.log('PASS asynchronous tasks, busy controls, fast completion after navigation, report retries and error feedback')
+
     await navigate('任务历史')
     await page.getByText('#1', { exact: true }).waitFor()
     await page.getByRole('button', { name: '下一页', exact: true }).click()
@@ -223,6 +288,14 @@ async function main() {
     console.log('PASS task pagination, loading state and stale response protection')
 
     await navigate('Provider')
+    await page.getByRole('button', { name: '新增 Provider', exact: true }).click()
+    await page.locator('#provider-id').fill('production-main')
+    await page.locator('#provider-name').fill('Duplicate draft')
+    await page.locator('#provider-url').fill('https://other.invalid/v1')
+    await page.getByRole('button', { name: '保存 Provider', exact: true }).click()
+    await page.getByText('provider id already exists', { exact: true }).waitFor()
+    assert.equal(await page.locator('#provider-name').inputValue(), 'Duplicate draft')
+    await page.getByRole('button', { name: '取消', exact: true }).click()
     for (const width of [320, 375]) {
       await page.setViewportSize({ width, height: 812 })
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true)
@@ -231,7 +304,13 @@ async function main() {
       await page.getByRole('button', { name: '编辑 Provider', exact: true }).click()
       await page.locator('#provider-name').waitFor()
       assert.equal(await page.locator('#provider-name').inputValue(), 'Production Gateway')
-      await page.getByRole('button', { name: '取消', exact: true }).click()
+      await page.locator('#provider-url').fill('https://other.invalid/v1')
+      await page.getByRole('button', { name: '保存 Provider', exact: true }).click()
+      await page.getByText('Base URL 已变更，请重新填写 API Key 或明确清除原密钥', { exact: true }).waitFor()
+      assert.equal(providerWrites, width === 320 ? 0 : 1)
+      await page.locator('#provider-key').fill('explicit-replacement')
+      await page.getByRole('button', { name: '保存 Provider', exact: true }).click()
+      await page.locator('#provider-name').waitFor({ state: 'detached' })
       await actions.click()
       await page.getByRole('button', { name: '删除 Provider', exact: true }).click()
       await page.getByRole('alertdialog').waitFor()
@@ -243,7 +322,18 @@ async function main() {
     await page.getByRole('heading', { name: 'Provider', exact: true }).waitFor()
     assert.equal(await page.getByRole('button', { name: /更多操作|新增 Provider/ }).count(), 0)
     role = 'admin'
-    console.log('PASS mobile provider edit/delete dialogs, no horizontal overflow and read-only access')
+    assert.equal(providerWrites, 2)
+    console.log('PASS duplicate create feedback, explicit key on endpoint change, mobile edit/delete dialogs and read-only access')
+
+    for (const state of ['unconfigured', 'pending']) {
+      report = { ...makeReport('ok', 0), state, generated_at: '', providers: [], provider_count: state === 'pending' ? 2 : 0 }
+      await page.goto(origin)
+      await page.getByRole('heading', { name: state === 'pending' ? '等待首次检测' : '尚未配置监控服务', exact: true }).waitFor()
+      assert.equal(await page.getByRole('heading', { name: '无法获取服务状态', exact: true }).count(), 0)
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true)
+      await capture(`first-install-${state}`)
+    }
+    console.log('PASS first-install empty and pending states')
 
     report = makeReport('unknown')
     await page.goto(origin)
@@ -295,6 +385,7 @@ async function main() {
     assert.ok(duration.split(',').every(value => parseFloat(value) < 0.001))
     assert.deepEqual(errors, [])
     console.log(`PASS desktop/mobile themes and reduced motion; screenshots: ${artifacts}`)
+    await require('./status-regressions.cjs')(browser, artifacts)
   } finally {
     delayed.splice(0).forEach(resolve => resolve())
     await browser.close()

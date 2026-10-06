@@ -3,8 +3,8 @@ package storage
 import (
 	"context"
 	"path/filepath"
-	"strings"
 	"testing"
+	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
@@ -13,6 +13,10 @@ func TestDatabaseRestrictsWindowsACL(t *testing.T) {
 	directory := t.TempDir()
 	path := filepath.Join(directory, "private.sqlite")
 	store, err := NewSQLite(context.Background(), path, directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	system, err := windows.CreateWellKnownSid(windows.WinLocalSystemSid)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -26,9 +30,31 @@ func TestDatabaseRestrictsWindowsACL(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		actual := descriptor.String()
-		if !strings.Contains(actual, "D:P") || !strings.Contains(actual, user.User.Sid.String()) || strings.Count(actual, "(A;") != 2 {
-			t.Errorf("%s has an unexpected ACL: %s", suffix, actual)
+		control, _, err := descriptor.Control()
+		if err != nil || control&windows.SE_DACL_PROTECTED == 0 {
+			t.Fatalf("%s DACL is not protected: %v", suffix, err)
+		}
+		acl, _, err := descriptor.DACL()
+		if err != nil || acl == nil || acl.AceCount != 2 {
+			t.Fatalf("%s has an unexpected DACL: %v", suffix, err)
+		}
+		seen := map[string]bool{}
+		for i := uint32(0); i < uint32(acl.AceCount); i++ {
+			var ace *windows.ACCESS_ALLOWED_ACE
+			if err := windows.GetAce(acl, i, &ace); err != nil {
+				t.Fatal(err)
+			}
+			sid := (*windows.SID)(unsafe.Pointer(&ace.SidStart))
+			if ace.Header.AceType != windows.ACCESS_ALLOWED_ACE_TYPE ||
+				ace.Header.AceFlags&windows.INHERITED_ACE != 0 ||
+				ace.Mask != windows.STANDARD_RIGHTS_REQUIRED|windows.SYNCHRONIZE|0x1ff ||
+				(!sid.Equals(user.User.Sid) && !sid.Equals(system)) {
+				t.Fatalf("%s has an unexpected ACE: %s", suffix, descriptor.String())
+			}
+			seen[sid.String()] = true
+		}
+		if !seen[user.User.Sid.String()] || !seen[system.String()] {
+			t.Errorf("%s is missing an expected principal", suffix)
 		}
 	}
 }

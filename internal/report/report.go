@@ -40,23 +40,25 @@ type ModelResult struct {
 }
 
 type ProviderReport struct {
-	ProviderID   string        `json:"provider_id"`
-	ProviderType string        `json:"provider_type"`
-	ProviderName string        `json:"provider_name"`
-	ProviderLogo string        `json:"provider_logo"`
-	CurrentModel string        `json:"current_model"`
-	Results      []ModelResult `json:"results"`
-	OKCount      int           `json:"ok_count"`
-	SlowCount    int           `json:"slow_count"`
-	ErrorCount   int           `json:"error_count"`
-	UnknownCount int           `json:"unknown_count"`
-	CheckedAt    string        `json:"checked_at"`
-	Status       string        `json:"status"`
-	StatusLabel  string        `json:"status_label"`
-	ModelCount   int           `json:"model_count"`
+	ConnectionRevision string        `json:"connection_revision,omitempty"`
+	ProviderID         string        `json:"provider_id"`
+	ProviderType       string        `json:"provider_type"`
+	ProviderName       string        `json:"provider_name"`
+	ProviderLogo       string        `json:"provider_logo"`
+	CurrentModel       string        `json:"current_model"`
+	Results            []ModelResult `json:"results"`
+	OKCount            int           `json:"ok_count"`
+	SlowCount          int           `json:"slow_count"`
+	ErrorCount         int           `json:"error_count"`
+	UnknownCount       int           `json:"unknown_count"`
+	CheckedAt          string        `json:"checked_at"`
+	Status             string        `json:"status"`
+	StatusLabel        string        `json:"status_label"`
+	ModelCount         int           `json:"model_count"`
 }
 
 type Report struct {
+	State               string                `json:"state"`
 	Title               string                `json:"title"`
 	GeneratedAt         string                `json:"generated_at"`
 	ElapsedMS           int                   `json:"elapsed_ms"`
@@ -200,8 +202,13 @@ func Build(cfg config.Config, results []probe.Result, providerErrors []probe.Pro
 		order = append(order, provider.ID)
 	}
 	providers := []ProviderReport{}
+	revisions := make(map[string]string, len(cfg.Providers))
+	for _, provider := range cfg.Providers {
+		revisions[provider.ID] = provider.ConnectionRevision
+	}
 	for _, key := range order {
 		group := grouped[key]
+		group.ConnectionRevision = revisions[key]
 		if group.ErrorCount > 0 || failedProviders[group.ProviderID] {
 			group.Status = "error"
 			group.StatusLabel = "异常"
@@ -236,6 +243,7 @@ func Build(cfg config.Config, results []probe.Result, providerErrors []probe.Pro
 		overallClass = "error"
 	}
 	return Report{
+		State:               "ready",
 		Title:               cfg.DashboardTitle,
 		GeneratedAt:         now.UTC().Format(time.RFC3339),
 		ElapsedMS:           int(time.Since(started).Milliseconds()),

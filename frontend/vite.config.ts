@@ -2,11 +2,25 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { createHash } from 'node:crypto'
+import { readFile, writeFile } from 'node:fs/promises'
+import { gzipSync } from 'node:zlib'
 
 const rootDir = path.dirname(fileURLToPath(import.meta.url))
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), {
+    name: 'compressed-fonts',
+    apply: 'build',
+    async closeBundle() {
+      for (const weight of ['Regular', 'Bold']) {
+        const filename = path.resolve(rootDir, `../web/fonts/harmonyos-sans/HarmonyOS_Sans_SC_${weight}.ttf`)
+        const original = await readFile(filename)
+        const digest = createHash('sha256').update(original).digest('hex')
+        await writeFile(`${filename}.${digest}.gz`, gzipSync(original, { level: 9 }))
+      }
+    },
+  }],
   resolve: {
     alias: {
       '@': path.resolve(rootDir, 'src'),

@@ -29,7 +29,7 @@ curl -c cookies.txt -H 'Content-Type: application/json' \
 | 400 | 请求体非法、参数校验失败 |
 | 401 | 未登录、账号密码错误或会话失效 |
 | 403 | 权限不足、CSRF/来源校验失败或需要修改初始密码 |
-| 404 | `/api/status` 尚无报告；`/metrics` 未启用；任务不存在 |
+| 404 | `/metrics` 未启用；任务不存在 |
 | 405 | 方法不允许 |
 | 409 | 已有检测任务运行（body: `check already running`）或账号已并发变更 |
 | 413 | 请求体超过 1 MiB |
@@ -53,7 +53,7 @@ curl -c cookies.txt -H 'Content-Type: application/json' \
 
 ### `GET /api/status`
 
-返回最新 `Report`。`status_login_required=true` 时需要已完成初始改密的普通用户或管理员会话，否则允许匿名读取。无报告时返回 `404` + `{"ok":false,"error":"no report available"}`。
+返回最新 `Report`。`status_login_required=true` 时需要已完成初始改密的普通用户或管理员会话，否则允许匿名读取。首次安装也返回 `200`：`state=unconfigured` 表示无启用 Provider，`pending` 表示等待首次检测，`ready` 表示已有报告；未检测时 `generated_at=""`。Provider 删除、停用、暂停与名称变更立即投影到当前状态及 SSE，不伪造新的检测时间。
 
 ### `GET /api/events`（SSE）
 
@@ -85,7 +85,7 @@ Web 静态资源。非 `/api/` 且磁盘上无对应文件的路径回退到 `in
 
 ### `POST /api/admin/detection/start`、`POST /api/admin/check`
 
-触发一次全量检测，**同步执行**（服务端上下文超时 30 分钟），返回 `{"ok":true,"report":{...}}`。已有任务运行时返回 `409`。
+触发一次全量检测，立即返回 **202 Accepted**、`{"ok":true,"task":CheckTask}` 和 `Location: /api/admin/tasks/{id}`。任务由服务端后台执行，最长 30 分钟；浏览器关闭、切换页面或断开连接不会取消已接受的任务。通过任务详情查询 `running/success/error/canceled`，完成后读取 `/api/status` 或 SSE。已有任务运行时返回 `409`，服务关闭中返回 `503`。
 
 ```bash
 curl -X POST -b cookies.txt -H "X-CSRF-Token: $CSRF" http://127.0.0.1:8080/api/admin/check
@@ -93,7 +93,7 @@ curl -X POST -b cookies.txt -H "X-CSRF-Token: $CSRF" http://127.0.0.1:8080/api/a
 
 ### `POST /api/admin/detection/stop`
 
-停止当前检测，返回 `{"ok":true,"stopped":true}`。未完成任务标记 `canceled`，不更新报告/历史/告警。
+仅保留管理员 API，前端不显示停止按钮。返回 `{"ok":true,"stopped":true}`。未完成任务标记 `canceled`，不更新报告/历史/告警，但已确认响应的用量仍会入账。正常停服也会取消并收尾后台任务。
 
 ---
 
@@ -158,10 +158,14 @@ curl -X PUT -b cookies.txt -H "X-CSRF-Token: $CSRF" -H 'Content-Type: applicatio
 | `POST` | `/api/admin/providers` | 新增 |
 | `PUT` | `/api/admin/providers/{id}` | 修改（`api_key` 空保留，`clear_api_key` 清除） |
 | `DELETE` | `/api/admin/providers/{id}` | 删除 |
-| `POST` | `/api/admin/providers/{id}/rerun` | 单独重跑（同步，30 分钟超时） |
+| `POST` | `/api/admin/providers/{id}/rerun` | 单独重跑，返回 202 和 task，后台最长 30 分钟；不存在、停用或暂停的 Provider 返回 400 |
 | `POST` | `/api/admin/provider-models` | 仅管理员，读取编辑草稿对应的上游模型列表，不保存配置、不触发探测 |
 
 模型同步请求为 `{"provider_id":"已保存的ID，可省略","type":"openai","base_url":"https://example.test/v1","api_key":"","clear_api_key":false}`，返回模型 ID 数组。新 Provider 可不传 `provider_id`，无需先保存。已有 Provider 的 `api_key` 留空时复用存储的 Key；若同时变更 Base URL，必须重新填写 Key 或显式清除，避免把旧凭据发送到新地址。
+
+新增时 ID 忽略大小写判重，重复返回 `409`，不会覆盖已有配置；修改或删除不存在的 ID 返回 `404`。上述 Base URL 与密钥校验同样适用于保存及配置导入，校验失败返回 `400`，整次更新不生效。
+
+连接地址、密钥或协议改变后，该 Provider 的当前结果立即变为“未检测”，旧检测时间、延迟和错误信息清空；历史统计及已产生的用量保留。仅修改名称不使结果失效。状态快照携带随机的 `connection_revision`，它不是密钥哈希；旧版本正在运行的检测不能恢复当前健康状态，包括改回原值或删除后重建的情况。
 
 同步使用现有安全 HTTP 客户端，调用 `{base_url}/models`，超时为 `model_list_timeout_seconds` 且最多 30 秒。该接口同样要求会话与 CSRF，不返回凭据；前端只在保存 Provider 时提交选定的 `models`。
 

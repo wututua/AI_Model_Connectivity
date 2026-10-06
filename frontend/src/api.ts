@@ -1,5 +1,6 @@
 import type {
   AdminConfig,
+  AcceptedCheck,
   BillingSummary,
   CheckTask,
   ConfigExport,
@@ -58,10 +59,8 @@ export const api = {
 
   detection: (): Promise<RunningState> =>
     request<RunningState>('GET', '/api/admin/detection'),
-  startDetection: (): Promise<unknown> =>
-    request('POST', '/api/admin/detection/start'),
-  triggerCheck: (): Promise<unknown> =>
-    request('POST', '/api/admin/check'),
+  startDetection: () => request<AcceptedCheck>('POST', '/api/admin/detection/start'),
+  triggerCheck: () => request<AcceptedCheck>('POST', '/api/admin/check'),
 
   config: (): Promise<AdminConfig> =>
     request<AdminConfig>('GET', '/api/admin/config'),
@@ -78,8 +77,10 @@ export const api = {
     request<SafeProviderConfig>('PUT', `/api/admin/providers/${encodeURIComponent(id)}`, p),
   deleteProvider: (id: string): Promise<unknown> =>
     request('DELETE', `/api/admin/providers/${encodeURIComponent(id)}`),
-  rerunProvider: (id: string): Promise<unknown> =>
-    request('POST', `/api/admin/providers/${encodeURIComponent(id)}/rerun`),
+  rerunProvider: (id: string) =>
+    request<AcceptedCheck>('POST', `/api/admin/providers/${encodeURIComponent(id)}/rerun`),
+
+  task: (id: number) => request<CheckTask>('GET', `/api/admin/tasks/${id}`),
 
   tasks: (params?: { limit?: number; offset?: number; status?: string }, signal?: AbortSignal): Promise<CheckTask[]> => {
     const qs = new URLSearchParams()

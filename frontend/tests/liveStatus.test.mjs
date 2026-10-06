@@ -12,7 +12,7 @@ function setup(overrides = {}) {
   const live = []
   let fetches = 0
   const { startStatusUpdates } = loadUtility('liveStatus', clock.globals)
-  const close = startStatusUpdates({
+  const controller = startStatusUpdates({
     fetchReport: async () => report(`poll-${++fetches}`),
     onReport: value => reports.push(value),
     onError: error => errors.push(error),
@@ -29,7 +29,7 @@ function setup(overrides = {}) {
     },
     ...overrides,
   })
-  return { clock, sources, reports, errors, live, close, get fetches() { return fetches } }
+  return { clock, sources, reports, errors, live, ...controller, get fetches() { return fetches } }
 }
 
 test('SSE failure resumes polling while reconnecting', async () => {
@@ -50,6 +50,19 @@ test('SSE failure resumes polling while reconnecting', async () => {
   assert.equal(state.live.at(-1), true)
   state.close()
   assert.equal(state.clock.pending, 0)
+})
+
+test('first-install SSE snapshots without timestamps remain live', async () => {
+  const state = setup()
+  await settle()
+  for (const phase of ['unconfigured', 'pending']) {
+    state.sources[0].message({ generated_at: '', providers: [], state: phase })
+    assert.equal(state.live.at(-1), true)
+    assert.equal(state.reports.at(-1).state, phase)
+  }
+  await state.clock.advance(120_000)
+  assert.equal(state.fetches, 1)
+  state.close()
 })
 
 test('poll-only mode backs off to 30, 60 and 120 seconds', async () => {
@@ -132,5 +145,73 @@ test('slow fetches do not overlap during SSE reconnects', async () => {
   assert.equal(calls, 2)
   state.close()
   resolve(report('ignored'))
+  await settle()
+})
+
+for (const failure of [false, true]) {
+  test(`manual refresh ${failure ? 'failure' : 'success'} cannot overwrite a same-timestamp SSE config update`, async () => {
+    const requests = []
+    const state = setup({
+      fetchReport: () => new Promise((resolve, reject) => requests.push({ resolve, reject })),
+    })
+    requests[0].resolve({ ...report('same-time'), title: 'initial' })
+    await settle()
+    const refresh = state.refresh()
+    state.sources[0].message({ ...report('same-time'), title: 'new config' })
+    if (failure) requests[1].reject(new Error('stale failure'))
+    else requests[1].resolve({ ...report('same-time'), title: 'old config' })
+    await refresh
+    assert.equal(state.reports.at(-1).title, 'new config')
+    assert.equal(state.errors.length, 0)
+    assert.equal(state.clock.pending, 0)
+    state.close()
+  })
+}
+
+test('manual requests supersede earlier requests and ignore callbacks after close', async () => {
+  const requests = []
+  const state = setup({
+    createSource: null,
+    fetchReport: () => new Promise((resolve, reject) => requests.push({ resolve, reject })),
+  })
+  const first = state.refresh()
+  const second = state.refresh()
+  requests[2].resolve(report('latest manual'))
+  await second
+  requests[1].resolve(report('older manual'))
+  requests[0].reject(new Error('old polling error'))
+  await first
+  await settle()
+  assert.deepEqual(state.reports.map(value => value.generated_at), ['latest manual'])
+  assert.equal(state.errors.length, 0)
+  assert.equal(state.clock.pending, 1)
+  const pending = state.refresh()
+  state.close()
+  requests[3].reject(new Error('after close'))
+  await pending
+  await state.refresh()
+  await state.clock.advance(300_000)
+  assert.equal(requests.length, 4)
+  assert.equal(state.errors.length, 0)
+  assert.equal(state.clock.pending, 0)
+})
+
+test('polling does not overlap a slow manual refresh and resumes afterwards', async () => {
+  const requests = []
+  const state = setup({
+    createSource: null,
+    fetchReport: () => new Promise(resolve => requests.push(resolve)),
+  })
+  requests[0](report('initial'))
+  await settle()
+  const manual = state.refresh()
+  await state.clock.advance(300_000)
+  assert.equal(requests.length, 2)
+  requests[1](report('manual'))
+  await manual
+  await state.clock.advance(60_000)
+  assert.equal(requests.length, 3)
+  state.close()
+  requests[2](report('ignored'))
   await settle()
 })

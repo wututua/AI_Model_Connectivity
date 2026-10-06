@@ -48,14 +48,15 @@ type RuntimeSettings struct {
 }
 
 type SafeProviderConfig struct {
-	ID           string   `json:"id"`
-	Name         string   `json:"name"`
-	Type         string   `json:"type"`
-	BaseURL      string   `json:"base_url"`
-	Models       []string `json:"models"`
-	Enabled      bool     `json:"enabled"`
-	ProbeEnabled bool     `json:"probe_enabled"`
-	APIKeySet    bool     `json:"api_key_set"`
+	ConnectionRevision string   `json:"-"`
+	ID                 string   `json:"id"`
+	Name               string   `json:"name"`
+	Type               string   `json:"type"`
+	BaseURL            string   `json:"base_url"`
+	Models             []string `json:"models"`
+	Enabled            bool     `json:"enabled"`
+	ProbeEnabled       bool     `json:"probe_enabled"`
+	APIKeySet          bool     `json:"api_key_set"`
 }
 
 type ProviderUpdate struct {
@@ -181,20 +182,25 @@ func SafeProviders(providers []ProviderConfig) []SafeProviderConfig {
 	result := make([]SafeProviderConfig, 0, len(providers))
 	for _, provider := range providers {
 		result = append(result, SafeProviderConfig{
-			ID:           provider.ID,
-			Name:         provider.Name,
-			Type:         provider.Type,
-			BaseURL:      provider.BaseURL,
-			Models:       append([]string{}, provider.Models...),
-			Enabled:      provider.Enabled,
-			ProbeEnabled: provider.ProbeEnabled,
-			APIKeySet:    provider.APIKey != "",
+			ConnectionRevision: provider.ConnectionRevision,
+			ID:                 provider.ID,
+			Name:               provider.Name,
+			Type:               provider.Type,
+			BaseURL:            provider.BaseURL,
+			Models:             append([]string{}, provider.Models...),
+			Enabled:            provider.Enabled,
+			ProbeEnabled:       provider.ProbeEnabled,
+			APIKeySet:          provider.APIKey != "",
 		})
 	}
 	return result
 }
 
-func ApplyProviderUpdate(existing ProviderConfig, update ProviderUpdate) ProviderConfig {
+func ApplyProviderUpdate(existing ProviderConfig, update ProviderUpdate) (ProviderConfig, error) {
+	if existing.APIKey != "" && update.APIKey == "" && !update.ClearAPIKey &&
+		normalizeBaseURL(update.BaseURL) != normalizeBaseURL(existing.BaseURL) {
+		return ProviderConfig{}, errors.New("Base URL 已变更，请重新填写 API Key 或明确清除原密钥")
+	}
 	provider := ProviderConfig{
 		ID:           strings.TrimSpace(update.ID),
 		Name:         strings.TrimSpace(update.Name),
@@ -219,7 +225,7 @@ func ApplyProviderUpdate(existing ProviderConfig, update ProviderUpdate) Provide
 	} else if update.APIKey != "" {
 		provider.APIKey = update.APIKey
 	}
-	return provider
+	return provider, nil
 }
 
 func ValidateRuntimeSettings(settings RuntimeSettings) error {

@@ -24,6 +24,28 @@ import (
 // stubAdmin satisfies AdminController with no-op implementations.
 type stubAdmin struct{}
 
+func TestProviderMutationErrorStatus(t *testing.T) {
+	for _, tc := range []struct {
+		err    error
+		status int
+	}{
+		{config.ErrProviderExists, http.StatusConflict},
+		{config.ErrProviderNotFound, http.StatusNotFound},
+		{errors.New("invalid provider URL"), http.StatusBadRequest},
+		{nil, http.StatusOK},
+	} {
+		rec := httptest.NewRecorder()
+		writeResult(rec, map[string]bool{"ok": true}, tc.err)
+		if rec.Code != tc.status {
+			t.Fatalf("error %v returned %d, want %d", tc.err, rec.Code, tc.status)
+		}
+	}
+}
+
+func (stubAdmin) StartCheck(context.Context, string) (storage.CheckTask, error) {
+	return storage.CheckTask{ID: 1, Kind: "manual", Status: "running"}, nil
+}
+
 type visibilityAdmin struct {
 	stubAdmin
 	show atomic.Bool
@@ -34,7 +56,10 @@ func (a *visibilityAdmin) AdminConfig(context.Context) (config.AdminConfig, erro
 	if a.fail.Load() {
 		return config.AdminConfig{}, errors.New("config unavailable")
 	}
-	return config.AdminConfig{Settings: config.RuntimeSettings{ShowErrorDetail: a.show.Load()}}, nil
+	return config.AdminConfig{
+		Settings:  config.RuntimeSettings{ShowErrorDetail: a.show.Load()},
+		Providers: []config.SafeProviderConfig{{ID: "p1", Enabled: true, ProbeEnabled: true}},
+	}, nil
 }
 
 func sensitiveReport() report.Report {
@@ -206,7 +231,7 @@ func (stubAdmin) CheckProvider(context.Context, string) (report.Report, error) {
 func (stubAdmin) StopCheck() bool            { return false }
 func (stubAdmin) RunningState() RunningState { return RunningState{} }
 func (stubAdmin) AdminConfig(context.Context) (config.AdminConfig, error) {
-	return config.AdminConfig{}, nil
+	return config.AdminConfig{Settings: config.RuntimeSettings{DashboardTitle: "integration-test"}}, nil
 }
 func (stubAdmin) UpdateSettings(context.Context, config.RuntimeSettings) (config.AdminConfig, error) {
 	return config.AdminConfig{}, nil
@@ -295,8 +320,8 @@ func TestStatusEndpointNoReport(t *testing.T) {
 	srv, _ := newTestServer(t)
 	rec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/status", nil))
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("expected 404 when no report, got %d", rec.Code)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"state":"unconfigured"`) {
+		t.Fatalf("expected a usable empty status report, got %d: %s", rec.Code, rec.Body)
 	}
 }
 
@@ -383,5 +408,36 @@ func TestOrdinaryUserRoleAndMutationBoundary(t *testing.T) {
 	var state RunningState
 	if err := json.Unmarshal(response.Body.Bytes(), &state); err != nil || !state.ReadOnly {
 		t.Fatalf("wrong read-only session: %+v, %v", state, err)
+	}
+}
+
+func TestCheckEndpointsReturnAcceptedTask(t *testing.T) {
+	srv, _ := newTestServer(t)
+	for _, path := range []string{"/api/admin/check", "/api/admin/detection/start", "/api/admin/providers/p1/rerun"} {
+		req := httptest.NewRequest(http.MethodPost, path, nil)
+		authenticateTestRequest(req, false)
+		res := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(res, req)
+		if res.Code != http.StatusAccepted || res.Header().Get("Location") != "/api/admin/tasks/1" || !strings.Contains(res.Body.String(), `"status":"running"`) {
+			t.Fatalf("%s: status=%d headers=%v body=%s", path, res.Code, res.Header(), res.Body)
+		}
+	}
+}
+
+func TestEmptySSEInitialSnapshot(t *testing.T) {
+	srv, _ := newTestServer(t)
+	server := httptest.NewServer(srv.Handler())
+	defer server.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/api/events", nil)
+	res, err := server.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	line, err := bufio.NewReader(res.Body).ReadString('\n')
+	if err != nil || !strings.Contains(line, `"state":"unconfigured"`) {
+		t.Fatalf("missing first-install snapshot: %s, %v", line, err)
 	}
 }

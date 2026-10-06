@@ -4,7 +4,7 @@
   <p>面向 OpenAI 兼容接口的轻量级、自托管模型可用性监控平台</p>
   <p>
     <a href="https://github.com/wututua/AI_Model_Connectivity/actions/workflows/ci.yml"><img src="https://github.com/wututua/AI_Model_Connectivity/actions/workflows/ci.yml/badge.svg?branch=main" alt="GitHub CI"></a>
-    <a href="https://go.dev/"><img src="https://img.shields.io/badge/Go-1.25-00ADD8?logo=go&amp;logoColor=white" alt="Go 1.25"></a>
+    <a href="https://go.dev/"><img src="https://img.shields.io/badge/Go-1.26.8-00ADD8?logo=go&amp;logoColor=white" alt="Go 1.26.8"></a>
     <a href="https://react.dev/"><img src="https://img.shields.io/badge/React-18.3-61DAFB?logo=react&amp;logoColor=20232A" alt="React 18.3"></a>
     <a href="LICENSE"><img src="https://img.shields.io/github/license/wututua/AI_Model_Connectivity" alt="MIT License"></a>
   </p>
@@ -39,7 +39,7 @@ AI Model Connectivity（简称 CG）会定期探测多个 Provider 及其模型�
 - **可靠的并发控制**：全局与单 Provider 两级并发限制，避免集中探测触发上游限流。
 - **状态与趋势**：展示正常、较慢、异常、未检测、暂停状态，以及历史灯、24 小时延迟分位数和统计窗口检测成功率。
 - **实时更新**：优先使用 SSE 推送，连接失败时自动降级为 30、60、120 秒退避轮询。
-- **推理模型兼容**：自动剥离 `<think>` / `<thinking>` 内容，兼容 DeepSeek-R1、QwQ 等模型。
+- **响应校验**：剥离 `<think>` / `<thinking>` 内容后检查实际回复；不保证所有推理模型兼容，详见下方兼容范围。
 - **告警通知**：支持 Telegram、Discord、Bark、企业微信、钉钉和通用 Webhook，提供恢复通知、冷却与 Provider/模型过滤。
 - **账号与权限**：账号密码登录；管理员管理用户与配置，普通用户只读；可开启状态监控页登录限制。
 - **本地持久化**：使用纯 Go SQLite 驱动，无需部署外部数据库；支持旧版 JSON 数据自动迁移。
@@ -58,7 +58,7 @@ cd AI_Model_Connectivity
 
 ### 启动服务
 
-需要 Go 1.25。仓库已包含构建后的前端资源，因此首次体验不需要安装 Node.js，也不要求预先创建 `.env`。
+需要 Go 1.26.8。仓库已包含构建后的前端资源，因此首次体验不需要安装 Node.js，也不要求预先创建 `.env`。
 
 ```bash
 go run ./cmd/cg
@@ -121,7 +121,7 @@ docker run -d \
 
 ### 预编译二进制
 
-发布流水线提供 Linux、Windows、macOS 的 amd64/arm64 压缩包，包内包含二进制、`.env.example`、README 和预构建的 `web/`：
+发布流水线提供 Linux、Windows、macOS 的 amd64/arm64 压缩包，包内包含固定名称的可执行文件、`.env.example`、README、LICENSE、`docs/`、`assets/` 和预构建的 `web/`（含字体许可），另提供 SHA-256 校验文件：
 
 - [GitHub Releases](https://github.com/wututua/AI_Model_Connectivity/releases)
 
@@ -143,6 +143,8 @@ PROVIDER_1_PROBE_ENABLED=true
 ```
 
 `PROVIDER_N_MODELS` 留空时，服务会从 `{BASE_URL}/models` 自动发现模型。`ENABLED=false` 会完全隐藏并停用 Provider；`PROBE_ENABLED=false` 会保留展示但暂停探测。
+
+**兼容范围**：当前使用 Chat Completions 非流式文本请求，固定 `max_tokens=16`、`temperature=0`。不支持仅 Responses、原生 Anthropic/Gemini、图像、音频或嵌入端点；要求不同参数或较大推理预算的模型可能失败。模型返回非空有效回复才算成功，用量以接口返回为准，不等于供应商账单。
 
 常用配置：
 
@@ -167,7 +169,7 @@ PROVIDER_1_PROBE_ENABLED=true
 
 | 页面 | 路径 | 用途 |
 |------|------|------|
-| 运行概览 | `/admin/overview` | 查看运行状态，触发或停止检测 |
+| 运行概览 | `/admin/overview` | 查看运行状态，启动后台检测并跟踪完成状态 |
 | Provider | `/admin/providers` | 搜索、新增、编辑、暂停、删除和重测 Provider |
 | 系统设置 | `/admin/settings` | 修改探测、历史、调度、告警和访问控制配置 |
 | 任务历史 | `/admin/tasks` | 筛选检测任务并查看结果明细 |
@@ -180,6 +182,8 @@ PROVIDER_1_PROBE_ENABLED=true
 `/health` 始终公开。开启 **系统设置 → 访问控制 → 查看状态监控需要登录** 后，`/api/status` 与 `/api/events` 也要求有效账号会话。管理 API 使用 HttpOnly 会话 Cookie，写请求额外校验 CSRF；普通用户不能修改配置或运行检测。`/metrics` 同样需要账号会话。接口细节见 [HTTP API 参考](docs/api.md)。
 
 旧版本升级时，符合密码规则的管理 Token 会迁移为初始管理员密码，否则生成新密码；旧 Bearer 和只读分享密钥不再被接受。已有账号不会因重启或修改 `ADMIN_PASSWORD` 被重置。
+
+忘记管理员密码时，先停止服务，在相同工作目录与数据配置下运行 `model-connectivity recover-admin admin`，获得临时密码并在登录后修改；其他数据不变。操作细节见 [运维指南](docs/operations.md#9-管理员密码恢复)。
 
 ## 项目文档
 
@@ -205,7 +209,7 @@ PROVIDER_1_PROBE_ENABLED=true
 go run ./cmd/cg
 ```
 
-前端热更新需要 Node.js 20+：
+前端开发与 CI 使用 Node.js 24：
 
 ```bash
 cd frontend
@@ -227,8 +231,8 @@ cd frontend && npm test && npm run build
 
 | 层级 | 技术 |
 |------|------|
-| 后端 | Go 1.25、SQLite、SSE、Prometheus |
-| 前端 | React 18、TypeScript、Vite 5 |
+| 后端 | Go 1.26.8、SQLite、SSE、Prometheus |
+| 前端 | React 18、TypeScript、Vite 7、React Router 7 |
 | UI | shadcn/ui、Radix UI、Tailwind CSS、Lucide |
 | 部署 | Docker、Docker Compose、distroless、跨平台二进制 |
 | CI/CD | GitHub Actions |
@@ -274,4 +278,4 @@ docs/                项目文档
 
 本项目基于 [MIT License](LICENSE) 开源。
 
-**本项目使用 HarmonyOS Sans 字体。** 字体版权归 Huawei Device Co., Ltd. 所有，适用独立的 [HarmonyOS Sans 字体许可](frontend/public/fonts/harmonyos-sans/LICENSE.txt)，不属于项目的 MIT 授权范围。字体来源见 [字体声明](frontend/public/fonts/harmonyos-sans/NOTICE.md)。
+**本项目使用 HarmonyOS Sans 字体。** 字体版权归 Huawei Device Co., Ltd. 所有，适用独立的 [HarmonyOS Sans 字体许可](web/fonts/harmonyos-sans/LICENSE.txt)，不属于项目的 MIT 授权范围。字体来源见 [字体声明](web/fonts/harmonyos-sans/NOTICE.md)。

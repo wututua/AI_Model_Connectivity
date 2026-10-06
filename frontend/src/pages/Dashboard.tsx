@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   Activity, ArrowUpDown, Clock3, LayoutGrid, List, RefreshCw, Search, Server, Settings2, X, XCircle,
@@ -8,7 +8,7 @@ import { api } from '../api'
 import { cn } from '../lib/utils'
 import { detectionSuccessRate, relativeTime, reportPresentation } from '../utils/status'
 import { readDashboardPreferences, saveDashboardPreferences, type SortMode, type ViewMode } from '../utils/dashboardPreferences'
-import { startStatusUpdates } from '../utils/liveStatus'
+import { startStatusUpdates, type StatusController } from '../utils/liveStatus'
 import { useNow } from '../hooks/useNow'
 import { useAuth } from '../hooks/useAuth'
 import { ProviderCard } from '../components/ProviderCard'
@@ -39,21 +39,30 @@ export default function Dashboard() {
   const setViewMode = (viewMode: ViewMode) => setPreferences(current => ({ ...current, viewMode }))
   useEffect(() => saveDashboardPreferences(preferences), [preferences])
 
-  const fetchReport = useCallback(() => api.status()
-    .then(data => { setReport(data); setError(null) })
-    .catch(cause => setError((cause as Error).message)), [])
+  const updates = useRef<StatusController | null>(null)
 
   const handleRefresh = useCallback(() => {
+    const controller = updates.current
+    if (!controller) return
     setRefreshing(true)
-    fetchReport().finally(() => setRefreshing(false))
-  }, [fetchReport])
+    void controller.refresh().finally(() => {
+      if (updates.current === controller) setRefreshing(false)
+    })
+  }, [])
 
-  useEffect(() => startStatusUpdates({
-    fetchReport: api.status,
-    onReport: data => { setReport(data); setError(null) },
-    onError: cause => setError(cause.message),
-    onLive: setLive,
-  }), [])
+  useEffect(() => {
+    const controller = startStatusUpdates({
+      fetchReport: api.status,
+      onReport: data => { setReport(data); setError(null) },
+      onError: cause => setError(cause.message),
+      onLive: setLive,
+    })
+    updates.current = controller
+    return () => {
+      updates.current = null
+      controller.close()
+    }
+  }, [])
 
   const filteredProviders = useMemo(() => {
     if (!report?.providers) return []
@@ -114,6 +123,14 @@ export default function Dashboard() {
 
         {error && !report ? (
           <EmptyState error={error} />
+        ) : report?.state === 'pending' || report?.state === 'unconfigured' ? (
+          <div className="flex min-h-[55vh] flex-col items-center justify-center text-center">
+            <Server className="size-8 text-muted-foreground" />
+            <h1 className="mt-4 text-xl font-semibold">{report.state === 'unconfigured' ? '尚未配置监控服务' : '等待首次检测'}</h1>
+            <p className="mt-2 text-sm text-muted-foreground">{report.state === 'unconfigured' ? '暂无启用的 Provider' : `${report.provider_count} 个 Provider，暂无检测报告`}</p>
+            {session.user?.role === 'admin' && <Button asChild className="mt-5"><Link to={report.state === 'unconfigured' ? '/admin/providers' : '/admin/overview'}><Settings2 />{report.state === 'unconfigured' ? '配置 Provider' : '运行概览'}</Link></Button>}
+            {error && <p role="alert" className="mt-4 text-sm text-destructive">{error}</p>}
+          </div>
         ) : report ? (
           <div className="space-y-5 animate-enter">
             <StatusOverview report={report} live={live} now={now} />

@@ -72,7 +72,7 @@ Cookie 为 SameSite Strict，24 小时绝对有效期；HTTPS 部署设置 `SECU
 | 400 | 请求体非法 / 参数校验失败（如密码太短、provider id 非法） |
 | 401 | 未认证、登录失败或会话失效 |
 | 403 | 权限不足、CSRF/来源校验失败、需要初始改密 |
-| 404 | 资源不存在（如 `/api/status` 尚无报告、任务 id 不存在） |
+| 404 | 资源不存在（如任务 id 不存在） |
 | 405 | HTTP 方法不允许 |
 | 409 | 已有检测任务正在运行（`check already running`） |
 | 413 / 415 | 请求体过大 / 登录请求类型不是 JSON |
@@ -88,7 +88,7 @@ Cookie 为 SameSite Strict，24 小时绝对有效期；HTTPS 部署设置 `SECU
 
 获取最新检测报告（仪表盘首页数据）。`status_login_required=true` 时要求登录，否则可匿名读取。
 
-- **404**：尚无报告（服务刚启动未跑过检测），前端需处理空态并提示手动触发检测。
+- **200 空态**：`state=unconfigured` 表示尚无启用 Provider，`pending` 表示等待首次检测；此时 `generated_at=""`，不是请求失败。已有报告为 `ready`。
 - **响应**：`Report` 对象（见 6.1）。
 
 ### 4.2 `GET /api/events`（SSE 实时推送）
@@ -96,7 +96,7 @@ Cookie 为 SameSite Strict，24 小时绝对有效期；HTTPS 部署设置 `SECU
 Server-Sent Events，推送最新 `Report`。
 
 - 响应头：`Content-Type: text/event-stream`
-- 连接建立后立即推送一次当前最新报告（若存在）。
+- 连接建立后立即推送当前报告，包括首次安装空态；配置变更也会更新状态。
 - 之后每次检测完成推送一条 `data: <Report JSON>\n\n`。
 - 每 5 秒发送 `: keep-alive` 注释帧保活，发送报告和心跳前复查访问权限。
 - 权限失效时发送 `event: auth-required` 并关闭连接；前端刷新会话并跳转登录。
@@ -132,15 +132,15 @@ Server-Sent Events，推送最新 `Report`。
 
 #### `POST /api/admin/detection/start`
 
-触发一次全量检测（同步执行，最长 30 分钟超时）。响应 `{ "ok": true, "report": Report }`；已有任务运行返回 **409**。
+接受一次后台全量检测（最长 30 分钟）。响应 **202** `{ "ok": true, "task": CheckTask }` 和 `Location: /api/admin/tasks/{id}`；已有任务运行返回 **409**。返回成功只表示已启动，须轮询任务详情确认完成。
 
 #### `POST /api/admin/detection/stop`
 
-停止当前检测。响应 `{ "ok": true, "stopped": true }`。
+保留管理员 API，前端不提供停止按钮。响应 `{ "ok": true, "stopped": true }`；已确认的用量保留。
 
 #### `POST /api/admin/check`
 
-与 `detection/start` 等效的全量检测触发入口（同步返回报告）。响应同上，409 语义相同。
+与 `detection/start` 等效，返回后台任务。响应同上，409 语义相同。
 
 ### 5.2 用户管理
 
@@ -176,7 +176,7 @@ Server-Sent Events，推送最新 `Report`。
 
 #### `POST /api/admin/config/import`
 
-导入配置。请求体 `ConfigImport`：`{ "settings": RuntimeSettings, "providers": ProviderUpdate[] }`，响应更新后的 `AdminConfig`。
+导入配置。请求体 `ConfigImport`：`{ "settings": RuntimeSettings, "providers": ProviderUpdate[] }`，响应更新后的 `AdminConfig`。若已有 Provider 的 Base URL 改变，必须重新填写 `api_key` 或显式 `clear_api_key: true`；否则返回 400，整个导入不生效。
 
 #### `POST /api/admin/config/reload`
 
@@ -213,19 +213,21 @@ Server-Sent Events，推送最新 `Report`。
 
 #### `POST /api/admin/providers`
 
-新增 Provider。请求体 `ProviderUpdate`（见 6.5），响应创建后的 `SafeProviderConfig`。
+新增 Provider。请求体 `ProviderUpdate`（见 6.5），响应创建后的 `SafeProviderConfig`。ID 忽略大小写判重，重复返回 409，不覆盖原配置。
 
 #### `PUT /api/admin/providers/{id}`
 
-更新 Provider。路径参数 `id` 需 URL 编码。请求体 `ProviderUpdate`；`api_key` 留空表示不变，`clear_api_key: true` 表示清除。
+更新 Provider。路径参数 `id` 需 URL 编码，不存在时返回 404，不自动创建。请求体 `ProviderUpdate`；Base URL 不变时 `api_key` 留空保留原值；地址变更时必须重新填写 Key 或显式清除，否则返回 400。`clear_api_key: true` 表示清除。
+
+连接地址、密钥或协议改变后，当前结果立即变为 unknown，清除当前检测时间、延迟及错误；历史及用量保留。仅名称变更不失效。`ProviderReport.connection_revision` 是随机配置版本，允许省略以兼容旧快照，不是密钥哈希，也不应当作时间戳排序。
 
 #### `DELETE /api/admin/providers/{id}`
 
-删除 Provider。响应 `{ "ok": true }`。
+删除 Provider。响应 `{ "ok": true }`，不存在时返回 404。
 
 #### `POST /api/admin/providers/{id}/rerun`
 
-单独重跑该 Provider 的检测（同步，最长 30 分钟）。响应 `{ "ok": true, "report": Report }`，409 语义同上。
+单独重跑该 Provider 的检测（后台，最长 30 分钟）。响应 **202** `{ "ok": true, "task": CheckTask }`，409 语义同上。停用、暂停或不存在的 Provider 返回 400。
 
 **Provider id 校验规则**（后端 `ValidateProviderID`）：非空、≤128 字符、不允许首尾空格、不允许控制字符及 `/ \ ? #`、不允许 `.` / `..`。
 
@@ -267,6 +269,7 @@ Prometheus 指标端点。仅在后端通过 `SetMetrics` 启用后可用，否�
 
 ```json
 {
+  "state": "ready",
   "title": "仪表盘标题",
   "generated_at": "2024-01-01T12:00:00Z",
   "elapsed_ms": 1234,
@@ -370,6 +373,6 @@ Prometheus 指标端点。仅在后端通过 `SetMetrics` 启用后可用，否�
 1. **统一入口**：所有请求走 `frontend/src/api.ts` 的 `api` 对象，自动携带 Cookie 与写请求 CSRF 头；错误统一从 `error` 字段提取。
 2. **登录态**：`AuthProvider` 启动、窗口聚焦和每 30 秒读取 session；按角色、初始改密标记及监控访问开关守卫路由。登录、改密后接受新的 session，忽略过期的并发刷新结果。
 3. **实时刷新**：仪表盘优先 SSE（`/api/events`），网络失败自动降级轮询 `/api/status`，`auth-required` 触发会话刷新。
-4. **长耗时操作**：触发检测类接口（start / check / rerun）同步执行，前端需有 loading 态；409 表示已有任务在跑。
-5. **敏感字段不回显**：api_key、告警 webhook/bot token 等只显示"已设置"，编辑时留空即不变。
+4. **长耗时操作**：start / check / rerun 返回 202 后保持运行态，定期查询 detection 和 tasks/{id}；完成后刷新报告。切页或断网不取消后台任务；409 表示已有任务在跑。
+5. **敏感字段不回显**：api_key、告警 webhook/bot token 等只显示"已设置"。Provider 地址不变时留空保留 Key；地址改变须重新填写或明确清除。
 6. **URL 编码**：Provider id 允许特殊字符，拼接路径时必须 `encodeURIComponent`（`api.ts` 已处理）。

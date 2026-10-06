@@ -174,6 +174,7 @@ func TestHidingErrorsPublishesOldReportAndSanitizesMerge(t *testing.T) {
 		{ID: "p1", Enabled: true, ProbeEnabled: false, BaseURL: "https://example.test"},
 		{ID: "p2", Enabled: true, ProbeEnabled: true, BaseURL: "https://example.test"},
 	}
+	app.cfg.Providers = config.ReconcileProviderRevisions(nil, app.cfg.Providers)
 	base, _ := report.Build(app.cfg, []probe.Result{
 		{ProviderID: "p2", Model: "m2", Status: "error", Error: "sensitive-detail", HistoryKey: "p2::m2"},
 	}, []probe.ProviderError{{ProviderID: "p2", Error: "sensitive-discovery"}}, nil, time.Now())

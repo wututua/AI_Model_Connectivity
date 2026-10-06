@@ -34,6 +34,12 @@ export function TasksTab() {
       .finally(() => { if (request === requestId.current) setLoading(false) })
   }, [filter, offset])
   useEffect(() => { load(); return () => { requestId.current++; pending.current?.abort() } }, [load])
+  const hasRunning = tasks.some(task => task.status === 'running')
+  useEffect(() => {
+    if (!hasRunning || loading) return
+    const timer = setTimeout(load, 2000)
+    return () => clearTimeout(timer)
+  }, [hasRunning, loading, load])
 
   const pageSummary = useMemo(() => ({ success: tasks.filter(task => task.status === 'success').length, failed: tasks.filter(task => task.status === 'error').length, running: tasks.filter(task => task.status === 'running').length }), [tasks])
 

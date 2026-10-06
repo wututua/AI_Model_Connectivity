@@ -1,5 +1,5 @@
 # ── Stage 1: 前端构建 ──────────────────────────────────────────────────
-FROM node:20-slim AS frontend-builder
+FROM node:24-slim AS frontend-builder
 WORKDIR /app/frontend
 COPY frontend/package*.json ./
 RUN npm ci
@@ -7,7 +7,9 @@ COPY frontend/ ./
 RUN npm run build
 
 # ── Stage 2: 后端构建 ──────────────────────────────────────────────────
-FROM golang:1.25-alpine AS backend-builder
+FROM golang:1.26.8-alpine AS backend-builder
+ARG VERSION=dev
+ARG COMMIT=unknown
 WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
@@ -16,7 +18,7 @@ COPY --from=frontend-builder /app/web ./web
 RUN mkdir -p /runtime-data
 RUN CGO_ENABLED=0 go build \
     -trimpath \
-    -ldflags="-s -w" \
+    -ldflags="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT}" \
     -o /model-connectivity \
     ./cmd/cg
 

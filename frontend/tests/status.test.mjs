@@ -39,6 +39,7 @@ test('unknown status dots are neutral and distinct from slow responses', () => {
 test('report headings distinguish unknown models, real failures, slow responses and empty reports', () => {
   const base = { total: 3, error_count: 0, slow_count: 0, unknown_count: 0, provider_errors: [] }
   assert.equal(reportPresentation(base).status, 'ok')
+  assert.equal(reportPresentation({ ...base, providers: [{ status: 'unknown' }] }).headline, '部分 Provider 尚未检测')
   assert.equal(reportPresentation({ ...base, unknown_count: 3 }).headline, '所有模型尚未检测')
   assert.equal(reportPresentation({ ...base, unknown_count: 1 }).headline, '部分模型尚未检测')
   assert.equal(reportPresentation({ ...base, unknown_count: 1, error_count: 1 }).status, 'error')

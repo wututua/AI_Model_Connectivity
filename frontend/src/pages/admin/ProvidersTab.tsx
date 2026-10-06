@@ -24,6 +24,8 @@ export function ProvidersTab({ readOnly = false }: { readOnly?: boolean }) {
   const [deleteTarget, setDeleteTarget] = useState<SafeProviderConfig | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [rerunning, setRerunning] = useState<string | null>(null)
+  const [busy, setBusy] = useState(true)
+  const watchedTask = useRef<number | null>(null)
   const [search, setSearch] = useState('')
   const [message, setMessage] = useAutoMsg()
   const [actionTarget, setActionTarget] = useState<SafeProviderConfig | null>(null)
@@ -35,6 +37,32 @@ export function ProvidersTab({ readOnly = false }: { readOnly?: boolean }) {
   }, [setMessage])
 
   useEffect(() => { load() }, [load])
+  useEffect(() => {
+    if (readOnly) return
+    let active = true
+    let pending = false
+    const poll = async () => {
+      if (pending) return
+      pending = true
+      try {
+        const state = await api.detection()
+        if (!active) return
+        setBusy(state.running)
+        setRerunning(state.running ? state.provider_id || null : null)
+        if (watchedTask.current) {
+          const task = await api.task(watchedTask.current)
+          if (!active || task.status === 'running') return
+          watchedTask.current = null
+          setMessage(task.status === 'success' ? `检测任务 #${task.id} 已完成` : `错误：检测任务 #${task.id} ${task.status === 'canceled' ? '已取消' : '失败'}`)
+        }
+      } catch {
+        // Preserve the last known state while reconnecting.
+      } finally { pending = false }
+    }
+    void poll()
+    const timer = setInterval(poll, 2000)
+    return () => { active = false; clearInterval(timer) }
+  }, [readOnly, setMessage])
 
   const filtered = useMemo(() => {
     const query = search.trim().toLowerCase()
@@ -58,9 +86,12 @@ export function ProvidersTab({ readOnly = false }: { readOnly?: boolean }) {
 
   const rerun = async (provider: SafeProviderConfig) => {
     setRerunning(provider.id); setMessage('')
-    try { await api.rerunProvider(provider.id); setMessage(`已触发「${provider.name}」的检测任务`) }
-    catch (cause) { setMessage(`错误：${(cause as Error).message}`) }
-    finally { setRerunning(null) }
+    setBusy(true)
+    try {
+      const { task } = await api.rerunProvider(provider.id)
+      watchedTask.current = task.id
+      setMessage(`「${provider.name}」检测任务 #${task.id} 已启动`)
+    } catch (cause) { setRerunning(null); setBusy(false); setMessage(`错误：${(cause as Error).message}`) }
   }
 
   return (
@@ -105,7 +136,7 @@ export function ProvidersTab({ readOnly = false }: { readOnly?: boolean }) {
                   <TableCell className="whitespace-nowrap"><div className="flex flex-col items-start gap-1"><Badge variant={provider.enabled ? 'success' : 'muted'}>{provider.enabled ? '已启用' : '已停用'}</Badge><span className="text-xs text-muted-foreground">{provider.enabled && provider.probe_enabled ? '参与检测' : '不参与检测'}</span></div></TableCell>
                   {!readOnly && <TableCell>
                     <div className="flex justify-end gap-1">
-                      <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" onClick={() => rerun(provider)} disabled={!provider.enabled || !provider.probe_enabled || rerunning !== null} aria-label={`重新检测 ${provider.name}`}><RotateCw className={rerunning === provider.id ? 'animate-spin' : ''} /></Button></TooltipTrigger><TooltipContent>重新检测</TooltipContent></Tooltip>
+                      <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" onClick={() => rerun(provider)} disabled={!provider.enabled || !provider.probe_enabled || busy || rerunning !== null} aria-label={`重新检测 ${provider.name}`}><RotateCw className={rerunning === provider.id ? 'animate-spin' : ''} /></Button></TooltipTrigger><TooltipContent>重新检测</TooltipContent></Tooltip>
                       <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" onClick={() => setEditing(provider)} aria-label={`编辑 ${provider.name}`}><Edit2 /></Button></TooltipTrigger><TooltipContent>编辑</TooltipContent></Tooltip><Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" className="text-destructive hover:text-destructive" onClick={() => setDeleteTarget(provider)} aria-label={`删除 ${provider.name}`}><Trash2 /></Button></TooltipTrigger><TooltipContent>删除</TooltipContent></Tooltip>
                     </div>
                   </TableCell>}
@@ -121,7 +152,7 @@ export function ProvidersTab({ readOnly = false }: { readOnly?: boolean }) {
         <DialogContent className="max-w-sm">
           <DialogHeader><DialogTitle className="break-all pr-6">{actionTarget?.name}</DialogTitle><DialogDescription>Provider 操作</DialogDescription></DialogHeader>
           {actionTarget && <div className="grid gap-2">
-            <Button variant="outline" className="h-11 justify-start" disabled={!actionTarget.enabled || !actionTarget.probe_enabled || rerunning !== null} onClick={() => { void rerun(actionTarget); setActionTarget(null) }}><RotateCw />重新检测</Button>
+            <Button variant="outline" className="h-11 justify-start" disabled={!actionTarget.enabled || !actionTarget.probe_enabled || busy || rerunning !== null} onClick={() => { void rerun(actionTarget); setActionTarget(null) }}><RotateCw />重新检测</Button>
             <Button variant="outline" className="h-11 justify-start" onClick={() => { setEditing(actionTarget); setActionTarget(null) }}><Edit2 />编辑 Provider</Button>
             <Button variant="outline" className="h-11 justify-start text-destructive hover:text-destructive" onClick={() => { setDeleteTarget(actionTarget); setActionTarget(null) }}><Trash2 />删除 Provider</Button>
           </div>}
@@ -151,6 +182,9 @@ function ProviderDialog({ value, onOpenChange, onSave }: { value: EditingState; 
   const [syncMessage, setSyncMessage] = useState('')
   const pending = useRef<AbortController | null>(null)
   const set = <Key extends keyof typeof form>(key: Key, next: (typeof form)[Key]) => setForm(current => ({ ...current, [key]: next }))
+  const endpointChanged = initial && form.base_url.trim().replace(/\/+$/, '') !== initial.base_url.trim().replace(/\/+$/, '')
+  const keyConfirmationRequired = initial?.api_key_set && endpointChanged && !form.api_key && !form.clear_api_key
+  const keyChangeError = 'Base URL 已变更，请重新填写 API Key 或明确清除原密钥'
 
   useEffect(() => {
     pending.current?.abort()
@@ -162,6 +196,7 @@ function ProviderDialog({ value, onOpenChange, onSave }: { value: EditingState; 
   const sync = async () => {
     if (pending.current || saving) return
     if (!form.base_url.trim()) { setSyncError('请先填写 Base URL'); return }
+    if (keyConfirmationRequired) { setSyncError(keyChangeError); return }
     const controller = new AbortController()
     pending.current = controller
     setSyncing(true); setSyncError(''); setSyncMessage('')
@@ -181,6 +216,7 @@ function ProviderDialog({ value, onOpenChange, onSave }: { value: EditingState; 
   const submit = async () => {
     if (saving || syncing) return
     if (!form.id.trim() || !form.name.trim() || !form.base_url.trim()) { setError('ID、名称和 Base URL 均为必填项'); return }
+    if (keyConfirmationRequired) { setError(keyChangeError); return }
     setSaving(true); setError('')
     try {
       await onSave(initial?.id ?? null, {
@@ -199,7 +235,7 @@ function ProviderDialog({ value, onOpenChange, onSave }: { value: EditingState; 
           <Field label="显示名称" htmlFor="provider-name"><Input id="provider-name" value={form.name} onChange={event => set('name', event.target.value)} placeholder="OpenAI" /></Field>
           <Field label="Provider 类型" htmlFor="provider-type"><Input id="provider-type" value={form.type} onChange={event => set('type', event.target.value)} placeholder="openai" className="font-mono" /></Field>
           <Field label="Base URL" htmlFor="provider-url"><Input id="provider-url" type="url" value={form.base_url} onChange={event => set('base_url', event.target.value)} placeholder="https://api.openai.com/v1" className="font-mono" /></Field>
-          <Field className="md:col-span-2" label={`API Key${initial?.api_key_set ? '（留空保留现有值）' : ''}`} htmlFor="provider-key"><Input id="provider-key" type="password" value={form.api_key} onChange={event => set('api_key', event.target.value)} placeholder={initial?.api_key_set ? '已设置' : 'sk-...'} className="font-mono" /></Field>
+          <Field className="md:col-span-2" label={`API Key${initial?.api_key_set ? (endpointChanged ? '（地址已变更）' : '（留空保留现有值）') : ''}`} htmlFor="provider-key"><Input id="provider-key" type="password" value={form.api_key} onChange={event => set('api_key', event.target.value)} placeholder={initial?.api_key_set ? '已设置' : 'sk-...'} className="font-mono" /></Field>
           {initial?.api_key_set && <ToggleRow className="md:col-span-2" label="清除现有 API Key" description="保存后移除服务端存储的 Key" checked={form.clear_api_key} onCheckedChange={value => set('clear_api_key', value)} danger />}
           <div className="min-w-0 md:col-span-2"><ModelPicker value={form.models} available={available} onChange={models => set('models', models)} onSync={sync} syncing={syncing} disabled={saving} syncError={syncError} syncMessage={syncMessage} /></div>
           <ToggleRow className="md:col-span-2" label="启用 Provider" description="停用后不会展示或参与检测" checked={form.enabled} onCheckedChange={value => set('enabled', value)} />

@@ -33,6 +33,9 @@ jobs:
       - name: Unit tests
         if: runner.os == 'Windows'
         run: go test ./...
+      - name: Go vulnerability scan
+        if: runner.os == 'Linux'
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
 
   build-frontend:
     name: Build frontend
@@ -44,7 +47,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
           cache: 'npm'
           cache-dependency-path: frontend/package-lock.json
 
@@ -56,6 +59,19 @@ jobs:
 
       - name: Test
         run: npm test --prefix frontend
+
+      - name: Dependency audit
+        run: npm audit --prefix frontend --audit-level=low
+
+      - name: Install browser
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Browser regression tests
+        working-directory: frontend
+        env:
+          PLAYWRIGHT_CHANNEL: chromium
+        run: npm run test:browser
 
       - name: Upload web artifact
         uses: actions/upload-artifact@v4
@@ -113,8 +129,8 @@ jobs:
           CGO_ENABLED: '0'
         run: |
           mkdir -p dist
-          binary="model-connectivity-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}"
-          go build -trimpath -ldflags="-s -w" -o "dist/${binary}" ./cmd/cg
+          binary="model-connectivity${{ matrix.ext }}"
+          go build -trimpath -ldflags="-s -w -X main.version=${{ github.ref_name }} -X main.commit=${{ github.sha }}" -o "dist/${binary}" ./cmd/cg
 
       - name: Package
         run: |
@@ -122,11 +138,14 @@ jobs:
           asset="model-connectivity-${{ matrix.goos }}-${{ matrix.goarch }}"
           cp ../.env.example .env.example
           cp ../README.md README.md
+          cp ../LICENSE LICENSE
+          cp -r ../docs docs
+          cp -r ../assets assets
           cp -r ../web web
           if [ "${{ matrix.goos }}" = "windows" ]; then
-            zip -r "${asset}.zip" "${asset}.exe" ".env.example" "README.md" "web/"
+            zip -r "${asset}.zip" "model-connectivity.exe" ".env.example" "README.md" "LICENSE" "docs/" "assets/" "web/"
           else
-            tar -czf "${asset}.tar.gz" "${asset}" ".env.example" "README.md" "web/"
+            tar -czf "${asset}.tar.gz" "model-connectivity" ".env.example" "README.md" "LICENSE" "docs/" "assets/" "web/"
           fi
 
       - name: Upload artifact
@@ -143,6 +162,9 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout release notes
+        uses: actions/checkout@v4
+
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
@@ -150,15 +172,31 @@ jobs:
           pattern: 'model-connectivity-*'
           merge-multiple: true
 
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum *.zip *.tar.gz > SHA256SUMS.txt
+
+      - name: Select versioned release notes
+        id: release-notes
+        run: |
+          notes="docs/releases/${GITHUB_REF_NAME}.md"
+          if [ -f "$notes" ]; then
+            printf 'path=%s\n' "$notes" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          make_latest: ${{ contains(github.ref_name, '-') && 'false' || 'true' }}
+          body_path: ${{ steps.release-notes.outputs.path }}
           body: |
             ## Release 说明
 
             - 下载对应平台的压缩包
-            - 解压后可直接使用，其中包含二进制、`.env.example`、`README.md` 和预构建的 `web/` 目录
-            - 复制 `.env.example` 为 `.env`，填写至少一个 Provider 后启动程序
+            - 解压后可直接使用，内含固定名称的可执行文件、`.env.example`、`README.md`、`LICENSE`、`docs/`、`assets/` 和预构建 `web/`
+            - 可直接启动并在管理面板添加 Provider；使用 `--version` 查看构建信息
+            - `SHA256SUMS.txt` 用于校验下载文件
             - 该项目会真实调用模型接口并消耗 token，建议把自动检测周期调长一点
 
             ## 启动方式
@@ -169,6 +207,7 @@ jobs:
           files: |
             dist/*.zip
             dist/*.tar.gz
+            dist/SHA256SUMS.txt
 
   docker:
     name: Push Docker image to Docker Hub
@@ -202,10 +241,12 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ secrets.DOCKERHUB_USERNAME }}/model-connectivity
+          flavor: |
+            latest=false
           tags: |
             type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/') }}
+            type=semver,pattern={{major}}.{{minor}},enable=${{ !contains(github.ref_name, '-') }}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/') && !contains(github.ref_name, '-') }}
             type=raw,value=main,enable=${{ github.ref == 'refs/heads/main' }}
 
       - name: Build and push
@@ -214,6 +255,9 @@ jobs:
           context: .
           platforms: linux/amd64,linux/arm64
           push: true
+          build-args: |
+            VERSION=${{ github.ref_name }}
+            COMMIT=${{ github.sha }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha

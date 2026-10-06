@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -239,6 +240,33 @@ func (c *Client) do(request *http.Request) error {
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return fmt.Errorf("notify webhook returned %s", response.Status)
+	}
+	switch c.platform() {
+	case "wecom", "wechat_work", "dingtalk", "telegram", "bark":
+		var receipt struct {
+			ErrCode *int  `json:"errcode"`
+			OK      *bool `json:"ok"`
+			Code    *int  `json:"code"`
+		}
+		body, err := io.ReadAll(io.LimitReader(response.Body, (64<<10)+1))
+		if err != nil || len(body) > 64<<10 || json.Unmarshal(body, &receipt) != nil {
+			return errors.New("notify platform returned an invalid receipt")
+		}
+		// Do not log the response body: a provider may echo credentials in it.
+		switch c.platform() {
+		case "telegram":
+			if receipt.OK == nil || !*receipt.OK {
+				return errors.New("telegram rejected the notification")
+			}
+		case "bark":
+			if receipt.Code == nil || *receipt.Code != 200 {
+				return errors.New("bark rejected the notification")
+			}
+		default:
+			if receipt.ErrCode == nil || *receipt.ErrCode != 0 {
+				return errors.New("notify platform rejected the notification")
+			}
+		}
 	}
 	return nil
 }

@@ -8,7 +8,7 @@
 |------|------|
 | `GET /health` | 返回 `{"ok": true}`，无需认证 |
 | `model-connectivity healthcheck` | 请求 `http://127.0.0.1:<APP_PORT>/health`，非 2xx 退出码 1（容器健康检查用） |
-| `GET /api/status` | 有报告说明已完成过检测；`404` 表示尚未检测；启用登录开关后需要账号会话 |
+| `GET /api/status` | 返回 200；`state=unconfigured/pending` 为正常首用空态，`ready` 为已有报告；启用登录开关后需要账号会话 |
 
 ## 2. Prometheus 指标
 
@@ -63,6 +63,8 @@ curl -b cookies.txt http://127.0.0.1:8080/metrics
 3. 验证：临时把某 Provider 的 API Key 改错后触发检测，应收到 `DEGRADED` 通知；恢复后（开启 `NOTIFY_ON_RECOVERY`）收到恢复通知。
 4. 无通知的常见原因：平台设为 `disabled` / Webhook 为空 / 状态未变化 / 首次启动即正常 / 处于冷却期。
 
+企业微信/钉钉要求 `errcode=0`，Telegram 要求 `ok=true`，Bark 要求 `code=200`；HTTP 200 但平台拒绝时仍记为失败，不推进已发送状态，下次检测会继续尝试（仍遵守冷却配置）。通用 Webhook 与 Discord 按 HTTP 2xx 判断。失败回执不写入日志，避免回显凭据。这不是独立重试队列：未再执行检测时不会自动重发。
+
 ## 5. 任务历史排查
 
 ```bash
@@ -70,7 +72,7 @@ curl -b cookies.txt \
   'http://127.0.0.1:8080/api/admin/tasks?status=error&limit=20'
 ```
 
-`error_message` 与 `status=canceled` 可区分失败与被手动停止；`elapsed_ms` 用于定位整体变慢。
+`error_message` 与 `status=canceled` 可区分失败与取消/停服；`elapsed_ms` 用于定位整体变慢。后台任务受服务进程管理，离开页面不会取消。强制终止进程仍可能丢失尚未落库的用量，统计不能替代供应商账单。
 
 ## 6. 备份与恢复
 
@@ -105,3 +107,12 @@ systemctl stop model-connectivity && cp -a data data.bak && systemctl start mode
 - 使用 `SKIP_MODELS` / `MAX_MODELS_PER_PROVIDER` 缩小探测面；
 - 定时检测间隔设为 6–12 小时；
 - 在管理面板 **检测控制** 查看「Token 消耗估算」，在 **用量** 页查看实际统计。
+
+## 9. 管理员密码恢复
+
+1. 停止所有使用该数据库的服务实例，备份数据目录。
+2. 在原工作目录、相同 `DATA_DIR` / `DATABASE_PATH` 环境下运行 `model-connectivity recover-admin admin`（用户名替换为实际管理员；Windows 使用 `.\model-connectivity.exe`，源码使用 `go run ./cmd/cg recover-admin admin`）。
+3. 命令仅为已有管理员生成并显示临时密码，重新启用账号并撤销其所有会话；不清除配置、历史、用量或其他用户，不会提升普通用户权限。
+4. 重启服务，用临时密码登录并完成强制改密。输出包含密码，勿录屏、上传或写入共享日志。
+
+Docker Compose 使用同样的数据卷和服务账户：`docker compose stop`，随后 `docker compose run --rm model-connectivity recover-admin admin`，最后 `docker compose up -d`。若改过服务名，请相应替换。命令不接受明文密码参数，避免泄露在进程列表中；拥有数据库读取/写入权限等同于可信运维权限。

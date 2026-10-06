@@ -1,6 +1,6 @@
 module cg
 
-go 1.25.0
+go 1.26.8
 
 require modernc.org/sqlite v1.29.10
 
@@ -19,7 +19,7 @@ require (
 	github.com/prometheus/procfs v0.16.1 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	go.yaml.in/yaml/v2 v2.4.2 // indirect
-	golang.org/x/sys v0.42.0 // indirect
+	golang.org/x/sys v0.44.0 // indirect
 	google.golang.org/protobuf v1.36.8 // indirect
 	modernc.org/gc/v3 v3.1.2 // indirect
 	modernc.org/libc v1.72.0 // indirect

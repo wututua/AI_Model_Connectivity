@@ -30,15 +30,13 @@ func (a *application) DiscoverModels(ctx context.Context, query config.ModelDisc
 	if baseURL == "" {
 		return nil, errors.New("请先填写 Base URL")
 	}
-	// A draft URL must not silently send an existing secret to a different endpoint.
-	if existing.APIKey != "" && query.APIKey == "" && !query.ClearAPIKey &&
-		baseURL != strings.TrimRight(strings.TrimSpace(existing.BaseURL), "/") {
-		return nil, errors.New("Base URL 已变更，请重新填写 API Key 后同步模型")
-	}
-	draft := config.ApplyProviderUpdate(existing, config.ProviderUpdate{
+	draft, err := config.ApplyProviderUpdate(existing, config.ProviderUpdate{
 		ID: "model-discovery", Type: query.Type, BaseURL: baseURL,
 		APIKey: query.APIKey, ClearAPIKey: query.ClearAPIKey,
 	})
+	if err != nil {
+		return nil, err
+	}
 	if err := config.ValidateProviders([]config.ProviderConfig{draft}); err != nil {
 		return nil, err
 	}

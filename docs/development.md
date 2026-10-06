@@ -4,8 +4,8 @@
 
 ## 1. 环境
 
-- Go 1.25（见 `go.mod`，无 CGO 依赖）
-- Node 20+（前端）
+- Go 1.26.8（见 `go.mod`，无 CGO 依赖）
+- Node 24（前端，使用锁文件安装）
 - 首次源码运行需先构建前端，或直接使用仓库已提交的 `web/`
 
 ## 2. 常用命令
@@ -63,7 +63,7 @@ cd frontend && npx tsc --noEmit
 | `internal/storage` | 最新报告/历史/通知状态/配置/任务、用量保留、写入回滚、文件权限、最后管理员保护、会话过期/撤销、密码变更并发 |
 | `internal/web` | Cookie、CSRF、认证限流、JSON 边界、账号角色、强制初始改密、用户管理、REST/SSE 登录保护及会话撤销 |
 
-CI（`.github/workflows/ci.yml`）跑 `go vet`、`go test -race`、前端单元测试和构建；发布工作流在 Windows 上跑单元测试、在 Linux 上跑竞态测试，测试通过后才能构建发布产物。跨平台编译不等于在每个平台上执行测试。
+CI 与发布工作流包含 `go vet`、Linux `go test -race`、govulncheck、npm audit、前端单元测试、构建和 Playwright 回归；发布还在 Windows 上跑单元测试。跨平台编译不等于在每个平台上执行测试。浏览器回归使用本地模拟 API，不会消耗真实模型 Token。
 
 提交前建议：
 
@@ -92,6 +92,6 @@ cd frontend && npm test && npm run build && cd ..
 
 ## 7. 发布
 
-- 在 GitHub 上游仓库推送 `v*` tag 后，GitHub Actions 立即产出 6 平台压缩包、发布 GitHub Release，并推送 Docker Hub 多架构镜像。
+- 推送 `v*` tag 后，GitHub Actions 在全部检查通过后产出 6 平台压缩包、校验文件、Release 和多架构镜像。预发布 tag 不更新 `latest`，正式版本才更新。
 - 前端产物 `web/` 已提交到仓库，发布包内自带，无需用户本地构建。
 - 触发器与产物说明见 [部署指南](deployment.md#8-发布流水线)。
