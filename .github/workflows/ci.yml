@@ -8,6 +8,9 @@ on:
     branches: ["**"]
 
 jobs:
+  test-installer:
+    uses: ./.github/workflows/installer-check.yml
+
   test-backend:
     name: Go test & vet
     runs-on: ubuntu-latest

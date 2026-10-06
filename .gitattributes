@@ -6,3 +6,7 @@ frontend/** linguist-vendored=true
 
 # web/ is the Vite build output committed for embedded release packaging.
 web/**      linguist-generated=true
+
+# Linux installer scripts must keep LF on Windows checkouts.
+*.sh text eol=lf
+scripts/tests/*.py text eol=lf

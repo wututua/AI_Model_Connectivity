@@ -22,6 +22,8 @@ import (
 
 	"cg/internal/config"
 	"cg/internal/metrics"
+	"cg/internal/notify"
+	"cg/internal/probe"
 	"cg/internal/report"
 	"cg/internal/storage"
 )
@@ -42,21 +44,25 @@ type AdminController interface {
 	ImportConfig(context.Context, config.ConfigImport) (config.AdminConfig, error)
 	ListTasks(context.Context, storage.TaskQuery) ([]storage.CheckTask, error)
 	GetTask(context.Context, int64) (storage.CheckTask, error)
+	SendNotification(context.Context, int64) (notify.Delivery, error)
 }
 
 type RunningState struct {
-	Running                   bool    `json:"running"`
-	TaskID                    int64   `json:"task_id"`
-	Kind                      string  `json:"kind"`
-	ProviderID                string  `json:"provider_id"`
-	AutoCheckIntervalMinHours float64 `json:"auto_check_interval_min_hours"`
-	AutoCheckIntervalMaxHours float64 `json:"auto_check_interval_max_hours"`
-	ReadOnly                  bool    `json:"read_only"`
+	Progress                  probe.Progress `json:"progress"`
+	ElapsedMS                 int64          `json:"elapsed_ms"`
+	Running                   bool           `json:"running"`
+	TaskID                    int64          `json:"task_id"`
+	Kind                      string         `json:"kind"`
+	ProviderID                string         `json:"provider_id"`
+	AutoCheckIntervalMinHours float64        `json:"auto_check_interval_min_hours"`
+	AutoCheckIntervalMaxHours float64        `json:"auto_check_interval_max_hours"`
+	ReadOnly                  bool           `json:"read_only"`
 }
 
 var ErrCheckAlreadyRunning = errors.New("check already running")
 var ErrShuttingDown = errors.New("service is shutting down")
 var ErrProviderUnavailable = errors.New("provider is missing, disabled or paused")
+var ErrInvalidSelection = errors.New("无效的模型选择")
 
 type Broker struct {
 	mu      sync.Mutex
@@ -108,6 +114,7 @@ type Server struct {
 	metrics       *metrics.Metrics
 	authFailures  authFailureLimiter
 	passwordSlots chan struct{}
+	updater       UpdateService
 }
 
 func NewServer(cfg config.Config, store *storage.SQLiteStore, check CheckFunc, broker *Broker, admin AdminController) *Server {
@@ -131,6 +138,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/events", s.events)
 	mux.HandleFunc("/api/admin/detection", s.adminDetection)
 	mux.HandleFunc("/api/admin/detection/start", s.adminDetectionStart)
+	mux.HandleFunc("/api/admin/detection/selected", s.adminDetectionSelected)
+	mux.HandleFunc("/api/admin/budget", s.adminBudget)
+	mux.HandleFunc("POST /api/admin/providers/batch", s.adminProviderBatch)
 	mux.HandleFunc("/api/admin/detection/stop", s.adminDetectionStop)
 	mux.HandleFunc("/api/admin/config", s.adminConfig)
 	mux.HandleFunc("/api/admin/config/export", s.adminConfigExport)
@@ -141,7 +151,18 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/admin/provider-models", s.adminProviderModels)
 	mux.HandleFunc("/api/admin/tasks", s.adminTasks)
 	mux.HandleFunc("/api/admin/billing", s.adminBilling)
+	mux.HandleFunc("/api/admin/export", s.adminExportData)
+	mux.HandleFunc("/api/admin/diagnostics", s.adminDiagnostics)
+	mux.HandleFunc("/api/admin/updates", s.adminUpdates)
+	mux.HandleFunc("/api/admin/updates/check", s.adminUpdateCheck)
+	mux.HandleFunc("/api/admin/updates/start", s.adminUpdateStart)
+	mux.HandleFunc("/api/admin/updates/resolve", s.adminUpdateResolve)
+	mux.HandleFunc("/api/admin/notifications", s.adminNotifications)
+	mux.HandleFunc("/api/admin/notifications/test", s.adminNotificationTest)
+	mux.HandleFunc("/api/admin/notifications/", s.adminNotificationRetry)
 	mux.HandleFunc("/metrics", s.metricsHandler)
+	mux.HandleFunc("/api/admin/metrics-tokens", s.adminMetricsTokens)
+	mux.HandleFunc("/api/admin/metrics-tokens/", s.adminMetricsTokenItem)
 	mux.HandleFunc("/api/admin/tasks/", s.adminTaskItem)
 	mux.HandleFunc("/api/auth/session", s.authSession)
 	mux.HandleFunc("/api/auth/login", s.authLogin)
@@ -469,6 +490,24 @@ func (s *Server) metricsHandler(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w)
+		return
+	}
+	if authorization := r.Header.Get("Authorization"); authorization != "" {
+		scheme, token, ok := strings.Cut(authorization, " ")
+		valid, err := s.store.ValidMetricsToken(r.Context(), token)
+		if err != nil {
+			writeErrorText(w, 503, "暂时无法验证指标凭据")
+			return
+		}
+		if !ok || !strings.EqualFold(scheme, "Bearer") || !valid {
+			writeErrorText(w, 401, "无效的指标凭据")
+			return
+		}
+		s.metrics.Handler().ServeHTTP(w, r)
+		return
+	}
 	if !s.requireAuth(w, r) {
 		return
 	}
@@ -529,6 +568,14 @@ func randomToken(bytes int) (string, error) {
 }
 
 func (s *Server) writeCheckError(w http.ResponseWriter, err error) {
+	if errors.Is(err, storage.ErrBudgetExceeded) {
+		writeError(w, http.StatusTooManyRequests, err)
+		return
+	}
+	if errors.Is(err, ErrInvalidSelection) {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
 	if errors.Is(err, ErrProviderUnavailable) {
 		writeError(w, http.StatusBadRequest, err)
 		return
@@ -657,6 +704,8 @@ func writeResult(w http.ResponseWriter, value any, err error) {
 			status = http.StatusConflict
 		} else if errors.Is(err, config.ErrProviderNotFound) {
 			status = http.StatusNotFound
+		} else if errors.Is(err, storage.ErrBudgetExceeded) {
+			status = http.StatusTooManyRequests
 		}
 		writeError(w, status, err)
 		return

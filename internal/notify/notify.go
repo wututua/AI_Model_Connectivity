@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -38,6 +39,8 @@ type Client struct {
 	cfg        config.Config
 	stateStore StateStore
 	httpClient *http.Client
+	history    DeliveryStore
+	httpStatus int
 }
 
 type payload struct {
@@ -65,21 +68,28 @@ func newHTTPClient() *http.Client {
 	return httpclient.New(10 * time.Second)
 }
 
+// SendCheckIfNeeded rejects evidence from a check whose scope is no longer current.
+func (c *Client) SendCheckIfNeeded(ctx context.Context, value report.Report, checkedConfig config.Config) error {
+	if evidenceScope(checkedConfig) != evidenceScope(c.cfg) {
+		// An empty observation resets candidates but preserves sent state and cooldown.
+		value = report.Report{}
+	}
+	return c.SendIfNeeded(ctx, value)
+}
+
 func (c *Client) SendIfNeeded(ctx context.Context, value report.Report) error {
 	defer c.httpClient.CloseIdleConnections()
-	if !c.enabled() {
-		return nil
-	}
 	value = filterReport(value, c.cfg.NotifyProviders, c.cfg.NotifyModels)
 	current := alertState(value)
-	if current == "unknown" {
-		return nil
-	}
 	previous, err := c.stateStore.Read()
 	if err != nil {
 		return err
 	}
-	if current == previous.Status {
+	if !c.enabled() || current == "unknown" || current == previous.Status || c.cfg.InMaintenance(time.Now()) {
+		if previous.Candidate != "" || previous.Consecutive != 0 || previous.CandidateScope != "" {
+			previous.Candidate, previous.Consecutive, previous.CandidateScope = "", 0, ""
+			return c.stateStore.Write(previous)
+		}
 		return nil
 	}
 	if current == "ok" && !c.cfg.NotifyOnRecovery {
@@ -88,11 +98,28 @@ func (c *Client) SendIfNeeded(ctx context.Context, value report.Report) error {
 	if current == "ok" && previous.Status == "" {
 		return c.stateStore.Write(State{Status: current, SentAt: previous.SentAt})
 	}
+	threshold := max(1, c.cfg.NotifyFailureThreshold)
+	if current == "ok" {
+		threshold = max(1, c.cfg.NotifyRecoveryThreshold)
+	}
+	if threshold > 1 {
+		scope := evidenceScope(c.cfg)
+		if previous.Candidate != current || previous.CandidateScope != scope {
+			previous.Candidate, previous.Consecutive = current, 0
+		}
+		previous.CandidateScope = scope
+		previous.Consecutive++
+		if previous.Consecutive < threshold {
+			return c.stateStore.Write(previous)
+		}
+	}
 	now := time.Now()
 	if inCooldown(previous, now, c.cfg.NotifyCooldownMinutes) {
 		return nil
 	}
-	if err := c.send(ctx, buildPayload(value)); err != nil {
+	body := buildPayload(value)
+	summary := fmt.Sprintf("%s: ok=%d slow=%d error=%d total=%d provider_errors=%d", current, value.OKCount, value.SlowCount, value.ErrorCount, value.Total, len(value.ProviderErrors))
+	if _, err := c.deliver(ctx, "alert", 0, summary, body); err != nil {
 		return err
 	}
 	return c.stateStore.Write(State{Status: current, SentAt: now})
@@ -201,7 +228,7 @@ func (c *Client) send(ctx context.Context, body payload) error {
 
 func (c *Client) sendWebhook(ctx context.Context, body payload) error {
 	if err := config.ValidateWebhookURL(c.cfg.NotifyWebhookURL); err != nil {
-		return fmt.Errorf("notify_webhook_url: %w", err)
+		return errors.New("通知地址未通过安全校验")
 	}
 	data, err := json.Marshal(c.webhookBody(body))
 	if err != nil {
@@ -209,7 +236,7 @@ func (c *Client) sendWebhook(ctx context.Context, body payload) error {
 	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, c.cfg.NotifyWebhookURL, bytes.NewReader(data))
 	if err != nil {
-		return err
+		return errors.New("无法创建通知请求")
 	}
 	request.Header.Set("Content-Type", "application/json")
 	return c.do(request)
@@ -238,7 +265,7 @@ func (c *Client) sendTelegram(ctx context.Context, body payload) error {
 	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(data))
 	if err != nil {
-		return err
+		return errors.New("无法创建通知请求")
 	}
 	request.Header.Set("Content-Type", "application/json")
 	return c.do(request)
@@ -247,15 +274,19 @@ func (c *Client) sendTelegram(ctx context.Context, body payload) error {
 func (c *Client) do(request *http.Request) error {
 	response, err := c.httpClient.Do(request)
 	if err != nil {
-		var requestError *url.Error
-		if errors.As(err, &requestError) {
-			return fmt.Errorf("notify request failed: %w", requestError.Err)
+		if errors.Is(err, context.Canceled) {
+			return errors.New("通知请求已取消，接收结果未确认")
 		}
-		return err
+		var networkError net.Error
+		if errors.As(err, &networkError) && networkError.Timeout() {
+			return errors.New("通知请求超时，接收结果未确认")
+		}
+		return errors.New("通知连接失败，请检查网络和已保存的渠道配置")
 	}
 	defer response.Body.Close()
+	c.httpStatus = response.StatusCode
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return fmt.Errorf("notify webhook returned %s", response.Status)
+		return fmt.Errorf("通知平台返回 HTTP %d", response.StatusCode)
 	}
 	switch c.platform() {
 	case "wecom", "wechat_work", "dingtalk", "telegram", "bark":
@@ -266,21 +297,21 @@ func (c *Client) do(request *http.Request) error {
 		}
 		body, err := io.ReadAll(io.LimitReader(response.Body, (64<<10)+1))
 		if err != nil || len(body) > 64<<10 || json.Unmarshal(body, &receipt) != nil {
-			return errors.New("notify platform returned an invalid receipt")
+			return errors.New("通知平台返回无效回执")
 		}
 		// Do not log the response body: a provider may echo credentials in it.
 		switch c.platform() {
 		case "telegram":
 			if receipt.OK == nil || !*receipt.OK {
-				return errors.New("telegram rejected the notification")
+				return errors.New("Telegram 拒绝了通知")
 			}
 		case "bark":
 			if receipt.Code == nil || *receipt.Code != 200 {
-				return errors.New("bark rejected the notification")
+				return errors.New("Bark 拒绝了通知")
 			}
 		default:
 			if receipt.ErrCode == nil || *receipt.ErrCode != 0 {
-				return errors.New("notify platform rejected the notification")
+				return errors.New("通知平台拒绝了通知")
 			}
 		}
 	}

@@ -11,12 +11,19 @@ import type {
   SafeProviderConfig,
   ProviderUpdate,
   ModelDiscoveryRequest,
+  NotificationDelivery,
+  ModelTarget, RequestBudget, MetricsToken, IssuedMetricsToken,
   AuthSession, User, UserInput,
+  SystemUpdateStatus, SystemUpdateCheck, SystemUpdateJob,
 } from './types'
 
 try { localStorage.removeItem('cg_admin_token') } catch { /* Storage may be disabled. */ }
 let csrfToken = ''
 export function applySession(session: AuthSession) { csrfToken = session.csrf_token }
+
+export class APIError extends Error {
+  constructor(message: string, public readonly status: number) { super(message) }
+}
 
 async function request<T>(method: string, path: string, body?: unknown, silentAuth = false, signal?: AbortSignal): Promise<T> {
   const res = await fetch(path, {
@@ -36,7 +43,7 @@ async function decodeResponse<T>(res: Response, silentAuth = false): Promise<T> 
     window.dispatchEvent(new Event('cg:unauthorized'))
   }
   if (res.status === 403 && data?.code === 'password_change_required') window.dispatchEvent(new Event('cg:session-refresh'))
-  if (!res.ok) throw new Error((data as { error?: string } | null)?.error ?? `HTTP ${res.status}`)
+  if (!res.ok) throw new APIError((data as { error?: string } | null)?.error ?? `HTTP ${res.status}`, res.status)
   if (data === null) throw new Error('Invalid JSON response')
   return data as T
 }
@@ -46,6 +53,13 @@ async function sessionRequest(method: string, path: string, body?: unknown): Pro
 }
 
 export const api = {
+  updateStatus: (signal?: AbortSignal) => request<SystemUpdateStatus>('GET', '/api/admin/updates', undefined, false, signal),
+  resolveUpdate: (request_id: string, signal?: AbortSignal) =>
+    request<SystemUpdateStatus>('POST', '/api/admin/updates/resolve', { request_id }, false, signal),
+  checkUpdate: (channel: 'stable' | 'preview', signal?: AbortSignal) =>
+    request<SystemUpdateCheck>('POST', '/api/admin/updates/check', { channel }, false, signal),
+  startUpdate: (channel: 'stable' | 'preview', version: string, request_id: string, signal?: AbortSignal) =>
+    request<SystemUpdateJob>('POST', '/api/admin/updates/start', { channel, version, request_id, confirm: true }, false, signal),
   session: () => sessionRequest('GET', '/api/auth/session'),
   login: (username: string, password: string) => sessionRequest('POST', '/api/auth/login', { username, password }),
   logout: async () => { await request('POST', '/api/auth/logout'); csrfToken = '' },
@@ -61,6 +75,16 @@ export const api = {
     request<RunningState>('GET', '/api/admin/detection'),
   startDetection: () => request<AcceptedCheck>('POST', '/api/admin/detection/start'),
   triggerCheck: () => request<AcceptedCheck>('POST', '/api/admin/check'),
+  stopDetection: () => request<{ stopped: boolean }>('POST', '/api/admin/detection/stop'),
+  checkModels: (value: { targets?: ModelTarget[]; failed_only?: boolean; provider_id?: string }) =>
+    request<AcceptedCheck>('POST', '/api/admin/detection/selected', value),
+  budget: () => request<RequestBudget>('GET', '/api/admin/budget'),
+  batchProviders: (ids: string[], action: string, group = '') =>
+    request<AdminConfig>('POST', '/api/admin/providers/batch', { ids, action, group }),
+  metricsTokens: () => request<MetricsToken[]>('GET', '/api/admin/metrics-tokens'),
+  createMetricsToken: (name: string) => request<IssuedMetricsToken>('POST', '/api/admin/metrics-tokens', { name }),
+  rotateMetricsToken: (id: number) => request<IssuedMetricsToken>('POST', `/api/admin/metrics-tokens/${id}/rotate`),
+  revokeMetricsToken: (id: number) => request('DELETE', `/api/admin/metrics-tokens/${id}`),
 
   config: (): Promise<AdminConfig> =>
     request<AdminConfig>('GET', '/api/admin/config'),
@@ -93,8 +117,25 @@ export const api = {
   billing: (days = 30): Promise<BillingSummary> =>
     request<BillingSummary>('GET', `/api/admin/billing?days=${days}`),
 
+  notifications: (params: { limit: number; offset: number; status: string }, signal?: AbortSignal) => {
+    const query = new URLSearchParams({ limit: String(params.limit), offset: String(params.offset), status: params.status })
+    return request<NotificationDelivery[]>('GET', `/api/admin/notifications?${query}`, undefined, false, signal)
+  },
+  testNotification: () => request<NotificationDelivery>('POST', '/api/admin/notifications/test'),
+  retryNotification: (id: number) => request<NotificationDelivery>('POST', `/api/admin/notifications/${id}/retry`),
+
   exportConfig: (): Promise<ConfigExport> =>
     request<ConfigExport>('GET', '/api/admin/config/export'),
   importConfig: (data: ConfigImport): Promise<AdminConfig> =>
     request<AdminConfig>('POST', '/api/admin/config/import', data),
+}
+
+export async function downloadAdminFile(path: string, filename: string) {
+  const response = await fetch(path, { credentials: 'same-origin' })
+  if (!response.ok) { await decodeResponse(response); return }
+  const url = URL.createObjectURL(await response.blob())
+  const link = document.createElement('a')
+  link.href = url; link.download = filename
+  document.body.appendChild(link); link.click(); link.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
 }

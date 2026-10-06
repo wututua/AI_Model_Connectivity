@@ -42,6 +42,7 @@ PRAGMA mmap_size = 30000000;
 | `model` | 模型名 |
 | `result` | `ok` / `slow` / `error` / `unknown`（发现失败导致未检测） |
 | `latency_ms` | 延迟 |
+| `first_token_ms` | 流式首段有效文本延迟；0 表示无此测量 |
 | `checked_at` | 实际探测结束时间，UTC RFC3339；旧记录的时区偏移仍可读取 |
 | `error_type` | `timeout` / `dns` / `auth` / `rate_limit` / `server` / `unknown` |
 | `error_message`、`response_preview` | 错误与响应预览 |
@@ -49,7 +50,7 @@ PRAGMA mmap_size = 30000000;
 | `prompt_tokens` / `completion_tokens` / `total_tokens` | 本次用量 |
 
 索引：`(provider, model, checked_at DESC)`、`(history_key, checked_at DESC)`、`(checked_at DESC)`。
-旧库缺 token 列时通过 `PRAGMA table_info` 检测并 `ALTER TABLE ADD COLUMN`。
+旧库缺 Token 或首段延迟列时通过 `PRAGMA table_info` 检测并 `ALTER TABLE ADD COLUMN`。
 
 探测去重和报告查找使用同一身份键。Provider 部分经过百分号编码，例如 `a::b` + `c` 对应 `a%3A%3Ab::c`，不会与 `a` + `b::c` 混淆。历史查询和裁剪直接使用独立的 `provider`、`model` 列；旧 SQLite 记录无需重写，也不会因旧键相同而合并。
 
@@ -59,7 +60,15 @@ PRAGMA mmap_size = 30000000;
 
 ### `notify_state`
 
-单行存告警状态 `status` 与 `sent_at`（RFC3339）。
+单行存已通知/确认的告警状态 `status` 与 `sent_at`（RFC3339），以及防抖的 `candidate`、`consecutive`、`candidate_scope`。范围键只包含非秘密过滤条件和不透明连接版本，不是凭据哈希。新增列会自动迁移，防抖证据跨重启保留。
+
+### `notification_deliveries`
+
+独立保存实际通知发送尝试：类型、重试关联 ID、平台类型、状态、开始/结束时间、耗时、HTTP 状态、安全摘要与错误信息。不保存 Webhook URL、Telegram 凭据、平台原始回执或上游错误正文。
+
+先建立 `sending` 记录再发请求，完成后写入 `success` 或 `error`。浏览器取消请求后仍尝试用独立的 5 秒上下文保存结果；重启遗留记录变为 `unknown`，不会推断为确定失败或自动重发。
+
+新增记录时清理超过 90 天或最近 1,000 条之外的非进行中记录。`retry_of` 保留原记录 ID，但不设外键，原记录可按保留策略清理。手动重试建立新记录，不修改 `notify_state`；自动告警仍按原有状态变化规则执行。
 
 ### `runtime_config`
 
@@ -92,6 +101,14 @@ PRAGMA mmap_size = 30000000;
 
 主键 `(day, provider, model)`，列为 `provider_name`、`provider_type`、`prompt_tokens`、`completion_tokens`、`total_tokens`、`probe_count`。
 
+### `request_budget`
+
+按 UTC `day` 主键保存 `used` 请求尝试次数。发出模型或模型发现请求前用事务原子预留，包括未设限时的计数；取消、失败和重启不会退回预留。预算与用量是不同口径，不根据 Token 数据推算请求预算。新预留时清理 90 天以前的预算日记录。
+
+### `metrics_tokens`
+
+保存自增 ID、名称、唯一的 SHA-256 `token_hash`、创建及轮换时间。随机原始凭据仅创建/轮换响应返回一次。最多 20 个，轮换原子替换哈希，撤销删除行；不关联用户会话。
+
 ## 写入事务
 
 `RecordCheck` 在一个事务内完成：
@@ -104,6 +121,8 @@ PRAGMA mmap_size = 30000000;
 6. 提交。
 
 任一步失败即回滚：**历史、用量与最新报告要么一起成功，要么一起失败**（测试 `TestReportWriteFailureRollsBackHistoryAndUsage`）。
+
+模型范围重测只写本次实际结果，再按 Provider/模型身份合并最新报告，其他模型不新增历史。预算耗尽与取消一样不覆盖最新报告，但已确认的上游用量独立保存。
 
 应用层在批次取消或主事务失败后，会用独立的 5 秒收尾上下文尝试单独保存已确认探测的用量，不替换报告或历史，也不重复保存已提交的批次。数据库不可写或进程被强杀时无法保证收尾成功；未开始及取消中未收到响应的探测不估算用量。
 

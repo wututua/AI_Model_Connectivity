@@ -52,6 +52,16 @@ npm run build --prefix frontend
 
 涉及交互、登录、请求顺序或响应式布局时，还应运行[浏览器回归](docs/frontend.md#浏览器回归)。前端源码变更后需同步提交 `web/` 构建产物。
 
+安装脚本变更：
+
+```bash
+bash -n install-model-connectivity.sh
+shellcheck install-model-connectivity.sh
+python3 -m unittest discover -s scripts/tests -p test_installer.py -v
+```
+
+安装器测试使用隔离目录和模拟下载、账户、systemd 操作，不安装真实服务。Linux CI 及发布工作流会执行这些检查。Windows 可通过 `BASH_BIN` 指定 Git Bash 路径，运行 Python 测试；这不能替代真实 Linux/systemd 的部署验证。
+
 仅修改文档时，核对相对链接、标题锚点、命令与实际代码的一致性，不必重新构建应用。不要修改第三方许可证，也不要用当前行为重写旧版本的发布事实。
 
 ## Pull Request

@@ -29,7 +29,7 @@ COPY --from=backend-builder /model-connectivity /model-connectivity
 COPY --from=backend-builder /app/web ./web
 COPY --chown=65532:65532 --from=backend-builder /runtime-data ./data
 
-ENV APP_HOST=0.0.0.0 APP_PORT=8080
+ENV APP_HOST=0.0.0.0 APP_PORT=8080 CG_DEPLOYMENT=docker
 EXPOSE 8080
 VOLUME ["/app/data"]
 

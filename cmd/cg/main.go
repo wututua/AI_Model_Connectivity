@@ -17,16 +17,28 @@ import (
 
 	"cg/internal/config"
 	"cg/internal/metrics"
-	"cg/internal/notify"
 	"cg/internal/probe"
+	"cg/internal/provider"
 	"cg/internal/report"
 	"cg/internal/storage"
+	"cg/internal/update"
 	"cg/internal/web"
 )
 
 func main() {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
 	args := os.Args[1:]
+	if len(args) == 1 && args[0] == "--update-protocol" {
+		fmt.Println("1")
+		return
+	}
+	if len(args) == 1 && args[0] == "update-worker" {
+		if err := update.RunWorker(); err != nil {
+			slog.Error("system update failed", "err", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if len(args) == 1 && (args[0] == "--version" || args[0] == "version") {
 		fmt.Println(versionString())
 		return
@@ -68,6 +80,10 @@ func main() {
 		slog.Error("recover interrupted tasks", "err", err)
 		os.Exit(1)
 	}
+	if err := store.RecoverInterruptedNotifications(context.Background()); err != nil {
+		slog.Error("recover interrupted notifications", "err", err)
+		os.Exit(1)
+	}
 	runtimeCfg, ok, err := store.LoadRuntimeConfig(context.Background())
 	if err != nil {
 		slog.Error("load runtime config", "err", err)
@@ -99,6 +115,7 @@ func main() {
 		os.Exit(1)
 	}
 	app := &application{baseCfg: baseCfg, cfg: cfg, store: store, broker: broker, metrics: metrics.New(), schedulerWake: make(chan struct{}, 1)}
+	app.updater = update.New(version, commit)
 
 	if err := app.initializeUsers(context.Background()); err != nil {
 		slog.Error("initialize authentication", "err", err)
@@ -144,6 +161,7 @@ func main() {
 
 	srv := web.NewServer(cfg, store, app.check, broker, app)
 	srv.SetMetrics(app.metrics)
+	srv.SetUpdater(app)
 	server := srv.HTTPServer()
 	server.BaseContext = func(net.Listener) context.Context { return ctx }
 	serverErr := make(chan error, 1)
@@ -197,19 +215,24 @@ type application struct {
 	schedulerWake  chan struct{}
 	mu             sync.RWMutex
 	configMu       sync.Mutex
+	notificationMu sync.Mutex
 	running        bool
 	runCancel      context.CancelFunc
 	runDone        chan struct{}
 	shuttingDown   bool
+	updater        *update.Manager
 	taskID         int64
 	taskKind       string
 	taskProviderID string
+	runStarted     time.Time
+	progress       probe.Progress
 }
 
 type checkOptions struct {
 	Kind       string
 	ProviderID string
 	SaveLatest bool
+	Targets    []config.ModelTarget
 }
 
 type checkRun struct {
@@ -288,7 +311,17 @@ func (a *application) RunningState() web.RunningState {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	cfg := a.cfg
+	progress := a.progress
+	progress.Active = append([]config.ModelTarget{}, progress.Active...)
+	elapsed := int64(0)
+	if a.running {
+		elapsed = time.Since(a.runStarted).Milliseconds()
+	} else {
+		progress = probe.Progress{Phase: "idle", Active: []config.ModelTarget{}}
+	}
 	return web.RunningState{
+		Progress:                  progress,
+		ElapsedMS:                 elapsed,
 		Running:                   a.running,
 		TaskID:                    a.taskID,
 		Kind:                      a.taskKind,
@@ -484,12 +517,19 @@ func (a *application) checkWithOptions(ctx context.Context, options checkOptions
 }
 
 func (a *application) beginCheck(ctx context.Context, options checkOptions) (checkRun, error) {
+	budget, err := a.store.RequestBudget(ctx, a.currentConfig().DailyRequestLimit)
+	if err != nil {
+		return checkRun{}, err
+	}
+	if budget.Exhausted {
+		return checkRun{}, storage.ErrBudgetExceeded
+	}
 	run := checkRun{started: time.Now()}
 	runCtx, cancel := context.WithCancel(ctx)
 	run.ctx, run.cancel = runCtx, cancel
 
 	a.mu.Lock()
-	if a.shuttingDown {
+	if a.shuttingDown || a.updater != nil && a.updater.Busy() {
 		a.mu.Unlock()
 		cancel()
 		return checkRun{}, web.ErrShuttingDown
@@ -504,6 +544,8 @@ func (a *application) beginCheck(ctx context.Context, options checkOptions) (che
 	a.runDone = make(chan struct{})
 	a.taskKind = options.Kind
 	a.taskProviderID = options.ProviderID
+	a.runStarted = run.started
+	a.progress = probe.Progress{Phase: "discovering", Active: []config.ModelTarget{}}
 	a.mu.Unlock()
 	run.task = storage.CheckTask{Kind: options.Kind, Status: "running", ProviderID: options.ProviderID, StartedAt: run.started.UTC().Format(time.RFC3339)}
 	taskID, err := a.store.CreateCheckTask(runCtx, run.task)
@@ -556,6 +598,7 @@ func (a *application) finishRunState() {
 	a.taskID = 0
 	a.taskKind = ""
 	a.taskProviderID = ""
+	a.progress = probe.Progress{Phase: "idle", Active: []config.ModelTarget{}}
 	if a.runDone != nil {
 		close(a.runDone)
 		a.runDone = nil
@@ -566,6 +609,7 @@ func (a *application) finishRunState() {
 func (a *application) runCheck(ctx context.Context, options checkOptions, counts *storage.CheckTaskUpdate) (value report.Report, runErr error) {
 	started := time.Now()
 	cfg := a.currentConfig()
+	fullCfg := cfg
 	if options.ProviderID != "" {
 		filtered, ok := filterProvider(cfg, options.ProviderID)
 		if !ok {
@@ -573,7 +617,26 @@ func (a *application) runCheck(ctx context.Context, options checkOptions, counts
 		}
 		cfg = filtered
 	}
+	if len(options.Targets) > 0 {
+		previous, err := a.store.LatestReport(ctx)
+		if err != nil {
+			return report.Report{}, err
+		}
+		allowed := allowedModelTargets(cfg, report.WithConfig(previous, config.AdminConfigFromConfig(cfg)))
+		for _, target := range options.Targets {
+			if !allowed[provider.ModelKey(target.ProviderID, target.Model)] {
+				return report.Report{}, fmt.Errorf("%w: 配置已变更，请重新选择模型", web.ErrInvalidSelection)
+			}
+		}
+		cfg = selectedConfig(cfg, options.Targets)
+	}
 	runner := probe.NewRunner(cfg)
+	runner.SetRequestGuard(a.reserveRequest)
+	runner.SetObserver(func(progress probe.Progress) {
+		a.mu.Lock()
+		a.progress = progress
+		a.mu.Unlock()
+	})
 	results, providerErrors, err := runner.Run(ctx)
 	for _, result := range results {
 		if !result.Completed {
@@ -617,11 +680,12 @@ func (a *application) runCheck(ctx context.Context, options checkOptions, counts
 		return report.Report{}, err
 	}
 	var previous report.Report
-	if len(providerErrors) > 0 || options.ProviderID != "" && options.SaveLatest {
+	if len(providerErrors) > 0 || options.ProviderID != "" && options.SaveLatest || len(options.Targets) > 0 {
 		previous, err = a.store.LatestReport(ctx)
 		if err != nil {
 			return report.Report{}, fmt.Errorf("load latest report: %w", err)
 		}
+		previous = report.WithConfig(previous, config.AdminConfigFromConfig(fullCfg))
 		results = report.WithDiscoveryGaps(cfg, results, providerErrors, previous)
 	}
 	history := map[string][]report.HistoryRecord{}
@@ -634,9 +698,13 @@ func (a *application) runCheck(ctx context.Context, options checkOptions, counts
 		}
 	}
 	value, _ = report.Build(cfg, results, providerErrors, history, started)
-	if options.ProviderID != "" && options.SaveLatest {
+	if len(options.Targets) > 0 {
+		value = report.MergeModels(previous, value)
+	} else if options.ProviderID != "" && options.SaveLatest {
 		value = report.MergeProvider(previous, value, options.ProviderID)
 	}
+	observed := value
+	a.setPhase("saving")
 	a.configMu.Lock()
 	value = report.WithConfig(value, config.AdminConfigFromConfig(a.currentConfig()))
 	var latest *report.Report
@@ -652,9 +720,10 @@ func (a *application) runCheck(ctx context.Context, options checkOptions, counts
 		a.broker.Publish(value)
 	}
 	a.configMu.Unlock()
-	if options.SaveLatest {
+	if options.SaveLatest && len(options.Targets) == 0 && options.ProviderID == "" {
+		a.setPhase("notifying")
 		notifyCfg := a.currentConfig()
-		if err := notify.New(notifyCfg, storage.SQLiteNotifyStateStore{Store: a.store}).SendIfNeeded(ctx, report.WithConfig(value, config.AdminConfigFromConfig(notifyCfg))); err != nil {
+		if err := a.notificationClient(notifyCfg).SendCheckIfNeeded(ctx, report.WithConfig(observed, config.AdminConfigFromConfig(notifyCfg)), fullCfg); err != nil {
 			slog.Warn("send notify failed", "err", err)
 		}
 	}
@@ -679,6 +748,10 @@ func (a *application) scheduler(ctx context.Context) {
 		timer := time.NewTimer(interval)
 		select {
 		case <-timer.C:
+			budget, err := a.store.RequestBudget(ctx, a.currentConfig().DailyRequestLimit)
+			if err != nil || budget.Exhausted {
+				continue
+			}
 			if _, err := a.checkWithOptions(ctx, checkOptions{Kind: "scheduled", SaveLatest: true}); err != nil {
 				if errors.Is(err, web.ErrCheckAlreadyRunning) {
 					slog.Warn("scheduled check skipped", "err", err)

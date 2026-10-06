@@ -23,6 +23,7 @@ type Target struct {
 }
 
 type Result struct {
+	FirstTokenMS         int    `json:"first_token_ms,omitempty"`
 	Completed            bool   `json:"-"`
 	ProviderID           string `json:"provider_id"`
 	ProviderGroupID      string `json:"provider_group_id"`
@@ -54,6 +55,11 @@ type ProviderError struct {
 type Runner struct {
 	cfg       config.Config
 	providers []provider.Provider
+	mu        sync.Mutex
+	progress  Progress
+	observer  func(Progress)
+	guard     func(context.Context) error
+	runErr    error
 }
 
 func NewRunner(cfg config.Config) *Runner {
@@ -67,6 +73,9 @@ func NewRunner(cfg config.Config) *Runner {
 }
 
 func (r *Runner) Run(ctx context.Context) ([]Result, []ProviderError, error) {
+	r.mu.Lock()
+	r.progress, r.runErr = Progress{Active: []config.ModelTarget{}}, nil
+	r.mu.Unlock()
 	for _, item := range r.providers {
 		if closer, ok := item.(interface{ CloseIdleConnections() }); ok {
 			defer closer.CloseIdleConnections()
@@ -77,13 +86,14 @@ func (r *Runner) Run(ctx context.Context) ([]Result, []ProviderError, error) {
 		return nil, providerErrors, err
 	}
 	if len(targets) == 0 {
-		return nil, providerErrors, nil
+		return nil, providerErrors, r.runErr
 	}
+	r.updateProgress(func(p *Progress) { p.Phase = "probing"; p.ProviderID = ""; p.Total = len(targets) })
 	results := r.probeTargets(ctx, targets)
 	if err := ctx.Err(); err != nil {
 		return results, providerErrors, err
 	}
-	return results, providerErrors, nil
+	return results, providerErrors, r.runErr
 }
 
 func (r *Runner) collectTargets(ctx context.Context) ([]Target, []ProviderError) {
@@ -95,6 +105,17 @@ func (r *Runner) collectTargets(ctx context.Context) ([]Target, []ProviderError)
 		if ctx.Err() != nil {
 			break
 		}
+		r.updateProgress(func(p *Progress) { p.Phase = "discovering"; p.ProviderID = item.ID() })
+		automatic := true
+		for _, configured := range r.cfg.Providers {
+			if configured.ID == item.ID() {
+				automatic = len(configured.Models) == 0
+				break
+			}
+		}
+		if automatic && r.beforeRequest(ctx) != nil {
+			break
+		}
 		modelsCtx, cancel := context.WithTimeout(ctx, durationSeconds(r.cfg.ModelListTimeoutSeconds))
 		models, err := item.Models(modelsCtx)
 		cancel()
@@ -103,6 +124,11 @@ func (r *Runner) collectTargets(ctx context.Context) ([]Target, []ProviderError)
 			continue
 		}
 		models = dedupe(models)
+		if automatic && r.cfg.DiscoveryModelLimit > 0 && len(models) > r.cfg.DiscoveryModelLimit {
+			providerErrors = append(providerErrors, ProviderError{ProviderID: item.ID(), ProviderType: item.Type(),
+				Error: fmt.Sprintf("自动发现 %d 个模型，超过确认阈值 %d；请在 Provider 中选择并保存模型", len(models), r.cfg.DiscoveryModelLimit)})
+			continue
+		}
 		if len(models) == 0 {
 			providerErrors = append(providerErrors, ProviderError{ProviderID: item.ID(), ProviderType: item.Type(), Error: "no models returned"})
 			continue
@@ -170,19 +196,41 @@ func (r *Runner) probeTargets(ctx context.Context, targets []Target) []Result {
 }
 
 func (r *Runner) probeOne(ctx context.Context, target Target) (result Result) {
+	if r.beforeRequest(ctx) != nil {
+		return Result{}
+	}
+	r.updateProgress(func(p *Progress) {
+		p.Active = append(p.Active, config.ModelTarget{ProviderID: target.ProviderID, Model: target.Model})
+	})
+	defer r.updateProgress(func(p *Progress) {
+		p.Completed++
+		for i, item := range p.Active {
+			if item.ProviderID == target.ProviderID && item.Model == target.Model {
+				p.Active = append(p.Active[:i], p.Active[i+1:]...)
+				break
+			}
+		}
+	})
 	// Keep confirmed responses even when another probe cancels the batch.
 	defer func() {
 		result.Completed = ctx.Err() == nil || result.Status == "ok" || result.Status == "slow" ||
 			result.PromptTokens > 0 || result.CompletionTokens > 0 || result.TotalTokens > 0
 	}()
 	started := time.Now()
-	probeCtx, cancel := context.WithTimeout(ctx, durationSeconds(r.cfg.TimeoutSeconds))
+	timeout := r.cfg.TimeoutSeconds
+	for _, item := range r.cfg.Providers {
+		if item.ID == target.ProviderID && item.Probe.TimeoutSeconds > 0 {
+			timeout = item.Probe.TimeoutSeconds
+			break
+		}
+	}
+	probeCtx, cancel := context.WithTimeout(ctx, durationSeconds(timeout))
 	defer cancel()
 	text, usage, err := target.Provider.Chat(probeCtx, target.Model, r.cfg.ProbeSystemPrompt, r.cfg.ProbePrompt)
 	latency := int(time.Since(started).Milliseconds())
 	if err != nil {
 		if errors.Is(probeCtx.Err(), context.DeadlineExceeded) {
-			return resultPayload(target, "error", latency, "", fmt.Sprintf("timeout after %gs", r.cfg.TimeoutSeconds), usage)
+			return resultPayload(target, "error", latency, "", fmt.Sprintf("timeout after %gs", timeout), usage)
 		}
 		return resultPayload(target, "error", latency, "", shortError(err), usage)
 	}
@@ -195,6 +243,7 @@ func (r *Runner) probeOne(ctx context.Context, target Target) (result Result) {
 
 func resultPayload(target Target, status string, latency int, preview, errText string, usage provider.Usage) Result {
 	return Result{
+		FirstTokenMS:         usage.FirstTokenMS,
 		ProviderID:           target.ProviderID,
 		ProviderGroupID:      target.ProviderID,
 		ProviderType:         target.ProviderType,

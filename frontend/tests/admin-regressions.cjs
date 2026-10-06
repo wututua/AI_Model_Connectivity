@@ -156,6 +156,7 @@ async function overviewOrdering(browser, artifacts, heldEndpoint, fail, errors) 
       return route.fulfill({ status: 202, json: { ok: true, task } })
     }
     if (url.pathname === '/api/admin/detection') response = task?.status === 'running' ? { ...idle, running: true, task_id: task.id, kind: 'manual' } : idle
+    else if (url.pathname === '/api/admin/budget') response = { day: '2026-10-06', used: 0, limit: 0, remaining: 0, exhausted: false, resets_at: '2026-10-07T00:00:00Z' }
     else if (url.pathname === '/api/admin/config') response = { settings, providers: [] }
     else if (url.pathname === '/api/status') response = report
     else if (url.pathname === '/api/admin/tasks/701') response = task

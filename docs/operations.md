@@ -26,7 +26,7 @@
 
 ## Prometheus 指标
 
-常规服务启动会注册 `GET /metrics`，需要已完成初始改密的普通用户或管理员会话。仅自定义嵌入服务未调用 `SetMetrics` 时返回 404，没有对应的运行时启用开关。
+常规服务启动会注册 `GET /metrics`，需要已完成初始改密的普通用户/管理员会话，或管理员创建的独立指标凭据。仅自定义嵌入服务未调用 `SetMetrics` 时返回 404，没有对应的运行时启用开关。
 
 | 指标 | 类型 | 标签 | 说明 |
 | --- | --- | --- | --- |
@@ -36,7 +36,7 @@
 | `cg_check_runs_total` | Counter | `kind`,`status` | 任务数，状态为 `success` / `error` / `canceled` |
 | `cg_check_duration_seconds` | Histogram | `kind`,`status` | 任务耗时；桶为 1/5/10/30/60/120/300/600 秒 |
 
-任务 `kind` 为 `manual`、`scheduled`、`startup` 或 `provider`。服务使用独立 Registry，并包含 Go 与进程收集器。
+任务 `kind` 为 `manual`、`scheduled`、`startup`、`provider`、`models` 或 `failed`。服务使用独立 Registry，并包含 Go 与进程收集器。
 
 完成 [API 登录](api.md#认证)后可手动查询：
 
@@ -44,7 +44,20 @@
 curl -b cookies.txt http://127.0.0.1:8080/metrics
 ```
 
-当前没有永久指标密钥，旧 Bearer 配置不再有效。自动采集程序需要保护账号及 Cookie，并在 24 小时绝对会话过期后重新登录；不要配置不会更新的静态 Cookie，也不要通过无认证代理公开指标。
+自动采集建议使用「运维工具 → 指标凭据」创建的专用凭据；旧管理 Bearer 仍然无效。将新凭据保存为采集端受限文件，勿提交到仓库。Prometheus 示例：
+
+```yaml
+scrape_configs:
+  - job_name: model-connectivity
+    scheme: https
+    static_configs:
+      - targets: ["monitor.example.com"]
+    authorization:
+      type: Bearer
+      credentials_file: /run/secrets/cg_metrics_token
+```
+
+轮换后更新采集端文件；撤销后立即失效。凭据仅授权读取指标，不能用于管理 API；无认证代理不应公开指标。会话方式仍可使用，但必须维护 24 小时有效期。
 
 以下规则片段可加入 Prometheus 规则组的 `rules` 列表：
 
@@ -73,13 +86,17 @@ curl -b cookies.txt http://127.0.0.1:8080/metrics
 ## 告警验证
 
 1. 在设置中选择通知平台，填写 Webhook；Telegram 使用 Bot Token 与 Chat ID。
-2. 建立独立测试 Provider 和通知过滤范围，避免更改生产凭据或干扰真实告警。
-3. 在测试范围内模拟失败并检测，确认异常通知；恢复后再次检测，确认恢复通知设置。
-4. 测试结束后还原过滤范围与冷却时间，重新核对正式配置。
+2. 保存配置后，在 **通知记录** 页面发送测试通知，并在接收端确认。此操作不调用模型，也不改变正式告警状态。
+3. 如需验证过滤与恢复规则，使用独立测试 Provider 和通知范围模拟状态变化，不要更改生产凭据。
+4. 测试结束后还原正式范围与冷却时间。
 
 没有通知时检查平台是否禁用、凭据是否完整、过滤范围是否匹配、状态是否变化，以及是否仍在冷却期。首次检测即正常不会发送恢复通知；未检测、空范围或全部暂停也不能作为恢复证据。
 
 企业微信与钉钉要求 `errcode=0`，Telegram 要求 `ok=true`，Bark 要求 `code=200`；通用 Webhook 与 Discord 按 HTTP 2xx 判断。平台拒绝时不会推进已发送状态，后续检测会再次尝试，但没有独立的自动重试队列。具体范围规则见[告警通知](configuration.md#告警通知)。
+
+**通知记录** 可按发送中、平台已接受、发送失败和结果未知筛选，查看时间、渠道类型、摘要、HTTP 状态、耗时与安全错误信息。被过滤或处于冷却期的通知不会产生发送记录。
+
+失败或结果未知的记录可手动重试，使用当前已保存的通知渠道，仅重发历史摘要并建立新记录，不改变原记录和正式告警状态。重启中断、超时或断线可能发生在平台已接收之后，请先核对接收端，避免重复消息。历史中的“平台已接受”不是最终用户送达证明。
 
 ## 任务历史
 
@@ -173,7 +190,7 @@ docker compose up -d
 
 ## 成本控制
 
-探测会真实消耗 Token，固定短提示词不保证固定费用。前端的每模型约 40 Token 只是粗略估算，不同模型的分词、推理与计费策略可能不同。
+探测会真实消耗 Token，短提示词不保证固定费用。概览按 Provider 的输出上限和平均调度周期计算输出预算参考，不包括输入或额外推理费用。可设置每日请求预算和自动发现确认阈值，详见[请求预算](monitoring-features.md#请求预算)。
 
 - 显式选择模型，或使用 `SKIP_MODELS` / `MAX_MODELS_PER_PROVIDER` 限制探测范围。
 - 根据监控目标设置检测周期，避免不必要的高频轮询上游。

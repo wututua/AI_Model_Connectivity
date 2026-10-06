@@ -12,6 +12,9 @@ permissions:
   contents: write
 
 jobs:
+  test-installer:
+    uses: ./.github/workflows/installer-check.yml
+
   test-backend:
     name: Test Go (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -82,7 +85,7 @@ jobs:
   build:
     name: Build ${{ matrix.goos }}-${{ matrix.goarch }}
     runs-on: ubuntu-latest
-    needs: [build-frontend, test-backend]
+    needs: [build-frontend, test-backend, test-installer]
     if: startsWith(github.ref, 'refs/tags/')
     strategy:
       fail-fast: false
@@ -138,14 +141,15 @@ jobs:
           asset="model-connectivity-${{ matrix.goos }}-${{ matrix.goarch }}"
           cp ../README.md README.md
           cp ../CONTRIBUTING.md ../SECURITY.md ../CHANGELOG.md .
+          cp ../install-model-connectivity.sh .
           cp ../LICENSE LICENSE
           cp -r ../docs docs
           cp -r ../assets assets
           cp -r ../web web
           if [ "${{ matrix.goos }}" = "windows" ]; then
-            zip -r "${asset}.zip" "model-connectivity.exe" "README.md" "CONTRIBUTING.md" "SECURITY.md" "CHANGELOG.md" "LICENSE" "docs/" "assets/" "web/"
+            zip -r "${asset}.zip" "model-connectivity.exe" "README.md" "CONTRIBUTING.md" "SECURITY.md" "CHANGELOG.md" "LICENSE" "install-model-connectivity.sh" "docs/" "assets/" "web/"
           else
-            tar -czf "${asset}.tar.gz" "model-connectivity" "README.md" "CONTRIBUTING.md" "SECURITY.md" "CHANGELOG.md" "LICENSE" "docs/" "assets/" "web/"
+            tar -czf "${asset}.tar.gz" "model-connectivity" "README.md" "CONTRIBUTING.md" "SECURITY.md" "CHANGELOG.md" "LICENSE" "install-model-connectivity.sh" "docs/" "assets/" "web/"
           fi
 
       - name: Upload artifact
@@ -174,7 +178,9 @@ jobs:
 
       - name: Checksums
         working-directory: dist
-        run: sha256sum *.zip *.tar.gz > SHA256SUMS.txt
+        run: |
+          cp ../install-model-connectivity.sh .
+          sha256sum *.zip *.tar.gz install-model-connectivity.sh > SHA256SUMS.txt
 
       - name: Select versioned release notes
         id: release-notes
@@ -228,10 +234,11 @@ jobs:
             dist/*.zip
             dist/*.tar.gz
             dist/SHA256SUMS.txt
+            dist/install-model-connectivity.sh
 
   docker:
     name: Push Docker image to Docker Hub
-    needs: [build-frontend, test-backend]
+    needs: [build-frontend, test-backend, test-installer]
     if: startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:

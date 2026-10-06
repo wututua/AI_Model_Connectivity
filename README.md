@@ -20,21 +20,40 @@ AI Model Connectivity（简称 CG）定期检测多个服务商及其模型，�
 
 > **版本状态**
 >
-> 当前提供预发布版本，适合评估和试用。升级前请备份数据库，并阅读对应版本的 [Release 说明](docs/releases/README.md)。检测会调用真实模型接口并消耗 Token。
+> 当前版本为 [v1.0.0-beta.3](docs/releases/v1.0.0-beta.3.md)，适合评估和试用，不是稳定版。升级前请备份数据库，并阅读对应版本的 Release 说明。检测会调用真实模型接口并消耗 Token。
 
 ## 功能
 
-- **多服务商管理**：新增、编辑、暂停 Provider，单独重测或批量检测模型。
+- **多服务商管理**：分组、标签、批量启停与暂停，无密钥复制配置，支持单模型和失败项重测。
+- **探测兼容性**：按 Provider 配置提示词、输出上限、temperature 和超时，支持 Chat Completions、Responses 及流式首段文本延迟。
 - **模型选择**：手动指定模型或自动发现，支持全局与单 Provider 并发限制。
 - **状态监控**：实时状态、历史状态灯、延迟曲线、P50/P95/P99 和检测成功率。
-- **任务与用量**：后台执行检测任务，保留任务历史和上游返回的 Token 用量。
-- **通知**：支持 Webhook、Telegram、Discord、Bark、企业微信和钉钉，可配置范围、恢复通知与冷却时间。
+- **任务与用量**：实时检测进度、每日请求预算、自动发现确认阈值，支持历史与用量 CSV 导出。
+- **通知**：支持 Webhook、Telegram、Discord、Bark、企业微信和钉钉，提供范围过滤、恢复通知、冷却、防抖、维护窗口、测试、发送历史和手动重试。
+- **运维**：脱敏诊断导出、可轮换与撤销的 Prometheus 指标专用凭据。
+- **系统更新**：检查稳定版与预发布版本；脚本安装的 Linux 可显式启用管理员确认的一键更新、备份及失败恢复。
 - **账号权限**：管理员和只读用户，可为状态页开启登录保护。
 - **部署**：支持 Linux、Windows、macOS 二进制，以及 Docker 和 Docker Compose。
 
 ## 快速开始
 
 选择一种安装方式即可。日常设置通过管理面板维护，保存到 SQLite 后重启仍然生效。
+
+### Linux 安装脚本
+
+适用于使用 systemd 的 Linux amd64 / arm64。先下载并检查[安装脚本](install-model-connectivity.sh)，再运行；需要 Bash 4+、Python 3.8+、curl 和系统管理工具。
+
+```bash
+sudo bash install-model-connectivity.sh
+```
+
+在终端运行时先选择语言：`1. 简体中文`、`2. English`，回车默认简体中文；后续菜单、提示和帮助使用所选语言。无参数显示管理菜单。当前评估预发布版本时，显式选择 `preview` 通道：
+
+```bash
+sudo bash install-model-connectivity.sh install --channel preview
+```
+
+安装时可输入自定义监听 IP 和端口，回车默认 `127.0.0.1:8080`；升级保留已有设置。使用独立服务账户，首次初始化开启状态页登录要求。脚本校验发布包、保留完整前端，升级前停服备份；卸载保留数据库。参数、升级与恢复限制见[安装脚本指南](docs/deployment.md#linux-安装脚本)。
 
 ### 使用发布包
 
@@ -120,8 +139,8 @@ APP_PORT=8081 ./model-connectivity
 
 ## 兼容范围与限制
 
-- 当前检测使用 OpenAI 兼容的 Chat Completions 非流式文本接口，不直接支持原生 Anthropic/Gemini、仅 Responses、图像、音频或嵌入接口。
-- 请求固定使用 `temperature=0`、`max_tokens=16`。需要不同参数或较大推理预算的模型可能检测失败。
+- 支持 OpenAI 兼容的 Chat Completions / Responses 文本探测及对应流式响应，不直接支持原生 Anthropic/Gemini、图像、音频、嵌入或工具调用探测。
+- 旧配置默认仍为 `temperature=0`、`max_tokens=16`；参数支持取决于上游，兼容预设不能保证所有模型可用。详见[检测与运维功能](docs/monitoring-features.md)。
 - 未指定模型时会自动发现模型，可能扩大探测范围和 Token 消耗。
 - 检测成功率反映采样请求结果，不等于连续在线时间；用量仅来自上游返回的数据，不能替代供应商账单。
 - 采用单实例 SQLite 存储，不要让多个服务或单次检测进程并发使用同一数据库。
@@ -132,7 +151,9 @@ APP_PORT=8081 ./model-connectivity
 | 我想要 | 阅读 |
 | --- | --- |
 | 安装、升级或部署到服务器 | [部署指南](docs/deployment.md) |
+| 检查版本或启用后台更新 | [系统更新](docs/system-updates.md) |
 | 设置 Provider、通知或检测周期 | [配置参考](docs/configuration.md) |
+| 配置探测、预算、批量管理或数据导出 | [检测与运维功能](docs/monitoring-features.md) |
 | 备份、恢复密码或排查故障 | [运维指南](docs/operations.md) |
 | 调用 API 或集成状态数据 | [HTTP API](docs/api.md) |
 | 了解架构并参与开发 | [开发指南](docs/development.md) |

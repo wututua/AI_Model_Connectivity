@@ -94,19 +94,21 @@ export function normalizeSettings(settings: RuntimeSettings): RuntimeSettings {
   }
 }
 
-const TOKENS_PER_MODEL = 40
-
 export function TokenEstimateCard({ providers, settings }: { providers: SafeProviderConfig[]; settings: RuntimeSettings }) {
   const enabledProviders = providers.filter(provider => provider.enabled && provider.probe_enabled)
   let totalModels: number | null = 0
+  let outputLimit = 0
   for (const provider of enabledProviders) {
+    let count = 0
     if (provider.models.length === 0) {
-      if (settings.max_models_per_provider > 0) totalModels += settings.max_models_per_provider
+      if (settings.max_models_per_provider > 0) count = settings.max_models_per_provider
       else { totalModels = null; break }
     } else {
       const limit = settings.max_models_per_provider > 0 ? settings.max_models_per_provider : provider.models.length
-      totalModels += Math.min(provider.models.length, limit)
+      count = Math.min(provider.models.length, limit)
     }
+    totalModels += count
+    outputLimit += count * (provider.probe?.max_tokens || 16)
   }
 
   const minHours = settings.auto_check_interval_min_hours
@@ -116,13 +118,13 @@ export function TokenEstimateCard({ providers, settings }: { providers: SafeProv
   const upper = maxHours <= 0 ? minHours : maxHours
   const averageHours = schedulingOn ? (lower + upper) / 2 : 0
   const dailyChecks = averageHours > 0 ? 24 / averageHours : 0
-  const dailyTokens = totalModels !== null && schedulingOn ? totalModels * TOKENS_PER_MODEL * dailyChecks : null
+  const dailyTokens = totalModels !== null && schedulingOn ? outputLimit * dailyChecks : null
 
   return (
     <Card>
       <CardHeader className="pb-3">
-        <CardTitle className="flex items-center gap-2 text-sm"><Activity className="size-4 text-warning" />Token 消耗估算</CardTitle>
-        <CardDescription>按每模型约 {TOKENS_PER_MODEL} Token 估算，不含手动检测。</CardDescription>
+        <CardTitle className="flex items-center gap-2 text-sm"><Activity className="size-4 text-warning" />输出预算参考</CardTitle>
+        <CardDescription>按输出上限与平均调度间隔计算，不含输入、额外推理或手动检测，不是费用上限。</CardDescription>
       </CardHeader>
       <CardContent className="grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-4">
         <Estimate label="检测 Provider" value={`${enabledProviders.length} / ${providers.length}`} />

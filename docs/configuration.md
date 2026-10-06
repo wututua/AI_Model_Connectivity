@@ -68,9 +68,21 @@
 | `PROBE_PROMPT` | `ping` | 用户提示词 |
 | `PROBE_SYSTEM_PROMPT` | `No thinking. Respond only with exactly: pang. No extra words.` | 系统提示词 |
 
-每次探测固定使用 `temperature=0`、`max_tokens=16`，仅发送 system + user 两条消息。界面中的每模型约 40 Token 是粗略估算，不是费用承诺；实际分词、推理用量和计费因上游而异。
+未配置 Provider 探测选项时仍使用 `temperature=0`、`max_tokens=16`。Provider 编辑页可覆盖输出上限、Token 参数、temperature、提示词、超时，以及 Chat / Responses 和流式协议；字段、预设与限制见[探测协议与参数](monitoring-features.md#探测协议与参数)。界面的输出预算参考不是实际消耗或费用上限。
 
 后端会剥离 `<think>` / `<thinking>` 等思考标签，只保留实际回复。需要不同参数或较大推理预算的模型可能失败；回复为空、缺少消息或因长度上限截断均不算成功，不应仅因 HTTP 200 判断可用。
+
+以下新增设置通过管理面板或 API 保存，不新增对应环境变量：
+
+| 运行时字段 | 默认 | 说明 |
+| --- | --- | --- |
+| `daily_request_limit` | `0` | UTC 每日模型与模型发现请求次数上限，0 不限制 |
+| `discovery_model_limit` | `0` | 自动发现原始模型数超过阈值时须先选择并保存模型，0 不限制 |
+| `notify_failure_threshold` | `0` | 连续异常次数，0/1 等效一次 |
+| `notify_recovery_threshold` | `0` | 连续正常恢复次数，0/1 等效一次 |
+| `maintenance_start` / `maintenance_end` | 空 | 成对 RFC3339 时间，窗口内只静默正式告警 |
+
+Provider 还可保存 `group`、`tags` 和嵌套的 `probe` 选项，导出/导入会保留这些非凭据字段。旧数据库缺失的新字段自动按上述默认值解释；完整设置 PUT 和配置导入仍是替换语义，旧客户端省略这些字段会恢复其默认值。
 
 ## 历史与展示
 
@@ -137,6 +149,8 @@
 | `telegram` | 请求 `https://api.telegram.org/bot<token>/sendMessage`，`{"chat_id":…,"text":…}` |
 
 文本超过 10 行 Provider 明细会折叠为「其余 N 项已省略」。
+
+保存配置后可在 **通知记录** 页发送测试通知。测试与手动重试不经过状态变化、范围和冷却判断，不调用模型，也不推进正式告警状态；平台禁用或配置不完整时仍会拒绝。它们验证的是已保存的通知渠道，不验证模型告警范围，详见[告警验证](operations.md#告警验证)。
 
 ## Provider 配置
 

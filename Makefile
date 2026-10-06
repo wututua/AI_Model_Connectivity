@@ -2,7 +2,7 @@ BINARY  := model-connectivity
 CMD     := ./cmd/cg
 DIST    := dist
 
-.PHONY: all build build-frontend test lint clean dev-backend dev-frontend
+.PHONY: all build build-frontend test test-installer lint clean dev-backend dev-frontend
 
 all: build
 
@@ -23,6 +23,10 @@ build-backend:
 ## 运行所有测试
 test:
 	go test -v -race ./...
+
+test-installer:
+	bash -n install-model-connectivity.sh
+	python3 -m unittest discover -s scripts/tests -p test_installer.py -v
 
 ## 静态检查
 lint:

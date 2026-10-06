@@ -16,6 +16,7 @@ import (
 
 	"cg/internal/auth"
 	"cg/internal/config"
+	"cg/internal/notify"
 	"cg/internal/probe"
 	"cg/internal/report"
 	"cg/internal/storage"
@@ -23,6 +24,10 @@ import (
 
 // stubAdmin satisfies AdminController with no-op implementations.
 type stubAdmin struct{}
+
+func (stubAdmin) SendNotification(context.Context, int64) (notify.Delivery, error) {
+	return notify.Delivery{ID: 1, Status: "success", Kind: "test"}, nil
+}
 
 func TestProviderMutationErrorStatus(t *testing.T) {
 	for _, tc := range []struct {

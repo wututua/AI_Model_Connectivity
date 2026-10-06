@@ -117,6 +117,7 @@ async function main() {
           }
           return respond(report)
         }
+        if (url.pathname === '/api/admin/budget') return respond({ day: '2026-10-06', used: 0, limit: 0, remaining: 0, exhausted: false, resets_at: '2026-10-07T00:00:00Z' })
         if (url.pathname === '/api/admin/config' || url.pathname === '/api/admin/config/export') return respond({ settings, providers })
         if (url.pathname === '/api/admin/providers') return respond(providers)
         if (url.pathname === '/api/admin/detection') {
@@ -430,6 +431,9 @@ async function main() {
     console.log(`PASS desktop/mobile themes and reduced motion; screenshots: ${artifacts}`)
     await require('./status-regressions.cjs')(browser, artifacts)
     await require('./admin-regressions.cjs')(browser, artifacts)
+    await require('./notification-regressions.cjs')(browser, artifacts)
+    await require('./feature-regressions.cjs')(browser, artifacts)
+    await require('./update-regressions.cjs')(browser, artifacts)
   } catch (error) {
     if (page && !page.isClosed()) {
       console.error('Browser failure URL:', page.url())

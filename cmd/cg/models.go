@@ -50,6 +50,9 @@ func (a *application) DiscoverModels(ctx context.Context, query config.ModelDisc
 	if closer, ok := client.(interface{ CloseIdleConnections() }); ok {
 		defer closer.CloseIdleConnections()
 	}
+	if err := a.reserveRequest(ctx); err != nil {
+		return nil, err
+	}
 	models, err := client.Models(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("同步模型失败: %w", err)

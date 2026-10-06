@@ -24,6 +24,7 @@ func ReconcileProviderRevisions(previous, next []ProviderConfig) []ProviderConfi
 		if exists && old.ConnectionRevision != "" &&
 			normalizeBaseURL(old.BaseURL) == normalizeBaseURL(provider.BaseURL) &&
 			old.Type == provider.Type && old.APIKey == provider.APIKey &&
+			old.Probe == provider.Probe &&
 			old.Enabled == provider.Enabled && old.ProbeEnabled == provider.ProbeEnabled {
 			provider.ConnectionRevision = old.ConnectionRevision
 		} else {

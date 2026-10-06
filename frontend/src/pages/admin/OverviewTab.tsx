@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Activity, CheckCircle2, Clock3, Play, RefreshCw, Server, Timer } from 'lucide-react'
+import { Activity, CheckCircle2, Clock3, Play, RefreshCw, RotateCw, Server, Square, Timer } from 'lucide-react'
 import { api } from '../../api'
 import type { Report, RunningState, RuntimeSettings, SafeProviderConfig } from '../../types'
 import { relativeTime } from '../../utils/status'
@@ -9,6 +9,7 @@ import { Button } from '../../components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card'
 import { Skeleton } from '../../components/ui/skeleton'
 import { Feedback, LoadingButton, TokenEstimateCard, normalizeSettings, useAutoMsg } from './shared'
+import { BudgetStatus, DetectionProgress } from './DetectionProgress'
 
 export function OverviewTab({ readOnly = false }: { readOnly?: boolean }) {
   const now = useNow()
@@ -17,6 +18,8 @@ export function OverviewTab({ readOnly = false }: { readOnly?: boolean }) {
   const [summary, setSummary] = useState<Report | null>(null)
   const [loading, setLoading] = useState(false)
   const [starting, setStarting] = useState(false)
+  const [stopping, setStopping] = useState(false)
+  const commandLock = useRef(false)
   const [message, setMessage] = useAutoMsg()
   const watchedTask = useRef<number | null>(null)
   const mounted = useRef(false)
@@ -95,11 +98,13 @@ export function OverviewTab({ readOnly = false }: { readOnly?: boolean }) {
     return () => { active = false; clearInterval(timer) }
   }, [setMessage])
 
-  const run = async () => {
+  const run = async (failedOnly = false) => {
+    if (commandLock.current) return
+    commandLock.current = true
     feedbackRevision.current++
     setStarting(true); setMessage('')
     try {
-      const { task } = await api.triggerCheck()
+      const { task } = failedOnly ? await api.checkModels({ failed_only: true }) : await api.triggerCheck()
       if (!mounted.current) return
       stateRequest.current++
       watchedTask.current = task.id
@@ -107,7 +112,14 @@ export function OverviewTab({ readOnly = false }: { readOnly?: boolean }) {
       load()
     }
     catch (cause) { if (mounted.current) setMessage(`错误：${(cause as Error).message}`) }
-    finally { if (mounted.current) setStarting(false) }
+    finally { commandLock.current = false; if (mounted.current) setStarting(false) }
+  }
+  const stop = async () => {
+    if (stopping) return
+    setStopping(true)
+    try { await api.stopDetection(); if (mounted.current) setMessage('已请求停止检测，正在保存已确认的用量') }
+    catch (e) { if (mounted.current) setMessage(`错误：${(e as Error).message}`) }
+    finally { if (mounted.current) setStopping(false) }
   }
 
   if (!state && loading) return <OverviewSkeleton />
@@ -131,9 +143,12 @@ export function OverviewTab({ readOnly = false }: { readOnly?: boolean }) {
             </div>
             <div className="flex size-10 items-center justify-center rounded-md bg-primary/10 text-primary">{state.running ? <Activity className="animate-pulse" /> : <CheckCircle2 />}</div>
           </CardHeader>
+          <DetectionProgress state={state} />
           {!readOnly && (
             <CardContent className="flex flex-wrap gap-2">
-              <LoadingButton onClick={run} loading={starting} disabled={state.running}><Play />立即检测</LoadingButton>
+              <LoadingButton onClick={() => void run()} loading={starting} disabled={state.running}><Play />立即检测</LoadingButton>
+              <Button variant="outline" onClick={() => void run(true)} disabled={state.running || starting || !summary?.error_count}><RotateCw />重测失败项</Button>
+              {state.running && <LoadingButton variant="outline" onClick={() => void stop()} loading={stopping}><Square />停止检测</LoadingButton>}
             </CardContent>
           )}
         </Card>
@@ -158,6 +173,7 @@ export function OverviewTab({ readOnly = false }: { readOnly?: boolean }) {
         </Card>
       )}
 
+      {!readOnly && <BudgetStatus />}
       {config && <TokenEstimateCard providers={config.providers} settings={config.settings} />}
     </div>
   )

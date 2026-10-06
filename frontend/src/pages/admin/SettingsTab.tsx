@@ -1,8 +1,10 @@
 import { useEffect, useId, useState } from 'react'
-import { Check, Save } from 'lucide-react'
+import { Check, History, Save } from 'lucide-react'
+import { Link, useSearchParams } from 'react-router-dom'
 import { api } from '../../api'
 import type { RuntimeSettings } from '../../types'
 import { Badge } from '../../components/ui/badge'
+import { Button } from '../../components/ui/button'
 import { Input } from '../../components/ui/input'
 import { Label } from '../../components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select'
@@ -18,6 +20,8 @@ import { mergeModels, parseModels } from '../../utils/models'
 const emptyDrafts = { skip_models: '', notify_providers: '', notify_models: '' }
 
 export function SettingsTab() {
+  const [searchParams] = useSearchParams()
+  const initialTab = searchParams.get('tab') === 'notify' ? 'notify' : 'probe'
   const { refresh } = useAuth()
   const [form, setForm] = useState<RuntimeSettings | null>(null)
   const [savedForm, setSavedForm] = useState<RuntimeSettings | null>(null)
@@ -65,7 +69,7 @@ export function SettingsTab() {
   return (
     <div className="space-y-4">
       <UnsavedChanges dirty={dirty || saving} />
-      <Tabs defaultValue="probe">
+      <Tabs defaultValue={initialTab}>
         <div className="sticky top-14 z-20 -mx-1 flex flex-wrap items-center justify-between gap-3 border-b bg-background/95 px-1 py-3 backdrop-blur-xl">
           <TabsList className="grid h-auto w-full grid-cols-2 gap-1 sm:inline-grid sm:w-auto sm:grid-cols-4">
             <TabsTrigger value="probe">基础与检测</TabsTrigger><TabsTrigger value="history">历史与调度</TabsTrigger><TabsTrigger value="notify">通知</TabsTrigger><TabsTrigger value="access">访问控制</TabsTrigger>
@@ -99,6 +103,12 @@ export function SettingsTab() {
         </TabsContent>
 
         <TabsContent value="history" className="mt-4">
+          <SettingsCard title="调用预算" description="按 UTC 日期限制本服务发出的模型请求和模型发现请求，0 表示不限制。">
+            <div className="field-grid">
+              <NumberField id="daily-budget" label="每日上游请求上限" value={form.daily_request_limit ?? 0} onChange={value => set('daily_request_limit', value)} />
+              <NumberField id="discovery-limit" label="自动发现确认阈值" value={form.discovery_model_limit ?? 0} onChange={value => set('discovery_model_limit', value)} hint="超过阈值时不自动探测，需先选择并保存模型；0 不限制" />
+            </div>
+          </SettingsCard>
           <SettingsCard title="历史数据" description="控制统计窗口、保留策略与状态页展示。">
             <div className="field-grid">
               <NumberField id="stats-window" label="统计窗口" suffix="天" value={form.stats_window_days} onChange={value => set('stats_window_days', value)} />
@@ -120,6 +130,19 @@ export function SettingsTab() {
         </TabsContent>
 
         <TabsContent value="notify" className="mt-4">
+          <SettingsCard title="告警防抖" description="连续完整检测达到阈值后才通知，模型或 Provider 范围重测不计入。">
+            <div className="field-grid">
+              <NumberField id="notify-failure-threshold" label="连续异常告警阈值" value={form.notify_failure_threshold || 1} onChange={value => set('notify_failure_threshold', value)} suffix="次" />
+              <NumberField id="notify-recovery-threshold" label="连续正常恢复阈值" value={form.notify_recovery_threshold || 1} onChange={value => set('notify_recovery_threshold', value)} suffix="次" />
+            </div>
+          </SettingsCard>
+          <SettingsCard title="维护窗口" description="窗口内继续检测，仅静默正式告警。时间按本机时区显示，起止时间均留空表示关闭。">
+            <div className="field-grid">
+              <Field label="维护开始" htmlFor="maintenance-start"><Input id="maintenance-start" type="datetime-local" value={localDateTime(form.maintenance_start)} onChange={e => set('maintenance_start', isoDateTime(e.target.value))} /></Field>
+              <Field label="维护结束" htmlFor="maintenance-end"><Input id="maintenance-end" type="datetime-local" value={localDateTime(form.maintenance_end)} onChange={e => set('maintenance_end', isoDateTime(e.target.value))} /></Field>
+            </div>
+          </SettingsCard>
+          <div className="mb-4 flex justify-end"><Button asChild variant="outline" size="sm"><Link to="/admin/notifications"><History />发送记录与测试</Link></Button></div>
           <SettingsCard title="告警通知" description="模型异常与恢复时向指定平台发送通知。">
             <div className="field-grid">
               <Field label="通知平台"><Select value={form.notify_platform || 'webhook'} onValueChange={value => set('notify_platform', value)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="disabled">不启用</SelectItem><SelectItem value="webhook">Webhook</SelectItem><SelectItem value="discord">Discord</SelectItem><SelectItem value="bark">Bark</SelectItem><SelectItem value="wecom">企业微信</SelectItem><SelectItem value="dingtalk">钉钉</SelectItem><SelectItem value="telegram">Telegram</SelectItem></SelectContent></Select></Field>
@@ -171,3 +194,11 @@ function SecretField({ id, label, value, configured, onChange, placeholder }: { 
 function SettingsSkeleton() {
   return <div className="space-y-4"><Skeleton className="ml-auto h-9 w-32" /><Skeleton className="h-9 w-full max-w-lg" /><Skeleton className="h-72" /></div>
 }
+
+function localDateTime(value?: string) {
+  if (!value) return ''
+  const date = new Date(value)
+  if (!Number.isFinite(date.getTime())) return ''
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16)
+}
+function isoDateTime(value: string) { return value ? new Date(value).toISOString() : '' }

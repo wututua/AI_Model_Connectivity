@@ -7,6 +7,7 @@
 ## 目录
 
 - [环境要求](#环境要求)
+- [Linux 安装脚本](#linux-安装脚本)
 - [二进制部署](#二进制部署)
 - [Docker Compose](#docker-compose)
 - [Docker Run](#docker-run)
@@ -26,6 +27,114 @@
 | 修改前端 | Node.js 24，使用 `npm ci` 安装锁定依赖 |
 
 默认监听 `127.0.0.1:8080`，数据库为工作目录下的 `data/cg.sqlite`。更换工作目录或数据路径会连接到不同数据库，请固定启动目录。
+
+## Linux 安装脚本
+
+[install-model-connectivity.sh](../install-model-connectivity.sh) 面向使用 systemd 的 Linux，支持 amd64 / arm64。它需要 root 权限、Bash 4+、Python 3.8+、curl、CA 证书、util-linux（`flock`）、coreutils、tar 和用户管理工具。缺少依赖时脚本会停止，不自动修改系统软件源、安装软件包或开放防火墙；不支持 OpenRC、无 systemd 的容器、Windows 或 macOS。
+
+从仓库下载脚本并检查内容后执行：
+
+```bash
+curl -fL --proto '=https' --proto-redir '=https' \
+  -o install-model-connectivity.sh \
+  https://raw.githubusercontent.com/wututua/AI_Model_Connectivity/main/install-model-connectivity.sh
+
+sudo bash install-model-connectivity.sh
+```
+
+请使用 `bash`，不要使用 `sh` 或直接将网络响应管道传给 root shell。也可使用相应 Release 附带的脚本，并用同一版本的 `SHA256SUMS.txt` 核对；旧 Release 不会补写脚本附件。
+
+### 界面语言
+
+在终端启动脚本后，首先显示：
+
+```text
+1. 简体中文
+2. English
+```
+
+输入 `1` 或直接回车使用简体中文，输入 `2` 使用 English。所选语言用于本次运行的菜单、帮助、操作提示、警告和安装器校验错误，下次运行会重新选择，不写入服务配置。无参数时，选择语言后进入管理菜单；带命令运行时，选择语言后执行该命令。`systemctl`、`journalctl`、`curl` 等外部工具仍保留其原始输出。
+
+标准输入不是终端时，不显示语言选择、不读取输入，默认使用 English，避免自动化任务等待。`--yes` 只跳过操作确认，在终端运行时仍会询问语言，以及安装时尚未指定的地址、端口；无人值守时应重定向标准输入，例如 `sudo bash install-model-connectivity.sh upgrade --channel preview --yes < /dev/null`。
+
+### 通道与安装
+
+- 不带参数显示安装、升级、备份、状态、日志、启动、停止、重启和卸载菜单。
+- `stable` 是默认通道，只安装正式版；没有正式版时明确报错，不自动退回预发布版。
+- `preview` 从 GitHub 最近 100 条公开 Release 中按发布时间选择最新版本，包括 beta / RC 或正式版，不使用分支快照。
+- `--version` 指定确切标签，可明确选择预发布版本。下载和校验失败不会停止现有服务。
+
+```bash
+# 评估预发布版本
+sudo bash install-model-connectivity.sh install --channel preview
+
+# 固定一个已发布版本；自动化运行时显式确认
+sudo bash install-model-connectivity.sh install --version v1.0.0-beta.3 --yes
+
+# 指定监听地址和端口；不要直接暴露尚未加固的管理入口
+sudo bash install-model-connectivity.sh install \
+  --channel preview --host 127.0.0.1 --port 8081
+```
+
+`--host`、`--port` 和 `--secure-cookies` 仅用于首次安装或卸载后的重新安装。HTTPS 代理部署可加 `--secure-cookies`，但纯 HTTP 本地访问不应启用。脚本不修改防火墙，也不配置反向代理。
+
+### 自定义地址与端口
+
+无论从菜单选择安装，还是直接运行 `install`，终端中都会询问未通过 `--host`、`--port` 指定的值：
+
+```text
+监听 IP [127.0.0.1]：
+监听端口（1-65535）[8080]：
+```
+
+回车保留默认值，格式无效时可重新输入。安装确认前会显示最终监听地址，升级不会重新询问或覆盖这些设置。已通过参数指定的值不再询问；非交互安装直接使用参数或默认值。
+
+- `127.0.0.1`：仅监听本机 IPv4，适用于本地访问或同机反向代理。
+- `0.0.0.0`：监听所有 IPv4 接口，可用于远程访问；安装器会提醒配置防火墙和 HTTPS。
+- `::1`、`::` 或本机其他 IPv6 地址：支持数字形式的 IPv6，不带方括号输入；摘要使用 `[地址]:端口` 显示。
+- 地址不填写域名、URL 或 `IP:端口`；端口单独填写。绑定地址不可用或端口被占用时，安装会失败，不会覆盖已有数据。低端口还取决于系统对非 root 服务的绑定限制，通常建议使用 `1024-65535`。
+
+| 内容 | 路径 / 行为 |
+| --- | --- |
+| 程序和完整 `web/` | `/opt/model-connectivity`，root 管理 |
+| SQLite 与运行数据 | `/var/lib/model-connectivity`，专用服务账户拥有，目录权限 `0700` |
+| 离线备份 | `/var/backups/model-connectivity/<时间>-<随机后缀>`，root 私有，不自动清理 |
+| systemd 服务 | `/etc/systemd/system/model-connectivity.service` |
+| 服务账户 | `model-connectivity`，非 root、不可交互登录 |
+| 首次监听 / 登录 | `127.0.0.1:8080`，首次初始化时要求状态页登录 |
+
+启动变量直接写在 systemd 单元中，不创建应用配置文件。程序目录里的 `.installer.json` 仅记录安装器版本、监听设置和服务文件校验值，不是应用运行配置；Provider、密码、通知与运行设置仍保存在 SQLite。已有数据库的运行设置不会被安装默认值覆盖。
+
+### 升级与卸载
+
+管理员后台也可[检查版本和提交更新](system-updates.md)。一键更新仅限脚本管理的 Linux，首次需由服务器管理员运行 `sudo bash install-model-connectivity.sh enable-updates`；不会默认授予 Web 程序 root 权限。
+
+```bash
+sudo bash install-model-connectivity.sh upgrade --channel preview --yes
+sudo bash install-model-connectivity.sh backup --yes
+sudo bash install-model-connectivity.sh status
+sudo bash install-model-connectivity.sh logs
+sudo bash install-model-connectivity.sh restart
+sudo bash install-model-connectivity.sh uninstall --yes
+```
+
+升级先下载并验证完整发布包及 SHA-256，拒绝路径穿越、链接、设备文件、不完整前端和架构不匹配的压缩包，然后停服备份程序、数据目录及服务文件。正常升级保留端口、启动配置、账户、历史和用量；原来停止的服务升级后仍保持停止。运行中的服务升级后须通过本机健康检查，否则尝试从同一份备份恢复程序、数据库和服务配置。健康检查不调用模型，但服务启动后原有定时任务会继续运行。
+
+备份和升级期间，必须确保没有其他手工进程或容器写入同一数据目录。备份包含凭据且可能较大，操作前检查剩余磁盘空间。默认不会删除历史备份，也不会自动降级当前版本；明确指定旧标签属于管理员选择，操作前应阅读对应版本的数据兼容性说明。
+
+卸载同样先停服备份，然后删除脚本管理的服务和程序；数据库、备份和专用账户保留。重新安装时可识别卸载保留的数据，不重置已有用户密码。脚本不会接管手动创建的安装，也不会覆盖带自定义修改或 drop-in 的服务。需要改变脚本安装的监听设置时，可先备份、卸载，再固定原版本重新安装并传入新参数；需要更多 systemd 定制时，改用[手工部署](#systemd)并自行维护升级。
+
+### 失败恢复
+
+普通下载、校验失败发生在停服前；备份失败会尝试恢复原服务运行状态。升级失败后的自动恢复会先停止新服务，再恢复旧数据库，绝不会仅把旧二进制放到已迁移的数据库上。
+
+断电、`SIGKILL`、磁盘耗尽或系统服务管理失败时，自动恢复不一定能够完成。脚本会保留备份，不宣称这类情况已经恢复。完整备份带有 `complete` 文件，其中 `program/`、`data/` 和 `service` 分别对应程序目录、数据目录和 systemd 单元；首次安装前不存在的项目不会出现在备份中。手工恢复必须停服，并同时恢复该快照的程序、数据和服务，重新执行 `daemon-reload` 后再启动。不要将多份快照混用，也不要直接启动其他写入同一数据库的进程。一般备份原则见[备份与恢复](operations.md#备份与恢复)。
+
+首次密码通过以下命令查看，日志请勿公开：
+
+```bash
+sudo journalctl -u model-connectivity.service -n 50 --no-pager
+```
 
 ## 二进制部署
 
@@ -208,7 +317,7 @@ location /api/events {
 
 回滚时停止所有写入者，恢复旧版本程序和**升级前的一致性数据库备份**。数据库迁移不保证可逆，仅替换旧二进制可能无法回滚。
 
-旧账号系统升级会删除旧 Token KV。旧 Bearer 和只读分享密钥不再有效；只读访问需创建普通用户，指标采集需维护有效登录会话。`ADMIN_PASSWORD` 不会重置已有账号，忘记密码请使用[离线恢复命令](operations.md#管理员密码恢复)。
+旧账号系统升级会删除旧 Token KV。旧管理 Bearer 和只读分享密钥不再有效；只读访问需创建普通用户，指标采集可创建仅限 `/metrics` 的新指标凭据或维护有效登录会话。`ADMIN_PASSWORD` 不会重置已有账号，忘记密码请使用[离线恢复命令](operations.md#管理员密码恢复)。
 
 ## 容量规划
 

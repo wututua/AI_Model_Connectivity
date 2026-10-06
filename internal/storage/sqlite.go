@@ -150,6 +150,18 @@ func NewSQLite(ctx context.Context, databasePath, dataDir string) (*SQLiteStore,
 		db.Close()
 		return nil, err
 	}
+	if err := store.initNotifications(ctx); err != nil {
+		db.Close()
+		return nil, err
+	}
+	if err := store.initBudget(ctx); err != nil {
+		db.Close()
+		return nil, err
+	}
+	if err := store.initMetricsTokens(ctx); err != nil {
+		db.Close()
+		return nil, err
+	}
 	return store, nil
 }
 
@@ -242,13 +254,28 @@ func (s *SQLiteStore) init(ctx context.Context) error {
 	}
 	// Migrate existing installs that predate the token-tracking columns.
 	// SQLite has no ADD COLUMN IF NOT EXISTS, so check via PRAGMA first.
-	for _, col := range []string{"prompt_tokens", "completion_tokens", "total_tokens"} {
+	for _, col := range []string{"prompt_tokens", "completion_tokens", "total_tokens", "first_token_ms"} {
 		exists, err := columnExists(ctx, s.db, "probe_results", col)
 		if err != nil {
 			return err
 		}
 		if !exists {
 			if _, err := s.db.ExecContext(ctx, fmt.Sprintf(`ALTER TABLE probe_results ADD COLUMN %s INTEGER NOT NULL DEFAULT 0`, col)); err != nil {
+				return err
+			}
+		}
+	}
+	for _, column := range []struct{ name, definition string }{
+		{"candidate", "TEXT NOT NULL DEFAULT ''"},
+		{"consecutive", "INTEGER NOT NULL DEFAULT 0"},
+		{"candidate_scope", "TEXT NOT NULL DEFAULT ''"},
+	} {
+		exists, err := columnExists(ctx, s.db, "notify_state", column.name)
+		if err != nil {
+			return err
+		}
+		if !exists {
+			if _, err := s.db.ExecContext(ctx, "ALTER TABLE notify_state ADD COLUMN "+column.name+" "+column.definition); err != nil {
 				return err
 			}
 		}
@@ -350,7 +377,7 @@ func (s *SQLiteStore) RecordCheck(ctx context.Context, results []probe.Result, c
 	if !saveHistory {
 		return commit()
 	}
-	stmt, err := tx.PrepareContext(ctx, `INSERT INTO probe_results (provider, provider_type, provider_name, model, result, latency_ms, checked_at, error_type, error_message, response_preview, history_key, prompt_tokens, completion_tokens, total_tokens) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`) //nolint:lll
+	stmt, err := tx.PrepareContext(ctx, `INSERT INTO probe_results (provider, provider_type, provider_name, model, result, latency_ms, checked_at, error_type, error_message, response_preview, history_key, prompt_tokens, completion_tokens, total_tokens, first_token_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`) //nolint:lll
 	if err != nil {
 		return err
 	}
@@ -358,7 +385,7 @@ func (s *SQLiteStore) RecordCheck(ctx context.Context, results []probe.Result, c
 
 	for _, result := range results {
 		checked := resultTime(result, checkedAt).Format(time.RFC3339)
-		if _, err := stmt.ExecContext(ctx, result.ProviderID, result.ProviderType, result.ProviderName, result.Model, result.Status, result.LatencyMS, checked, errorType(result), result.Error, result.ResponsePreview, provider.ModelKey(result.ProviderID, result.Model), result.PromptTokens, result.CompletionTokens, result.TotalTokens); err != nil {
+		if _, err := stmt.ExecContext(ctx, result.ProviderID, result.ProviderType, result.ProviderName, result.Model, result.Status, result.LatencyMS, checked, errorType(result), result.Error, result.ResponsePreview, provider.ModelKey(result.ProviderID, result.Model), result.PromptTokens, result.CompletionTokens, result.TotalTokens, result.FirstTokenMS); err != nil {
 			return err
 		}
 	}
@@ -415,14 +442,15 @@ func (s *SQLiteStore) SaveLatestReport(ctx context.Context, value report.Report)
 func (s *SQLiteStore) ReadNotifyState(ctx context.Context) (notify.State, error) {
 	var status string
 	var sentAt sql.NullString
-	err := s.db.QueryRowContext(ctx, `SELECT status, sent_at FROM notify_state WHERE id = 1`).Scan(&status, &sentAt)
+	var state notify.State
+	err := s.db.QueryRowContext(ctx, `SELECT status, sent_at, candidate, consecutive, candidate_scope FROM notify_state WHERE id = 1`).Scan(&status, &sentAt, &state.Candidate, &state.Consecutive, &state.CandidateScope)
 	if errors.Is(err, sql.ErrNoRows) {
 		return notify.State{}, nil
 	}
 	if err != nil {
 		return notify.State{}, err
 	}
-	state := notify.State{Status: status}
+	state.Status = status
 	if sentAt.Valid && sentAt.String != "" {
 		parsed, err := time.Parse(time.RFC3339, sentAt.String)
 		if err != nil {
@@ -438,7 +466,8 @@ func (s *SQLiteStore) WriteNotifyState(ctx context.Context, value notify.State) 
 	if !value.SentAt.IsZero() {
 		sentAt = value.SentAt.Format(time.RFC3339)
 	}
-	_, err := s.db.ExecContext(ctx, `INSERT INTO notify_state (id, status, sent_at) VALUES (1, ?, ?) ON CONFLICT(id) DO UPDATE SET status = excluded.status, sent_at = excluded.sent_at`, value.Status, sentAt)
+	_, err := s.db.ExecContext(ctx, `INSERT INTO notify_state (id, status, sent_at, candidate, consecutive, candidate_scope) VALUES (1, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET status = excluded.status, sent_at = excluded.sent_at, candidate = excluded.candidate, consecutive = excluded.consecutive, candidate_scope = excluded.candidate_scope`,
+		value.Status, sentAt, value.Candidate, value.Consecutive, value.CandidateScope)
 	return err
 }
 

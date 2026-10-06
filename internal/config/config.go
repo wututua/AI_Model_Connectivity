@@ -9,6 +9,7 @@ import (
 )
 
 type Config struct {
+	OperationsSettings
 	AppHost                   string
 	AppPort                   int
 	WebDir                    string
@@ -53,15 +54,18 @@ type Config struct {
 }
 
 type ProviderConfig struct {
-	ConnectionRevision string   `json:"connection_revision,omitempty"`
-	ID                 string   `json:"id"`
-	Name               string   `json:"name"`
-	Type               string   `json:"type"`
-	BaseURL            string   `json:"base_url"`
-	APIKey             string   `json:"api_key,omitempty"`
-	Models             []string `json:"models"`
-	Enabled            bool     `json:"enabled"`
-	ProbeEnabled       bool     `json:"probe_enabled"`
+	Group              string       `json:"group"`
+	Tags               []string     `json:"tags"`
+	Probe              ProbeOptions `json:"probe"`
+	ConnectionRevision string       `json:"connection_revision,omitempty"`
+	ID                 string       `json:"id"`
+	Name               string       `json:"name"`
+	Type               string       `json:"type"`
+	BaseURL            string       `json:"base_url"`
+	APIKey             string       `json:"api_key,omitempty"`
+	Models             []string     `json:"models"`
+	Enabled            bool         `json:"enabled"`
+	ProbeEnabled       bool         `json:"probe_enabled"`
 }
 
 func Load() (Config, error) {

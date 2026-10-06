@@ -2,7 +2,10 @@ module cg
 
 go 1.26.8
 
-require modernc.org/sqlite v1.29.10
+require (
+	golang.org/x/mod v0.40.0
+	modernc.org/sqlite v1.29.10
+)
 
 require (
 	github.com/beorn7/perks v1.0.1 // indirect

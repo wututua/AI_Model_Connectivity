@@ -11,6 +11,7 @@ import (
 )
 
 type RuntimeSettings struct {
+	OperationsSettings
 	StatusLoginRequired         bool     `json:"status_login_required"`
 	DashboardTitle              string   `json:"dashboard_title"`
 	TimeoutSeconds              float64  `json:"timeout_seconds"`
@@ -48,27 +49,33 @@ type RuntimeSettings struct {
 }
 
 type SafeProviderConfig struct {
-	ConnectionRevision string   `json:"-"`
-	ID                 string   `json:"id"`
-	Name               string   `json:"name"`
-	Type               string   `json:"type"`
-	BaseURL            string   `json:"base_url"`
-	Models             []string `json:"models"`
-	Enabled            bool     `json:"enabled"`
-	ProbeEnabled       bool     `json:"probe_enabled"`
-	APIKeySet          bool     `json:"api_key_set"`
+	Group              string       `json:"group"`
+	Tags               []string     `json:"tags"`
+	Probe              ProbeOptions `json:"probe"`
+	ConnectionRevision string       `json:"-"`
+	ID                 string       `json:"id"`
+	Name               string       `json:"name"`
+	Type               string       `json:"type"`
+	BaseURL            string       `json:"base_url"`
+	Models             []string     `json:"models"`
+	Enabled            bool         `json:"enabled"`
+	ProbeEnabled       bool         `json:"probe_enabled"`
+	APIKeySet          bool         `json:"api_key_set"`
 }
 
 type ProviderUpdate struct {
-	ID           string   `json:"id"`
-	Name         string   `json:"name"`
-	Type         string   `json:"type"`
-	BaseURL      string   `json:"base_url"`
-	APIKey       string   `json:"api_key"`
-	ClearAPIKey  bool     `json:"clear_api_key"`
-	Models       []string `json:"models"`
-	Enabled      bool     `json:"enabled"`
-	ProbeEnabled bool     `json:"probe_enabled"`
+	Group        string       `json:"group"`
+	Tags         []string     `json:"tags"`
+	Probe        ProbeOptions `json:"probe"`
+	ID           string       `json:"id"`
+	Name         string       `json:"name"`
+	Type         string       `json:"type"`
+	BaseURL      string       `json:"base_url"`
+	APIKey       string       `json:"api_key"`
+	ClearAPIKey  bool         `json:"clear_api_key"`
+	Models       []string     `json:"models"`
+	Enabled      bool         `json:"enabled"`
+	ProbeEnabled bool         `json:"probe_enabled"`
 }
 
 type ModelDiscoveryRequest struct {
@@ -101,6 +108,7 @@ type AdminConfig struct {
 
 func SettingsFromConfig(cfg Config) RuntimeSettings {
 	return RuntimeSettings{
+		OperationsSettings:        cfg.OperationsSettings,
 		StatusLoginRequired:       cfg.StatusLoginRequired,
 		DashboardTitle:            cfg.DashboardTitle,
 		TimeoutSeconds:            cfg.TimeoutSeconds,
@@ -147,6 +155,7 @@ func ApplyRuntimeConfig(base Config, runtime RuntimeConfig) Config {
 }
 
 func ApplyRuntimeSettings(cfg Config, settings RuntimeSettings) Config {
+	cfg.OperationsSettings = settings.OperationsSettings
 	cfg.StatusLoginRequired = settings.StatusLoginRequired
 	cfg.DashboardTitle = settings.DashboardTitle
 	cfg.TimeoutSeconds = settings.TimeoutSeconds
@@ -182,6 +191,9 @@ func SafeProviders(providers []ProviderConfig) []SafeProviderConfig {
 	result := make([]SafeProviderConfig, 0, len(providers))
 	for _, provider := range providers {
 		result = append(result, SafeProviderConfig{
+			Group:              provider.Group,
+			Tags:               append([]string{}, provider.Tags...),
+			Probe:              provider.Probe,
 			ConnectionRevision: provider.ConnectionRevision,
 			ID:                 provider.ID,
 			Name:               provider.Name,
@@ -202,6 +214,9 @@ func ApplyProviderUpdate(existing ProviderConfig, update ProviderUpdate) (Provid
 		return ProviderConfig{}, errors.New("Base URL 已变更，请重新填写 API Key 或明确清除原密钥")
 	}
 	provider := ProviderConfig{
+		Group:        strings.TrimSpace(update.Group),
+		Tags:         append([]string{}, update.Tags...),
+		Probe:        update.Probe,
 		ID:           strings.TrimSpace(update.ID),
 		Name:         strings.TrimSpace(update.Name),
 		Type:         strings.ToLower(strings.TrimSpace(update.Type)),
@@ -229,6 +244,9 @@ func ApplyProviderUpdate(existing ProviderConfig, update ProviderUpdate) (Provid
 }
 
 func ValidateRuntimeSettings(settings RuntimeSettings) error {
+	if err := settings.OperationsSettings.Validate(); err != nil {
+		return err
+	}
 	if !isFinitePositive(settings.TimeoutSeconds) || settings.TimeoutSeconds > 24*60*60 {
 		return errors.New("timeout_seconds must be finite, greater than 0, and no more than 86400")
 	}
@@ -273,6 +291,9 @@ func ValidateRuntimeSettings(settings RuntimeSettings) error {
 func ValidateProviders(providers []ProviderConfig) error {
 	seen := map[string]bool{}
 	for _, provider := range providers {
+		if err := validateProviderMetadata(provider); err != nil {
+			return err
+		}
 		id := strings.TrimSpace(provider.ID)
 		if err := ValidateProviderID(id); err != nil {
 			return err

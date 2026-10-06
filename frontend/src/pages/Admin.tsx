@@ -1,6 +1,6 @@
 import { useState, type ComponentType } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
-import { Activity, ArrowLeft, BarChart3, Clock3, Database, FileJson, KeyRound, LayoutDashboard, LogOut, Settings2, ShieldCheck, Users } from 'lucide-react'
+import { Activity, ArrowLeft, BarChart3, Bell, Clock3, Database, Download, FileJson, KeyRound, LayoutDashboard, LogOut, Settings2, ShieldCheck, Users } from 'lucide-react'
 import { useAuth } from '../hooks/useAuth'
 import { ThemeToggle } from '../components/ThemeToggle'
 import { ChangePassword } from '../components/ChangePassword'
@@ -17,16 +17,22 @@ import { TasksTab } from './admin/TasksTab'
 import { ConfigTab } from './admin/ConfigTab'
 import { BillingTab } from './admin/BillingTab'
 import { UsersTab } from './admin/UsersTab'
+import { NotificationsTab } from './admin/NotificationsTab'
+import { OperationsTab } from './admin/OperationsTab'
+import { UpdatesTab } from './admin/UpdatesTab'
 
-type Tab = 'overview' | 'providers' | 'settings' | 'tasks' | 'billing' | 'config' | 'users' | 'account'
+type Tab = 'overview' | 'providers' | 'settings' | 'tasks' | 'billing' | 'config' | 'users' | 'account' | 'notifications' | 'operations' | 'updates'
 const TABS: { id: Tab; label: string; icon: ComponentType<{ className?: string }>; ownerOnly?: boolean }[] = [
   { id: 'overview', label: '运行概览', icon: LayoutDashboard },
   { id: 'providers', label: 'Provider', icon: Database },
   { id: 'settings', label: '系统设置', icon: Settings2, ownerOnly: true },
   { id: 'tasks', label: '任务历史', icon: Clock3 },
+  { id: 'notifications', label: '通知记录', icon: Bell, ownerOnly: true },
   { id: 'billing', label: 'Token 用量', icon: BarChart3 },
   { id: 'users', label: '用户管理', icon: Users, ownerOnly: true },
   { id: 'config', label: '配置管理', icon: FileJson, ownerOnly: true },
+  { id: 'operations', label: '运维工具', icon: ShieldCheck, ownerOnly: true },
+  { id: 'updates', label: '系统更新', icon: Download, ownerOnly: true },
   { id: 'account', label: '账户安全', icon: KeyRound },
 ]
 
@@ -87,9 +93,12 @@ export default function Admin() {
           {activeTab === 'providers' && <ProvidersTab readOnly={readOnly} />}
           {activeTab === 'settings' && !readOnly && <SettingsTab />}
           {activeTab === 'tasks' && <TasksTab />}
+          {activeTab === 'notifications' && !readOnly && <NotificationsTab />}
           {activeTab === 'billing' && <BillingTab />}
           {activeTab === 'users' && !readOnly && <UsersTab />}
           {activeTab === 'config' && !readOnly && <ConfigTab />}
+          {activeTab === 'operations' && !readOnly && <OperationsTab />}
+          {activeTab === 'updates' && !readOnly && <UpdatesTab />}
           {activeTab === 'account' && <ChangePassword />}
         </div>
       </main>

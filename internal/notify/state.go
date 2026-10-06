@@ -10,8 +10,11 @@ import (
 )
 
 type State struct {
-	Status string    `json:"status"`
-	SentAt time.Time `json:"sent_at"`
+	Status         string    `json:"status"`
+	SentAt         time.Time `json:"sent_at"`
+	Candidate      string    `json:"candidate,omitempty"`
+	Consecutive    int       `json:"consecutive,omitempty"`
+	CandidateScope string    `json:"candidate_scope,omitempty"`
 }
 
 func readState(path string) (State, error) {

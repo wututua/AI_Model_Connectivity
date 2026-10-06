@@ -1,4 +1,5 @@
 export interface ModelResult {
+  first_token_ms?: number
   checked_at?: string
   provider_id: string
   provider_name: string
@@ -76,6 +77,8 @@ export interface Report {
 }
 
 export interface RunningState {
+  progress?: { phase: string; provider_id: string; total: number; completed: number; active: ModelTarget[] }
+  elapsed_ms?: number
   running: boolean
   task_id: number
   kind: string
@@ -109,6 +112,12 @@ export interface UserInput {
 }
 
 export interface RuntimeSettings {
+  daily_request_limit?: number
+  discovery_model_limit?: number
+  notify_failure_threshold?: number
+  notify_recovery_threshold?: number
+  maintenance_start?: string
+  maintenance_end?: string
   status_login_required: boolean
   dashboard_title: string
   timeout_seconds: number
@@ -146,6 +155,9 @@ export interface RuntimeSettings {
 }
 
 export interface SafeProviderConfig {
+  group?: string
+  tags?: string[]
+  probe?: ProbeOptions
   id: string
   name: string
   type: string
@@ -157,6 +169,9 @@ export interface SafeProviderConfig {
 }
 
 export interface ProviderUpdate {
+  group?: string
+  tags?: string[]
+  probe?: ProbeOptions
   id: string
   name: string
   type: string
@@ -241,4 +256,71 @@ export interface BillingSummary {
   total_probe_count: number
   per_model: BillingItem[]
   daily: BillingDaily[]
+}
+
+export interface NotificationDelivery {
+  id: number
+  kind: 'alert' | 'test' | 'retry'
+  retry_of: number
+  platform: string
+  status: 'sending' | 'success' | 'error' | 'unknown'
+  created_at: string
+  finished_at: string
+  elapsed_ms: number
+  http_status: number
+  summary: string
+  error_message: string
+}
+
+export interface ProbeOptions {
+  protocol: string
+  stream: boolean
+  max_tokens: number
+  token_limit_field: string
+  omit_temperature: boolean
+  temperature: number
+  timeout_seconds: number
+  prompt: string
+  system_prompt: string
+  omit_system_prompt: boolean
+}
+
+export interface ModelTarget { provider_id: string; model: string }
+export interface RequestBudget { day: string; used: number; limit: number; remaining: number; exhausted: boolean; resets_at: string }
+export interface MetricsToken { id: number; name: string; created_at: string; rotated_at: string }
+export interface IssuedMetricsToken extends MetricsToken { token: string }
+export interface SystemUpdateJob {
+  id: string
+  version: string
+  channel: string
+  status: 'pending' | 'running' | 'succeeded' | 'failed' | 'rolled_back' | 'recovery_required'
+  stage: string
+  created_at: string
+  updated_at: string
+  message: string
+}
+
+export interface SystemUpdateStatus {
+  request_id: string
+  version: string
+  commit: string
+  platform: string
+  deployment: string
+  supported: boolean
+  reason: string
+  job: SystemUpdateJob | null
+}
+
+export interface SystemUpdateCheck {
+  channel: 'stable' | 'preview'
+  checked_at: string
+  available: boolean
+  release: {
+    version: string
+    notes: string
+    url: string
+    published_at: string
+    prerelease: boolean
+    package_available: boolean
+  } | null
 }

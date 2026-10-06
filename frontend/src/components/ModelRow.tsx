@@ -58,6 +58,7 @@ export const ModelRow = memo(function ModelRow({ result, showError, compact }: {
                 <Metric label="24h 样本" value={String(result.latency_samples_24h ?? 0)} />
               </dl>
               <p className="mt-4 text-xs text-muted-foreground">24h 平均延迟 <span className="font-mono text-foreground">{result.avg_latency_24h || 'N/A'}</span></p>
+              {!!result.first_token_ms && <p className="mt-2 text-xs text-muted-foreground">首段有效文本 <span className="font-mono text-foreground">{result.first_token_ms} ms</span> · 完整响应 {result.latency_ms} ms</p>}
               {result.weekly_success_text && <p className="mt-2 text-xs text-muted-foreground">{result.weekly_success_text}</p>}
             </div>
             {result.show_curve_chart && result.svg_path_line && <div className="min-w-0">

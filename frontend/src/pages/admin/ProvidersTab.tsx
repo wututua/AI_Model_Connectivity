@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Database, Edit2, KeyRound, MoreHorizontal, Plus, RefreshCw, RotateCw, Search, Trash2 } from 'lucide-react'
+import { Copy, Database, Edit2, KeyRound, ListChecks, MoreHorizontal, Plus, RefreshCw, RotateCw, Search, Trash2 } from 'lucide-react'
 import { api } from '../../api'
 import type { ProviderUpdate, SafeProviderConfig } from '../../types'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '../../components/ui/alert-dialog'
@@ -10,12 +10,15 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from '../../components/ui/input'
 import { ModelPicker } from '../../components/ModelPicker'
 import { Switch } from '../../components/ui/switch'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../components/ui/table'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../../components/ui/tooltip'
 import { Feedback, Field, ListSkeleton, LoadingButton, useAutoMsg } from './shared'
 import { mergeModels, parseModels } from '../../utils/models'
+import { ProbeFields, defaultProbe } from './ProbeFields'
+import { ModelCheckDialog } from './ModelCheckDialog'
 
-type EditingState = SafeProviderConfig | 'new' | null
+type EditingState = (SafeProviderConfig & { isCopy?: boolean }) | 'new' | null
 
 export function ProvidersTab({ readOnly = false }: { readOnly?: boolean }) {
   const [providers, setProviders] = useState<SafeProviderConfig[]>([])
@@ -30,13 +33,36 @@ export function ProvidersTab({ readOnly = false }: { readOnly?: boolean }) {
   const [message, setMessage] = useAutoMsg()
   const [actionTarget, setActionTarget] = useState<SafeProviderConfig | null>(null)
   const [loadFailed, setLoadFailed] = useState(false)
+  const [scope, setScope] = useState('all')
+  const [selected, setSelected] = useState<string[]>([])
+  const [batchAction, setBatchAction] = useState('pause')
+  const [batchGroup, setBatchGroup] = useState('')
+  const [batchConfirm, setBatchConfirm] = useState(false)
+  const [batchBusy, setBatchBusy] = useState(false)
+  const [modelTarget, setModelTarget] = useState<SafeProviderConfig | null>(null)
+  const loadRequest = useRef(0)
 
   const load = useCallback(() => {
+    const request = ++loadRequest.current
     setLoading(true); setLoadFailed(false)
-    api.providers().then(setProviders).catch(cause => { setLoadFailed(true); setMessage(`错误：${(cause as Error).message}`) }).finally(() => setLoading(false))
+    api.providers()
+      .then(value => {
+        if (request !== loadRequest.current) return
+        const ids = new Set(value.map(provider => provider.id))
+        setProviders(value)
+        setSelected(current => current.filter(id => ids.has(id)))
+      })
+      .catch(cause => {
+        if (request !== loadRequest.current) return
+        setLoadFailed(true); setMessage(`错误：${(cause as Error).message}`)
+      })
+      .finally(() => { if (request === loadRequest.current) setLoading(false) })
   }, [setMessage])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    load()
+    return () => { loadRequest.current++ }
+  }, [load])
   useEffect(() => {
     if (readOnly) return
     let active = true
@@ -66,9 +92,25 @@ export function ProvidersTab({ readOnly = false }: { readOnly?: boolean }) {
 
   const filtered = useMemo(() => {
     const query = search.trim().toLowerCase()
-    if (!query) return providers
-    return providers.filter(provider => [provider.id, provider.name, provider.type, provider.base_url, ...provider.models].some(value => value.toLowerCase().includes(query)))
-  }, [providers, search])
+    return providers.filter(provider =>
+      (scope === 'all' || scope === `g:${provider.group ?? ''}` || (provider.tags ?? []).some(tag => scope === `t:${tag}`)) &&
+      (!query || [provider.id, provider.name, provider.type, provider.base_url, provider.group ?? '', ...(provider.tags ?? []), ...provider.models].some(value => value.toLowerCase().includes(query))))
+  }, [providers, search, scope])
+  const groups = [...new Set(providers.map(p => p.group ?? ''))].sort()
+  const tags = [...new Set(providers.flatMap(p => p.tags ?? []))].sort()
+  const copy = (provider: SafeProviderConfig) => setEditing({ ...provider, id: '', name: `${provider.name} 副本`, api_key_set: false, enabled: false, isCopy: true })
+  const selection = (provider: SafeProviderConfig) => <input type="checkbox" className="size-4 shrink-0" aria-label={`选择 Provider ${provider.name}`} disabled={batchBusy} checked={selected.includes(provider.id)} onChange={e => setSelected(current => e.target.checked ? [...current, provider.id] : current.filter(id => id !== provider.id))} />
+  const batch = async () => {
+    if (batchBusy || !selected.length) return
+    setBatchBusy(true)
+    try {
+      const value = await api.batchProviders(selected, batchAction, batchGroup)
+      loadRequest.current++
+      setLoading(false); setLoadFailed(false)
+      setProviders(value.providers); setSelected([]); setBatchConfirm(false); setMessage('批量操作已保存')
+    } catch (e) { setBatchConfirm(false); setMessage(`错误：${(e as Error).message}`) }
+    finally { setBatchBusy(false) }
+  }
 
   const save = async (id: string | null, update: ProviderUpdate) => {
     if (id) await api.updateProvider(id, update)
@@ -78,8 +120,14 @@ export function ProvidersTab({ readOnly = false }: { readOnly?: boolean }) {
 
   const remove = async () => {
     if (!deleteTarget) return
+    const id = deleteTarget.id
     setDeleting(true)
-    try { await api.deleteProvider(deleteTarget.id); setDeleteTarget(null); setMessage('Provider 已删除'); load() }
+    try {
+      await api.deleteProvider(id)
+      setProviders(current => current.filter(provider => provider.id !== id))
+      setSelected(current => current.filter(selectedID => selectedID !== id))
+      setDeleteTarget(null); setMessage('Provider 已删除'); load()
+    }
     catch (cause) { setMessage(`错误：${(cause as Error).message}`) }
     finally { setDeleting(false) }
   }
@@ -103,12 +151,22 @@ export function ProvidersTab({ readOnly = false }: { readOnly?: boolean }) {
           {!readOnly && <Button size="sm" onClick={() => setEditing('new')}><Plus />新增 Provider</Button>}
         </div>
       </div>
+      <div className="flex flex-wrap items-center gap-3">
+        <Select value={scope} onValueChange={setScope}><SelectTrigger className="w-[190px]" aria-label="分组与标签"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">全部分组与标签</SelectItem>{groups.map(group => <SelectItem key={`g:${group}`} value={`g:${group}`}>分组 · {group || '未分组'}</SelectItem>)}{tags.map(tag => <SelectItem key={`t:${tag}`} value={`t:${tag}`}>标签 · {tag}</SelectItem>)}</SelectContent></Select>
+        {!readOnly && <label className="flex items-center gap-2 text-sm"><input type="checkbox" aria-label="选择当前筛选 Provider" disabled={batchBusy || !filtered.length} checked={!!filtered.length && filtered.every(p => selected.includes(p.id))} onChange={e => setSelected(current => e.target.checked ? [...new Set([...current, ...filtered.map(p => p.id)])] : current.filter(id => !filtered.some(p => p.id === id)))} />已选 {selected.length}</label>}
+      </div>
+      {!readOnly && selected.length > 0 && <div className="flex flex-wrap items-center gap-2 border-y py-3">
+        <Select value={batchAction} onValueChange={setBatchAction} disabled={batchBusy}><SelectTrigger className="w-[150px]" aria-label="批量操作"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="pause">暂停检测</SelectItem><SelectItem value="resume">恢复检测</SelectItem><SelectItem value="enable">启用 Provider</SelectItem><SelectItem value="disable">停用 Provider</SelectItem><SelectItem value="group">设置分组</SelectItem></SelectContent></Select>
+        {batchAction === 'group' && <Input aria-label="批量分组名称" className="w-[180px]" maxLength={128} value={batchGroup} onChange={e => setBatchGroup(e.target.value)} placeholder="分组名称" disabled={batchBusy} />}
+        <Button size="sm" disabled={batchBusy} onClick={() => setBatchConfirm(true)}><ListChecks />应用到 {selected.length} 项</Button>
+      </div>}
       <Feedback message={message} />
 
       <div className="divide-y border-y sm:hidden" aria-busy={loading}>
         {loading && !providers.length && <ListSkeleton label="正在加载 Provider" />}
         {filtered.map(provider => <section key={provider.id} className="min-w-0 py-4" aria-label={provider.name}>
           <div className="flex items-start gap-2">
+            {!readOnly && selection(provider)}
             <div className="min-w-0 flex-1"><h2 className="break-words text-sm font-semibold">{provider.name}</h2><p className="mt-1 break-all text-xs text-muted-foreground">{provider.id} · {provider.type}</p></div>
             {!readOnly && <Button variant="ghost" size="icon" className="size-10 shrink-0" aria-label={`${provider.name} 更多操作`} title="更多操作" onClick={() => setActionTarget(provider)}><MoreHorizontal /></Button>}
           </div>
@@ -117,6 +175,8 @@ export function ProvidersTab({ readOnly = false }: { readOnly?: boolean }) {
             <Badge variant={provider.enabled ? 'success' : 'muted'}>{provider.enabled ? '已启用' : '已停用'}</Badge>
             <span>{provider.enabled && provider.probe_enabled ? '参与检测' : '不参与检测'}</span>
             <span>{provider.models.length ? `${provider.models.length} 个模型` : '自动获取模型'}</span>
+            {provider.group && <Badge variant="outline">{provider.group}</Badge>}
+            {(provider.tags ?? []).map(tag => <span key={tag}>#{tag}</span>)}
           </div>
         </section>)}
         {!loading && !loadFailed && !filtered.length && <p className="py-12 text-center text-sm text-muted-foreground">{providers.length ? '没有匹配的 Provider' : '尚未添加 Provider'}</p>}
@@ -125,17 +185,19 @@ export function ProvidersTab({ readOnly = false }: { readOnly?: boolean }) {
       <Card className="hidden sm:block" aria-busy={loading}>
         <CardContent className="p-0">
           <Table>
-            <TableHeader><TableRow><TableHead>Provider</TableHead><TableHead className="hidden md:table-cell">连接地址</TableHead><TableHead className="hidden sm:table-cell">模型</TableHead><TableHead>状态</TableHead>{!readOnly && <TableHead className="w-[132px] text-right">操作</TableHead>}</TableRow></TableHeader>
+            <TableHeader><TableRow><TableHead>Provider</TableHead><TableHead className="hidden md:table-cell">连接地址</TableHead><TableHead className="hidden sm:table-cell">模型</TableHead><TableHead>状态</TableHead>{!readOnly && <TableHead className="w-[204px] text-right">操作</TableHead>}</TableRow></TableHeader>
             <TableBody>
               {loading && !providers.length && <TableRow><TableCell colSpan={readOnly ? 4 : 5}><ListSkeleton label="正在加载 Provider" /></TableCell></TableRow>}
               {filtered.map(provider => (
                 <TableRow key={provider.id}>
-                  <TableCell><div className="flex items-center gap-3"><div className="flex size-8 shrink-0 items-center justify-center rounded-md bg-muted font-mono text-xs font-semibold">{provider.name.slice(0, 2).toUpperCase()}</div><div className="min-w-0"><p className="truncate font-medium">{provider.name}</p><p className="truncate font-mono text-xs text-muted-foreground">{provider.id} · {provider.type}</p></div></div></TableCell>
+                  <TableCell><div className="flex items-center gap-3">{!readOnly && selection(provider)}<div className="min-w-0"><p className="truncate font-medium">{provider.name}</p><p className="truncate font-mono text-xs text-muted-foreground">{provider.id} · {provider.type}</p><p className="mt-1 break-words text-xs text-muted-foreground">{[provider.group, ...(provider.tags ?? []).map(tag => `#${tag}`)].filter(Boolean).join(' · ')}</p></div></div></TableCell>
                   <TableCell className="hidden max-w-[320px] md:table-cell"><p className="truncate font-mono text-xs text-muted-foreground" title={provider.base_url}>{provider.base_url}</p><p className="mt-1 flex items-center gap-1 text-xs text-muted-foreground"><KeyRound className="size-3" />{provider.api_key_set ? 'API Key 已设置' : '未设置 API Key'}</p></TableCell>
                   <TableCell className="hidden sm:table-cell"><span className="font-mono text-xs">{provider.models.length || '自动'}</span></TableCell>
                   <TableCell className="whitespace-nowrap"><div className="flex flex-col items-start gap-1"><Badge variant={provider.enabled ? 'success' : 'muted'}>{provider.enabled ? '已启用' : '已停用'}</Badge><span className="text-xs text-muted-foreground">{provider.enabled && provider.probe_enabled ? '参与检测' : '不参与检测'}</span></div></TableCell>
                   {!readOnly && <TableCell>
                     <div className="flex justify-end gap-1">
+                      <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" onClick={() => setModelTarget(provider)} disabled={busy || !provider.enabled || !provider.probe_enabled} aria-label={`模型检测 ${provider.name}`}><ListChecks /></Button></TooltipTrigger><TooltipContent>模型检测</TooltipContent></Tooltip>
+                      <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" onClick={() => copy(provider)} aria-label={`复制 ${provider.name}`}><Copy /></Button></TooltipTrigger><TooltipContent>复制配置（不含密钥）</TooltipContent></Tooltip>
                       <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" onClick={() => rerun(provider)} disabled={!provider.enabled || !provider.probe_enabled || busy || rerunning !== null} aria-label={`重新检测 ${provider.name}`}><RotateCw className={rerunning === provider.id ? 'animate-spin' : ''} /></Button></TooltipTrigger><TooltipContent>重新检测</TooltipContent></Tooltip>
                       <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" onClick={() => setEditing(provider)} aria-label={`编辑 ${provider.name}`}><Edit2 /></Button></TooltipTrigger><TooltipContent>编辑</TooltipContent></Tooltip><Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" className="text-destructive hover:text-destructive" onClick={() => setDeleteTarget(provider)} aria-label={`删除 ${provider.name}`}><Trash2 /></Button></TooltipTrigger><TooltipContent>删除</TooltipContent></Tooltip>
                     </div>
@@ -152,6 +214,8 @@ export function ProvidersTab({ readOnly = false }: { readOnly?: boolean }) {
         <DialogContent className="max-w-sm">
           <DialogHeader><DialogTitle className="break-all pr-6">{actionTarget?.name}</DialogTitle><DialogDescription>Provider 操作</DialogDescription></DialogHeader>
           {actionTarget && <div className="grid gap-2">
+            <Button variant="outline" className="h-11 justify-start" disabled={busy || !actionTarget.enabled || !actionTarget.probe_enabled} onClick={() => { setModelTarget(actionTarget); setActionTarget(null) }}><ListChecks />模型检测</Button>
+            <Button variant="outline" className="h-11 justify-start" onClick={() => { copy(actionTarget); setActionTarget(null) }}><Copy />复制配置（不含密钥）</Button>
             <Button variant="outline" className="h-11 justify-start" disabled={!actionTarget.enabled || !actionTarget.probe_enabled || busy || rerunning !== null} onClick={() => { void rerun(actionTarget); setActionTarget(null) }}><RotateCw />重新检测</Button>
             <Button variant="outline" className="h-11 justify-start" onClick={() => { setEditing(actionTarget); setActionTarget(null) }}><Edit2 />编辑 Provider</Button>
             <Button variant="outline" className="h-11 justify-start text-destructive hover:text-destructive" onClick={() => { setDeleteTarget(actionTarget); setActionTarget(null) }}><Trash2 />删除 Provider</Button>
@@ -160,6 +224,8 @@ export function ProvidersTab({ readOnly = false }: { readOnly?: boolean }) {
       </Dialog>}
 
       {!readOnly && <ProviderDialog key={editing === 'new' ? 'new' : editing?.id ?? 'closed'} value={editing} onOpenChange={open => !open && setEditing(null)} onSave={save} />}
+      {!readOnly && modelTarget && <ModelCheckDialog provider={modelTarget} onClose={() => setModelTarget(null)} onAccepted={id => { watchedTask.current = id; setBusy(true); setMessage(`模型检测任务 #${id} 已启动`) }} />}
+      <AlertDialog open={batchConfirm} onOpenChange={open => { if (!batchBusy) setBatchConfirm(open) }}><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>应用批量更改？</AlertDialogTitle><AlertDialogDescription>将修改已选的 {selected.length} 个 Provider，历史记录不变。</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel disabled={batchBusy}>取消</AlertDialogCancel><AlertDialogAction disabled={batchBusy || !selected.length} onClick={e => { e.preventDefault(); void batch() }}>{batchBusy ? '保存中' : '确认应用'}</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>
 
       <AlertDialog open={Boolean(deleteTarget)} onOpenChange={open => !open && !deleting && setDeleteTarget(null)}>
         <AlertDialogContent><AlertDialogHeader><AlertDialogTitle>删除 Provider？</AlertDialogTitle><AlertDialogDescription>将删除「{deleteTarget?.name}」及其配置。历史检测记录不会被此次操作修改。</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel disabled={deleting}>取消</AlertDialogCancel><AlertDialogAction onClick={event => { event.preventDefault(); remove() }} disabled={deleting}>{deleting ? '删除中…' : '确认删除'}</AlertDialogAction></AlertDialogFooter></AlertDialogContent>
@@ -169,10 +235,12 @@ export function ProvidersTab({ readOnly = false }: { readOnly?: boolean }) {
 }
 
 function ProviderDialog({ value, onOpenChange, onSave }: { value: EditingState; onOpenChange: (open: boolean) => void; onSave: (id: string | null, update: ProviderUpdate) => Promise<void> }) {
-  const initial = value && value !== 'new' ? value : null
+  const seed = value && value !== 'new' ? value : null
+  const initial = seed?.isCopy ? null : seed
   const [form, setForm] = useState({
-    id: initial?.id ?? '', name: initial?.name ?? '', type: initial?.type ?? 'openai', base_url: initial?.base_url ?? '',
-    api_key: '', clear_api_key: false, models: mergeModels(initial?.models ?? []), enabled: initial?.enabled ?? true, probe_enabled: initial?.probe_enabled ?? true,
+    id: seed?.id ?? '', name: seed?.name ?? '', type: seed?.type ?? 'openai', base_url: seed?.base_url ?? '',
+    api_key: '', clear_api_key: false, models: mergeModels(seed?.models ?? []), enabled: seed?.enabled ?? true, probe_enabled: seed?.probe_enabled ?? true,
+    group: seed?.group ?? '', tags: (seed?.tags ?? []).join(', '), probe: { ...defaultProbe, ...seed?.probe },
   })
   const [saving, setSaving] = useState(false)
   const [modelDraft, setModelDraft] = useState('')
@@ -226,6 +294,7 @@ function ProviderDialog({ value, onOpenChange, onSave }: { value: EditingState; 
       await onSave(initial?.id ?? null, {
         id: form.id.trim(), name: form.name.trim(), type: form.type.trim() || 'openai', base_url: form.base_url.trim(), api_key: form.api_key,
         clear_api_key: form.clear_api_key, models, enabled: form.enabled, probe_enabled: form.enabled && form.probe_enabled,
+        group: form.group.trim(), tags: parseModels(form.tags), probe: form.probe,
       })
     } catch (cause) { setError((cause as Error).message); setSaving(false) }
   }
@@ -239,11 +308,14 @@ function ProviderDialog({ value, onOpenChange, onSave }: { value: EditingState; 
           <Field label="显示名称" htmlFor="provider-name"><Input id="provider-name" value={form.name} onChange={event => set('name', event.target.value)} placeholder="OpenAI" /></Field>
           <Field label="Provider 类型" htmlFor="provider-type"><Input id="provider-type" value={form.type} onChange={event => set('type', event.target.value)} placeholder="openai" className="font-mono" /></Field>
           <Field label="Base URL" htmlFor="provider-url"><Input id="provider-url" type="url" value={form.base_url} onChange={event => set('base_url', event.target.value)} placeholder="https://api.openai.com/v1" className="font-mono" /></Field>
+          <Field label="分组" htmlFor="provider-group"><Input id="provider-group" maxLength={128} value={form.group} onChange={e => set('group', e.target.value)} /></Field>
+          <Field label="标签" htmlFor="provider-tags"><Input id="provider-tags" value={form.tags} onChange={e => set('tags', e.target.value)} placeholder="production, backup" /></Field>
           <Field className="md:col-span-2" label={`API Key${initial?.api_key_set ? (endpointChanged ? '（地址已变更）' : '（留空保留现有值）') : ''}`} htmlFor="provider-key"><Input id="provider-key" type="password" value={form.api_key} onChange={event => set('api_key', event.target.value)} placeholder={initial?.api_key_set ? '已设置' : 'sk-...'} className="font-mono" /></Field>
           {initial?.api_key_set && <ToggleRow className="md:col-span-2" label="清除现有 API Key" description="保存后移除服务端存储的 Key" checked={form.clear_api_key} onCheckedChange={value => set('clear_api_key', value)} danger />}
           <div className="min-w-0 md:col-span-2"><ModelPicker value={form.models} available={available} onChange={models => set('models', models)} draft={modelDraft} onDraftChange={setModelDraft} onSync={sync} syncing={syncing} disabled={saving} syncError={syncError} syncMessage={syncMessage} /></div>
           <ToggleRow className="md:col-span-2" label="启用 Provider" description="停用后不会展示或参与检测" checked={form.enabled} onCheckedChange={value => set('enabled', value)} />
           <ToggleRow className="md:col-span-2" label="参与检测" description="关闭后保留配置和展示，但跳过连通性探测" checked={form.probe_enabled} onCheckedChange={value => set('probe_enabled', value)} disabled={!form.enabled} />
+          <ProbeFields value={form.probe} onChange={value => set('probe', value)} />
         </fieldset>
         {error && <p className="text-sm text-destructive">{error}</p>}
         <DialogFooter><Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>取消</Button><LoadingButton onClick={submit} loading={saving} disabled={syncing}>保存 Provider</LoadingButton></DialogFooter>

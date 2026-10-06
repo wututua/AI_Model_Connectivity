@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"time"
 
 	"cg/internal/config"
 	"cg/internal/httpclient"
@@ -31,13 +32,6 @@ func stripThinkingTags(s string) string {
 type OpenAICompatible struct {
 	cfg    config.ProviderConfig
 	client *http.Client
-}
-
-type chatRequest struct {
-	Model       string        `json:"model"`
-	Messages    []chatMessage `json:"messages"`
-	Temperature float64       `json:"temperature"`
-	MaxTokens   int           `json:"max_tokens"`
 }
 
 type chatMessage struct {
@@ -154,14 +148,39 @@ func (p *OpenAICompatible) Chat(ctx context.Context, model, systemPrompt, prompt
 	if p.cfg.BaseURL == "" {
 		return "", Usage{}, fmt.Errorf("base url is empty")
 	}
-	payload := chatRequest{
-		Model: model,
-		Messages: []chatMessage{
-			{Role: "system", Content: systemPrompt},
-			{Role: "user", Content: prompt},
-		},
-		Temperature: 0,
-		MaxTokens:   16,
+	options := p.cfg.Probe
+	if options.Prompt != "" {
+		prompt = options.Prompt
+	}
+	if options.SystemPrompt != "" {
+		systemPrompt = options.SystemPrompt
+	}
+	if options.OmitSystemPrompt {
+		systemPrompt = ""
+	}
+	if options.Protocol == "responses" {
+		return p.responses(ctx, model, systemPrompt, prompt)
+	}
+	messages := []chatMessage{}
+	if systemPrompt != "" {
+		messages = append(messages, chatMessage{Role: "system", Content: systemPrompt})
+	}
+	messages = append(messages, chatMessage{Role: "user", Content: prompt})
+	limitField := options.TokenLimitField
+	if limitField == "" {
+		limitField = "max_tokens"
+	}
+	maxTokens := options.MaxTokens
+	if maxTokens == 0 {
+		maxTokens = 16
+	}
+	payload := map[string]any{"model": model, "messages": messages, limitField: maxTokens}
+	if !options.OmitTemperature {
+		payload["temperature"] = options.Temperature
+	}
+	if options.Stream {
+		payload["stream"] = true
+		payload["stream_options"] = map[string]bool{"include_usage": true}
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -175,11 +194,15 @@ func (p *OpenAICompatible) Chat(ctx context.Context, model, systemPrompt, prompt
 	req.Header.Set("Content-Type", "application/json")
 	p.authorize(req)
 
+	started := time.Now()
 	resp, err := p.client.Do(req)
 	if err != nil {
 		return "", Usage{}, p.redactError(err)
 	}
 	defer resp.Body.Close()
+	if options.Stream && resp.StatusCode >= 200 && resp.StatusCode < 300 && !strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "application/json") {
+		return p.readStream(resp.Body, false, started)
+	}
 
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
@@ -201,6 +224,9 @@ func (p *OpenAICompatible) Chat(ctx context.Context, model, systemPrompt, prompt
 	}
 	if parseErr != nil {
 		return "", usage, fmt.Errorf("parse chat response: %w", parseErr)
+	}
+	if options.Stream {
+		return "", usage, errors.New("upstream returned JSON instead of a stream")
 	}
 	if len(parsed.Choices) == 0 {
 		return "", usage, fmt.Errorf("empty choices")

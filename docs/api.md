@@ -14,14 +14,18 @@
 - [配置](#配置)
 - [Provider 管理](#provider-管理)
 - [任务历史](#任务历史)
+- [通知记录](#通知记录)
 - [用量统计](#用量统计)
+- [模型重测与批量管理](#模型重测与批量管理)
+- [预算与导出](#预算与导出)
 - [Prometheus 指标](#prometheus-指标)
 - [请求体限制](#请求体限制)
+- [系统更新](#系统更新)
 - [数据结构](#数据结构)
 
 ## 认证
 
-使用账号密码登录，服务端设置 `cg_session` Cookie（HttpOnly、SameSite=Strict、24 小时有效）。不再接受 Bearer Token。
+管理 API 使用账号密码登录，服务端设置 `cg_session` Cookie（HttpOnly、SameSite=Strict、24 小时有效）。旧管理 Bearer Token 无效；新增指标凭据仅能通过 Bearer 读取 `/metrics`，不能访问其他 API。
 
 - 管理员（`admin`）：全部管理接口。
 - 普通用户（`user`）：可读取 detection、providers、tasks、billing、metrics，并修改自己的密码；不能修改任何共享配置或管理其他账号。
@@ -79,9 +83,9 @@ curl -X POST -b cookies.txt -c cookies.txt \
 | 404 | 任务或 Provider 不存在；自定义服务未注册指标 |
 | 405 | 方法不允许 |
 | 409 | 已有检测任务运行（body: `check already running`）或账号已并发变更 |
-| 413 | 请求体超过 1 MiB |
+| 413 | 请求体超过 1 MiB，或导出超过 10000 行 |
 | 415 | 登录请求未使用 `application/json` |
-| 429 | 认证失败限流 |
+| 429 | 认证失败限流，或每日上游请求预算用尽 |
 | 500 | 服务端错误 |
 | 503 | 服务关闭中，或认证、访问策略暂时不可用 |
 
@@ -126,6 +130,8 @@ Web 静态资源。非 `/api/` 且磁盘上无对应文件的路径回退到 `in
 ```
 
 `read_only=true` 表示普通用户。登录状态与初始改密要求由 `/api/auth/session` 返回。
+
+运行时还返回 `elapsed_ms` 和 `progress`：`phase`（`discovering/probing/saving/notifying`）、`provider_id`（发现阶段）、`total`、`completed`、`active`（`provider_id` / `model` 数组）。空闲时阶段为 `idle`。进度不包含部分正式结果，不替代任务终态或报告。
 
 ### `POST /api/admin/detection/start`、`POST /api/admin/check`
 
@@ -230,6 +236,28 @@ curl -X POST -b cookies.txt -H "X-CSRF-Token: $CSRF" -H 'Content-Type: applicati
 
 报告额外提供 `unknown_count`、`stale_after_seconds` 和 Provider/模型级 `checked_at`。`generated_at` 与 `checked_at` 为带时区的 RFC3339 时间；公开报告和 SSE 始终按当前 `show_error_detail` 设置过滤错误详情。
 
+## 通知记录
+
+以下接口仅限已完成初始改密的管理员；写请求需要 CSRF，均不接受临时渠道或凭据参数：
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| `GET` | `/api/admin/notifications?limit=20&offset=0&status=` | 返回 `NotificationDelivery[]`，按 ID 倒序 |
+| `POST` | `/api/admin/notifications/test` | 向当前已保存的渠道发送测试通知 |
+| `POST` | `/api/admin/notifications/{id}/retry` | 向当前已保存的渠道重发失败或结果未知记录的历史摘要 |
+
+`limit` 为 1–200，默认 20；`offset` 非负；`status` 可为空或 `sending` / `success` / `error` / `unknown`，非法参数返回 400。
+
+发送接口同步等待平台响应，网络请求最长 10 秒。已完成并记录的尝试返回 **200 与记录本身**，须检查 `status`：HTTP 200 不保证通知发送成功，平台可能在 HTTP 200 回执中明确拒绝。`success` 仅表示平台已接受，不代表最终用户已收到。
+
+未启用或缺少配置返回 400，记录不存在或已过期返回 404，并发手动发送或重试成功/进行中记录返回 409。记录写入失败返回 500；如果发送已发生但结果落库失败，接收结果可能未知，切勿盲目自动重试。
+
+记录字段：`id`、`kind`（`alert` / `test` / `retry`）、`retry_of`（原记录 ID，非重试为 0）、`platform`、`status`、`created_at`、`finished_at`、`elapsed_ms`、`http_status`（没有响应时为 0）、`summary`、`error_message`。不包含渠道 URL、凭据、平台原始回执或上游错误正文。
+
+测试和重试不调用模型，不修改正式告警状态或冷却时间。重试生成独立记录，并明确标记为历史摘要，不完整重放旧消息详情；使用的是请求开始时已保存的渠道，而非历史地址。超时或断线可能发生在平台已经接收之后，重发可能重复。
+
+只有实际尝试发送时才建立记录；过滤、冷却和状态未变化导致的跳过不记入历史。新增记录时清理 90 天之前和最近 1,000 条之外的非进行中记录；重启遗留 `sending` 标为 `unknown`，不会自动重发。
+
 ## 用量统计
 
 ### `GET /api/admin/billing?days=30`（只读可用）
@@ -240,11 +268,81 @@ curl -X POST -b cookies.txt -H "X-CSRF-Token: $CSRF" -H 'Content-Type: applicati
 curl -b cookies.txt 'http://127.0.0.1:8080/api/admin/billing?days=7'
 ```
 
+## 模型重测与批量管理
+
+### `POST /api/admin/detection/selected`
+
+仅管理员。指定模型：
+
+```json
+{"targets":[{"provider_id":"openai-main","model":"model-a"}]}
+```
+
+或重测最新报告失败项：
+
+```json
+{"failed_only":true,"provider_id":"openai-main"}
+```
+
+`provider_id` 可省略以选择所有 Provider 的失败模型；`targets` 与 `failed_only` 互斥，每次 1–1000 个模型。仅当前有效检测范围内的模型可选，失败项仅指 `error`。返回 `202` / `AcceptedCheck`，任务类型 `models` 或 `failed`；`400` 表示选择为空或无效，`409` 已运行，`429` 预算用尽，`503` 关闭中。模型重测不清除发现错误，不刷新其他模型的结果或时间，不参与正式告警。
+
+### `POST /api/admin/providers/batch`
+
+仅管理员，原子更新 1–1000 个 Provider：
+
+```json
+{"ids":["provider-a","provider-b"],"action":"group","group":"production"}
+```
+
+`action` 支持 `enable`、`disable`、`pause`、`resume`、`group`。启用和参与检测为独立开关，`enable` 不会顺便清除暂停。返回更新后的 `AdminConfig`；无效 ID 时整次失败。复制配置由前端使用现有创建接口完成，不复制密钥。
+
+## 预算与导出
+
+均仅允许管理员：
+
+| 接口 | 响应 |
+| --- | --- |
+| `GET /api/admin/budget` | `day`、`used`、`limit`、`remaining`、`exhausted`、`resets_at`；limit=0 表示不限 |
+| `GET /api/admin/export?kind=history&start=2026-10-01&end=2026-10-06&provider_id=example&model=model-a` | 带 BOM 的 UTF-8 CSV |
+| `GET /api/admin/diagnostics` | 明确白名单的脱敏诊断 JSON |
+
+导出 `kind` 为 `history` / `usage`，起止日期必填、UTC 且含结束日，最多 366 天、10000 行。Provider 和模型过滤为可选的精确匹配。超过行数返回 `413`，不返回截断文件。历史导出不含原始错误/响应，诊断不含名称、地址、提示词、用户或凭据。详见[数据导出](monitoring-features.md#数据导出)。
+
 ## Prometheus 指标
 
 ### `GET /metrics`（只读可用）
 
-需有效会话 Cookie，即使监控页公开也需要登录。常规启动默认注册；自定义嵌入服务未调用 `SetMetrics` 时返回 `404`。旧版静态 Bearer 抓取不再可用，见[指标采集](operations.md#prometheus-指标)。
+需有效会话 Cookie，或独立指标凭据的 `Authorization: Bearer <token>` 请求头；不接受 URL 查询参数。凭据只对 `GET /metrics` 生效。常规启动默认注册；自定义嵌入服务未调用 `SetMetrics` 时返回 `404`。旧管理 Bearer 无效，见[指标采集](operations.md#prometheus-指标)。
+
+### 指标凭据管理
+
+仅管理员会话可访问，写操作需要 CSRF：
+
+| 接口 | 行为 |
+| --- | --- |
+| `GET /api/admin/metrics-tokens` | 列出 ID、名称、创建/轮换时间，不返回凭据或哈希 |
+| `POST /api/admin/metrics-tokens` | body 为 `{"name":"prometheus"}`，返回 `201` 和含 `token` 的新凭据 |
+| `POST /api/admin/metrics-tokens/{id}/rotate` | 原子轮换，返回 `200` 和新的 `token`，旧值立即失效 |
+| `DELETE /api/admin/metrics-tokens/{id}` | 撤销，返回 `{"ok":true}` |
+
+名称 1–64 字符，最多 20 个凭据。完整值仅创建/轮换时返回，服务级凭据无自动过期，不随管理员改密而失效，需显式轮换/撤销。不存在的 ID 返回 `404`。
+
+## 系统更新
+
+仅管理员会话可用，POST 需要 CSRF：
+
+| 接口 | 行为 |
+| --- | --- |
+| `GET /api/admin/updates` | 当前版本、commit、平台、部署能力、最近更新任务和一次性 `request_id`；不请求 GitHub |
+| `POST /api/admin/updates/check` | `{"channel":"stable"}` 或 `{"channel":"preview"}`，返回发布时间、说明、版本、附件可用性；成功结果缓存 5 分钟 |
+| `POST /api/admin/updates/start` | `{"channel":"preview","version":"v1.0.0-rc.1","confirm":true,"request_id":"状态接口返回的值"}`，接受后返回 `202` 和更新任务，任务 `id` 等于 `request_id` |
+| `POST /api/admin/updates/resolve` | `{"request_id":"本次提交使用的值"}`，使尚未入队的旧请求失效，并返回最新状态及新的提交凭据；不会启动或重试安装 |
+
+版本不是检查到的更高版本、通道不合法或缺少提交凭据返回 `400`；凭据已失效、部署不支持、检测正在运行或已有未确认更新返回 `409`；网络、状态文件或执行器不可用返回 `503`。`202` 只代表请求已排队，不代表更新成功。执行器可能在应用停服期间更新状态，重新连接后继续查询。
+
+`request_id` 是 32 位十六进制的一次性凭据，排队、结果确认或应用重启后失效。同一时刻不同管理页面可能拿到相同凭据，只有最先受理的请求能入队。提交期间可继续 GET 查询状态。提交超时、断线或收到 `5xx` 后，调用 `resolve` 确认结果，不要自动重发 `start`。结果中的任务 ID、版本和通道匹配时继续跟踪任务；不匹配时，旧请求已不能再入队，但它也可能已结束并被更晚任务覆盖，或被另一管理页面的提交抢先受理。确认接口失败时保持结果未知，待恢复连接后重试确认。再次安装必须由用户重新确认，并使用最新凭据。
+
+任务状态为 `pending`、`running`、`succeeded`、`failed`、`rolled_back` 或 `recovery_required`。`stage` 提供核对、下载、校验、备份、安装、重启及恢复阶段。断电后持续 `running` 不表示仍有进程运行，需结合 systemd 日志排查。详见[系统更新](system-updates.md)。
 
 ## 请求体限制
 

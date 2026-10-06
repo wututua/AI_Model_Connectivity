@@ -70,6 +70,8 @@ EventSource 不可用或连接失败时，退避轮询间隔为 30、60、120 �
 
 任务最长 30 分钟，不随浏览器切页或断网取消。`409` 表示已有任务运行。任务 `total` 只统计本任务实际探测，不包括合并报告中保留的其他 Provider 和发现失败补出的 `unknown` 样本。
 
+模型级启动使用 `CheckSelection`（明确 `targets` 或 `failed_only`），任务类型为 `models` / `failed`。未重测模型保留原时间和历史，不刷新 Provider 的完整检测时间；仅完整全量检查参与正式告警。`progress` 与正式报告独立，阶段包括模型发现、检测、保存及通知。预算耗尽返回 `429`，处理中耗尽则任务以错误结束，已确认用量仍保存。
+
 ## 配置编辑
 
 ### 敏感字段
@@ -83,6 +85,8 @@ EventSource 不可用或连接失败时，退避轮询间隔为 30、60、120 �
 已有 Provider 更换 Base URL 时必须重新填写 Key 或显式清除，不能把旧 Key 自动发送到新地址。规则同样适用于模型同步与配置导入，校验失败时整次更新不生效。
 
 设置接口提交完整 `RuntimeSettings`，不是部分 PATCH。导入整体替换 settings 与 providers；导出不含凭据、用户和会话，不是数据库备份。
+
+Provider 新增 `group`、`tags`、`probe`，运行设置新增预算、防抖与维护窗口字段，详见[检测与运维功能](monitoring-features.md)。旧客户端的完整 PUT 若省略新字段，会恢复其默认值。指标凭据是单独的服务级授权，仅可读取 `/metrics`，不能作为管理 API 的会话。
 
 ### 模型选择
 
@@ -153,5 +157,8 @@ EventSource 不可用或连接失败时，退避轮询间隔为 30、60、120 �
 | `BillingSummary` | 查询范围、总 Token、总探测次数、`per_model` 与 `daily` |
 | `BillingItem` | Provider、模型、输入/输出/总 Token 与探测次数 |
 | `BillingDaily` | UTC 日期 `day`、输入/输出/总 Token 与探测次数 |
+| `NotificationDelivery` | 通知发送尝试，含类型、重试来源、平台类型、结果、时间、HTTP 状态与安全摘要；仅管理员可读 |
 
 用量最多保留 365 天，包含失败响应中上游明确返回的有效 usage；未上报的费用无法推算，不能作为供应商账单。
+
+通知发送接口返回 200 仅表示尝试结果已记录，需检查 `NotificationDelivery.status`，不能套用检测任务的 202 语义。记录状态为 `sending` / `success` / `error` / `unknown`，其中 `success` 仅表示平台接受。测试和重试不改变正式告警状态，详见[通知 API](api.md#通知记录)。
