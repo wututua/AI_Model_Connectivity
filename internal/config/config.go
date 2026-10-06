@@ -1,7 +1,6 @@
 package config
 
 import (
-	"bufio"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -65,15 +64,9 @@ type ProviderConfig struct {
 	ProbeEnabled       bool     `json:"probe_enabled"`
 }
 
-func Load(path string) (Config, error) {
+func Load() (Config, error) {
 	cfg := defaults()
 	values := map[string]string{}
-	if path == "" {
-		path = ".env"
-	}
-	if err := readEnvFile(path, values); err != nil && !os.IsNotExist(err) {
-		return cfg, err
-	}
 	for _, item := range os.Environ() {
 		parts := strings.SplitN(item, "=", 2)
 		if len(parts) == 2 {
@@ -165,32 +158,6 @@ func defaults() Config {
 		NotifyPlatform:            "webhook",
 		NotifyOnRecovery:          true,
 	}
-}
-
-func readEnvFile(path string, values map[string]string) error {
-	file, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		line = strings.TrimPrefix(line, "export ")
-		parts := strings.SplitN(line, "=", 2)
-		if len(parts) != 2 {
-			continue
-		}
-		key := strings.TrimSpace(parts[0])
-		value := strings.TrimSpace(parts[1])
-		value = strings.Trim(value, "\"'")
-		values[key] = value
-	}
-	return scanner.Err()
 }
 
 func loadProviders(values map[string]string) []ProviderConfig {

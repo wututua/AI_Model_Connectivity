@@ -47,7 +47,7 @@
 | `GET /health` | 公开 | 公开 |
 | `GET /api/status`、`/api/events` | 允许；登录要求由开关控制 | 同左 |
 | `GET /api/admin/detection`、`providers`、`tasks`、`tasks/{id}`、`billing`、`/metrics` | ✅ | ✅ |
-| 其他 `/api/admin/*`（config、settings、providers 写、users、config/import、reload、检测触发） | ✅ | ❌ 403 |
+| 其他 `/api/admin/*`（config、settings、providers 写、users、config/import、检测触发） | ✅ | ❌ 403 |
 
 `/api/admin/config` 与 `/api/admin/config/export` 即使管理员访问也**不返回** Provider API Key 与通知凭据，只返回 `api_key_set` / `*_set` 布尔。状态页开关同时保护 REST 与 SSE；SSE 在每次发送报告前及每 5 秒保活时重新检查会话和策略，失效发送 `auth-required` 并断开。已发送或下载的数据无法追溯撤回。
 

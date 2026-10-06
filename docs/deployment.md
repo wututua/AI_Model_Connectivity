@@ -22,6 +22,7 @@ docker compose up -d
 
 - 镜像内 `APP_HOST=0.0.0.0`。未提供初始密码时会生成并打印到启动日志，首次登录要求修改。
 - 数据卷 `./data:/app/data` 持久化 SQLite。
+- 启动变量通过 Compose 的 `environment` 配置；未列出的变量需显式添加，Provider 等日常配置通过后台维护。
 - 健康检查：容器内执行 `model-connectivity healthcheck`（30s 间隔，start_period 10s）。
 
 Linux 绑定挂载前请准备目录权限（容器以 `65532:65532` 运行）：
@@ -58,8 +59,8 @@ GitHub Actions 会把多架构镜像推送到 `<DOCKERHUB_USERNAME>/model-connec
 
 ## 4. 二进制部署
 
-1. 从 [GitHub Releases](https://github.com/wututua/AI_Model_Connectivity/releases) 下载对应平台压缩包，核对 `SHA256SUMS.txt` 后解压（可执行文件统一命名 `model-connectivity`，Windows 加 `.exe`；另含 `.env.example`、`README.md`、`LICENSE`、`docs/`、`assets/`、`web/` 及字体许可）。
-2. `cp .env.example .env` 并填写 Provider 与初始管理员 `ADMIN_USERNAME` / `ADMIN_PASSWORD`（也可使用启动日志生成的密码）。
+1. 从 [GitHub Releases](https://github.com/wututua/AI_Model_Connectivity/releases) 下载对应平台压缩包，核对 `SHA256SUMS.txt` 后解压（可执行文件统一命名 `model-connectivity`，Windows 加 `.exe`；另含 `README.md`、`LICENSE`、`docs/`、`assets/`、`web/` 及字体许可）。
+2. 可选：通过进程环境变量设置 `ADMIN_USERNAME` / `ADMIN_PASSWORD`；未指定密码时使用启动日志生成的密码。无需创建配置文件，Provider 稍后在管理面板添加。
 3. 启动：`./model-connectivity`（Windows：`model-connectivity.exe`）。
 
 常用子命令：
@@ -85,7 +86,9 @@ WorkingDirectory=/opt/cg
 ExecStart=/opt/cg/model-connectivity
 Restart=always
 RestartSec=5
-EnvironmentFile=/opt/cg/.env
+Environment=APP_HOST=127.0.0.1
+Environment=APP_PORT=8080
+Environment=DATA_DIR=/opt/cg/data
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
@@ -129,7 +132,7 @@ location /api/events {
 ## 7. 升级与回滚
 
 1. 备份 `data/`（含 SQLite 与 WAL）。
-2. 替换二进制或镜像 tag，重启。
+2. 将旧的文件式启动配置迁移到进程环境变量（Compose 使用 `environment`，systemd 使用 `Environment=`），确认 `DATA_DIR`、`DATABASE_PATH`、监听地址和 `SECURE_COOKIES` 保持原值，再替换二进制或镜像 tag 并重启。Provider 和运行设置继续读取原 SQLite 数据库，通过后台修改。
 3. 首次启动日志出现 `server started` 且 `/health` 返回 `{"ok":true}` 即成功。
 4. 旧版本升级账号系统：符合密码规则的旧管理 Token 迁移为初始管理员密码，否则生成新密码并打印到日志；首次登录必须改密。
 5. 旧 Bearer 和只读分享密钥停止工作；为只读访问者创建普通用户。Prometheus 抓取也需改为维护有效登录会话。

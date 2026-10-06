@@ -114,7 +114,7 @@ func (r *Runner) collectTargets(ctx context.Context) ([]Target, []ProviderError)
 		}
 		logo := provider.IconFor(item.ID(), item.Type(), item.Name())
 		for _, model := range models {
-			key := item.ID() + "::" + model
+			key := provider.ModelKey(item.ID(), model)
 			if seen[key] {
 				continue
 			}
@@ -209,7 +209,7 @@ func resultPayload(target Target, status string, latency int, preview, errText s
 		LatencyMS:            latency,
 		ResponsePreview:      preview,
 		Error:                errText,
-		HistoryKey:           target.ProviderID + "::" + target.Model,
+		HistoryKey:           provider.ModelKey(target.ProviderID, target.Model),
 		PromptTokens:         usage.PromptTokens,
 		CompletionTokens:     usage.CompletionTokens,
 		TotalTokens:          usage.TotalTokens,

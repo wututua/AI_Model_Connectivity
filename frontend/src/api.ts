@@ -97,6 +97,4 @@ export const api = {
     request<ConfigExport>('GET', '/api/admin/config/export'),
   importConfig: (data: ConfigImport): Promise<AdminConfig> =>
     request<AdminConfig>('POST', '/api/admin/config/import', data),
-  reloadConfig: (): Promise<AdminConfig> =>
-    request<AdminConfig>('POST', '/api/admin/config/reload'),
 }

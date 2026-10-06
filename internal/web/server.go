@@ -40,7 +40,6 @@ type AdminController interface {
 	DeleteProvider(context.Context, string) error
 	ExportConfig(context.Context) (config.ConfigExport, error)
 	ImportConfig(context.Context, config.ConfigImport) (config.AdminConfig, error)
-	ReloadConfig(context.Context) (config.AdminConfig, error)
 	ListTasks(context.Context, storage.TaskQuery) ([]storage.CheckTask, error)
 	GetTask(context.Context, int64) (storage.CheckTask, error)
 }
@@ -136,7 +135,6 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/admin/config", s.adminConfig)
 	mux.HandleFunc("/api/admin/config/export", s.adminConfigExport)
 	mux.HandleFunc("/api/admin/config/import", s.adminConfigImport)
-	mux.HandleFunc("/api/admin/config/reload", s.adminConfigReload)
 	mux.HandleFunc("/api/admin/settings", s.adminSettings)
 	mux.HandleFunc("/api/admin/providers", s.adminProviders)
 	mux.HandleFunc("/api/admin/providers/", s.adminProviderItem)
@@ -448,23 +446,6 @@ func (s *Server) adminConfigImport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	result, err := s.admin.ImportConfig(r.Context(), value)
-	writeResult(w, result, err)
-}
-
-func (s *Server) adminConfigReload(w http.ResponseWriter, r *http.Request) {
-	if !s.requireAdmin(w, r) {
-		return
-	}
-	if r.Method != http.MethodPost {
-		methodNotAllowed(w)
-		return
-	}
-	result, err := s.admin.ReloadConfig(r.Context())
-	if err == nil {
-		if _, startErr := s.admin.StartCheck(r.Context(), ""); startErr != nil {
-			slog.Warn("reload check not started", "err", startErr)
-		}
-	}
 	writeResult(w, result, err)
 }
 

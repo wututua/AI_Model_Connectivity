@@ -31,8 +31,9 @@ profile.cov
 go.work
 go.work.sum
 
-# Env and generated data
+# Legacy local secrets and generated data
 .env
+.env.*
 data/
 
 # Editor/IDE

@@ -249,9 +249,6 @@ func (stubAdmin) ExportConfig(context.Context) (config.ConfigExport, error) {
 func (stubAdmin) ImportConfig(context.Context, config.ConfigImport) (config.AdminConfig, error) {
 	return config.AdminConfig{}, nil
 }
-func (stubAdmin) ReloadConfig(context.Context) (config.AdminConfig, error) {
-	return config.AdminConfig{}, nil
-}
 func (stubAdmin) ListTasks(context.Context, storage.TaskQuery) ([]storage.CheckTask, error) {
 	return nil, nil
 }
@@ -365,6 +362,24 @@ func TestAdminEndpointAcceptsSession(t *testing.T) {
 	}
 }
 
+func TestRemovedConfigReloadEndpointReturnsNotFound(t *testing.T) {
+	srv, _ := newTestServer(t)
+	handler := srv.Handler()
+	for _, role := range []string{"anonymous", "user", "admin"} {
+		for _, method := range []string{http.MethodGet, http.MethodPost} {
+			req := httptest.NewRequest(method, "/api/admin/config/reload", nil)
+			if role != "anonymous" {
+				authenticateTestRequest(req, role == "user")
+			}
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+			if rec.Code != http.StatusNotFound {
+				t.Errorf("%s %s: got %d, want 404", role, method, rec.Code)
+			}
+		}
+	}
+}
+
 func TestOrdinaryUserCannotReadSensitiveConfig(t *testing.T) {
 	srv, _ := newTestServer(t)
 	for _, path := range []string{"/api/admin/config", "/api/admin/config/export"} {
@@ -392,7 +407,7 @@ func TestNewUserRejectsWeakPassword(t *testing.T) {
 func TestOrdinaryUserRoleAndMutationBoundary(t *testing.T) {
 	server, _ := newTestServer(t)
 	handler := server.Handler()
-	for _, path := range []string{"/api/admin/check", "/api/admin/detection/start", "/api/admin/detection/stop", "/api/admin/providers/p1/rerun", "/api/admin/users", "/api/admin/config/reload", "/api/admin/config/import"} {
+	for _, path := range []string{"/api/admin/check", "/api/admin/detection/start", "/api/admin/detection/stop", "/api/admin/providers/p1/rerun", "/api/admin/users", "/api/admin/config/import"} {
 		request := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{}`))
 		authenticateTestRequest(request, true)
 		response := httptest.NewRecorder()

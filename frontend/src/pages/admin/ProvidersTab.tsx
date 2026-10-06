@@ -13,7 +13,7 @@ import { Switch } from '../../components/ui/switch'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../components/ui/table'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../../components/ui/tooltip'
 import { Feedback, Field, ListSkeleton, LoadingButton, useAutoMsg } from './shared'
-import { mergeModels } from '../../utils/models'
+import { mergeModels, parseModels } from '../../utils/models'
 
 type EditingState = SafeProviderConfig | 'new' | null
 
@@ -175,6 +175,7 @@ function ProviderDialog({ value, onOpenChange, onSave }: { value: EditingState; 
     api_key: '', clear_api_key: false, models: mergeModels(initial?.models ?? []), enabled: initial?.enabled ?? true, probe_enabled: initial?.probe_enabled ?? true,
   })
   const [saving, setSaving] = useState(false)
+  const [modelDraft, setModelDraft] = useState('')
   const [error, setError] = useState('')
   const [available, setAvailable] = useState<string[]>([])
   const [syncing, setSyncing] = useState(false)
@@ -217,11 +218,14 @@ function ProviderDialog({ value, onOpenChange, onSave }: { value: EditingState; 
     if (saving || syncing) return
     if (!form.id.trim() || !form.name.trim() || !form.base_url.trim()) { setError('ID、名称和 Base URL 均为必填项'); return }
     if (keyConfirmationRequired) { setError(keyChangeError); return }
+    const models = mergeModels(form.models, parseModels(modelDraft))
+    setForm(current => ({ ...current, models }))
+    setModelDraft('')
     setSaving(true); setError('')
     try {
       await onSave(initial?.id ?? null, {
         id: form.id.trim(), name: form.name.trim(), type: form.type.trim() || 'openai', base_url: form.base_url.trim(), api_key: form.api_key,
-        clear_api_key: form.clear_api_key, models: form.models, enabled: form.enabled, probe_enabled: form.enabled && form.probe_enabled,
+        clear_api_key: form.clear_api_key, models, enabled: form.enabled, probe_enabled: form.enabled && form.probe_enabled,
       })
     } catch (cause) { setError((cause as Error).message); setSaving(false) }
   }
@@ -237,7 +241,7 @@ function ProviderDialog({ value, onOpenChange, onSave }: { value: EditingState; 
           <Field label="Base URL" htmlFor="provider-url"><Input id="provider-url" type="url" value={form.base_url} onChange={event => set('base_url', event.target.value)} placeholder="https://api.openai.com/v1" className="font-mono" /></Field>
           <Field className="md:col-span-2" label={`API Key${initial?.api_key_set ? (endpointChanged ? '（地址已变更）' : '（留空保留现有值）') : ''}`} htmlFor="provider-key"><Input id="provider-key" type="password" value={form.api_key} onChange={event => set('api_key', event.target.value)} placeholder={initial?.api_key_set ? '已设置' : 'sk-...'} className="font-mono" /></Field>
           {initial?.api_key_set && <ToggleRow className="md:col-span-2" label="清除现有 API Key" description="保存后移除服务端存储的 Key" checked={form.clear_api_key} onCheckedChange={value => set('clear_api_key', value)} danger />}
-          <div className="min-w-0 md:col-span-2"><ModelPicker value={form.models} available={available} onChange={models => set('models', models)} onSync={sync} syncing={syncing} disabled={saving} syncError={syncError} syncMessage={syncMessage} /></div>
+          <div className="min-w-0 md:col-span-2"><ModelPicker value={form.models} available={available} onChange={models => set('models', models)} draft={modelDraft} onDraftChange={setModelDraft} onSync={sync} syncing={syncing} disabled={saving} syncError={syncError} syncMessage={syncMessage} /></div>
           <ToggleRow className="md:col-span-2" label="启用 Provider" description="停用后不会展示或参与检测" checked={form.enabled} onCheckedChange={value => set('enabled', value)} />
           <ToggleRow className="md:col-span-2" label="参与检测" description="关闭后保留配置和展示，但跳过连通性探测" checked={form.probe_enabled} onCheckedChange={value => set('probe_enabled', value)} disabled={!form.enabled} />
         </fieldset>

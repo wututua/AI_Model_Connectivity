@@ -98,6 +98,7 @@ func Build(cfg config.Config, results []probe.Result, providerErrors []probe.Pro
 
 	modelResults := make([]ModelResult, 0, len(results))
 	for _, result := range results {
+		result.HistoryKey = providerpkg.ModelKey(result.ProviderID, result.Model)
 		if result.CheckedAt == "" {
 			result.CheckedAt = now.UTC().Format(time.RFC3339)
 		}
@@ -317,7 +318,7 @@ func WithDiscoveryGaps(cfg config.Config, results []probe.Result, failures []pro
 				ProviderInstanceID: provider.ID, ProviderInstanceName: provider.Name,
 				Model: model, CurrentModel: models[0], IsCurrent: model == models[0],
 				Status: "unknown", Error: failure,
-				HistoryKey: provider.ID + "::" + model, CheckedAt: time.Now().UTC().Format(time.RFC3339),
+				HistoryKey: providerpkg.ModelKey(provider.ID, model), CheckedAt: time.Now().UTC().Format(time.RFC3339),
 			})
 		}
 	}

@@ -61,3 +61,27 @@ func TestChatValidatesCompletionAndPreservesUsage(t *testing.T) {
 		})
 	}
 }
+
+func TestErrorEnvelopePreservesReportedUsage(t *testing.T) {
+	for _, status := range []int{200, 400, 429, 503} {
+		for _, usageJSON := range []string{
+			`{"prompt_tokens":3,"completion_tokens":5,"total_tokens":8}`,
+			`{"prompt_tokens":3,"completion_tokens":5}`,
+		} {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(status)
+				w.Write([]byte(`{"error":{"message":"failed secret-key"},"usage":` + usageJSON + `}`))
+			}))
+			client := NewOpenAICompatible(config.ProviderConfig{BaseURL: server.URL, APIKey: "secret-key"})
+			text, usage, err := client.Chat(context.Background(), "fixture", "", "ping")
+			client.CloseIdleConnections()
+			server.Close()
+			if err == nil || text != "" || strings.Contains(err.Error(), "secret-key") {
+				t.Fatalf("HTTP %d: unsafe or missing error: %v", status, err)
+			}
+			if usage != (Usage{PromptTokens: 3, CompletionTokens: 5, TotalTokens: 8}) {
+				t.Errorf("HTTP %d discarded reported usage: %+v", status, usage)
+			}
+		}
+	}
+}

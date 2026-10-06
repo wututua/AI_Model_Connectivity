@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Download, FileJson, RefreshCw, Upload } from 'lucide-react'
+import { Download, Upload } from 'lucide-react'
 import { api } from '../../api'
 import type { ConfigExport, ConfigImport } from '../../types'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '../../components/ui/alert-dialog'
@@ -41,13 +41,6 @@ export function ConfigTab() {
     finally { setLoading(null) }
   }
 
-  const reload = async () => {
-    setLoading('reload'); setMessage('')
-    try { await api.reloadConfig(); setMessage('已从 .env 重新加载配置') }
-    catch (cause) { setMessage(`错误：${(cause as Error).message}`) }
-    finally { setLoading(null) }
-  }
-
   return (
     <div className="space-y-5">
       <Feedback message={message} />
@@ -61,10 +54,6 @@ export function ConfigTab() {
           <CardContent className="space-y-4"><Textarea value={importText} onChange={event => setImportText(event.target.value)} placeholder={'{\n  "settings": { ... },\n  "providers": [ ... ]\n}'} className="min-h-72 resize-none font-mono text-xs" /><Button onClick={() => setConfirmImport(true)} disabled={!importText.trim() || loading !== null}><Upload />导入配置</Button></CardContent>
         </Card>
       </div>
-      <Card>
-        <CardHeader className="flex-row items-start justify-between space-y-0"><div><CardTitle className="flex items-center gap-2"><FileJson className="size-4" />重新加载 .env</CardTitle><CardDescription className="mt-2">重新读取环境配置并热加载，不需要重启服务。</CardDescription></div><LoadingButton variant="outline" onClick={reload} loading={loading === 'reload'}><RefreshCw />重新加载</LoadingButton></CardHeader>
-      </Card>
-
       <AlertDialog open={confirmImport} onOpenChange={setConfirmImport}>
         <AlertDialogContent><AlertDialogHeader><AlertDialogTitle>导入并覆盖当前配置？</AlertDialogTitle><AlertDialogDescription>导入会更新运行设置和 Provider 列表，并立即影响后续检测任务。建议先导出当前配置作为备份。</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel disabled={loading === 'import'}>取消</AlertDialogCancel><AlertDialogAction onClick={event => { event.preventDefault(); importConfig() }} disabled={loading === 'import'}>{loading === 'import' ? '导入中…' : '确认导入'}</AlertDialogAction></AlertDialogFooter></AlertDialogContent>
       </AlertDialog>

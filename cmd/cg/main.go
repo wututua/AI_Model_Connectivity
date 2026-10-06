@@ -32,7 +32,7 @@ func main() {
 		return
 	}
 
-	baseCfg, err := config.Load(".env")
+	baseCfg, err := config.Load()
 	if err != nil {
 		slog.Error("load config", "err", err)
 		os.Exit(1)
@@ -412,47 +412,6 @@ func (a *application) ImportConfig(ctx context.Context, value config.ConfigImpor
 		return config.AdminConfig{}, err
 	}
 	return config.AdminConfigFromConfig(a.currentConfig()), nil
-}
-
-func (a *application) ReloadConfig(ctx context.Context) (config.AdminConfig, error) {
-	a.configMu.Lock()
-	defer a.configMu.Unlock()
-	loaded, err := config.Load(".env")
-	if err != nil {
-		return config.AdminConfig{}, err
-	}
-	current := a.currentConfig()
-	if loaded.AppHost != current.AppHost || loaded.AppPort != current.AppPort || loaded.WebDir != current.WebDir || loaded.DatabasePath != current.DatabasePath || loaded.DataDir != current.DataDir || loaded.SecureCookies != current.SecureCookies {
-		return config.AdminConfig{}, errors.New("changes to listening address, paths or SECURE_COOKIES require a restart")
-	}
-	runtimeCfg, ok, err := a.store.LoadRuntimeConfig(ctx)
-	if err != nil {
-		return config.AdminConfig{}, err
-	}
-	cfg := loaded
-	if ok {
-		cfg = config.ApplyRuntimeConfig(loaded, runtimeCfg)
-		if len(loaded.Providers) > 0 {
-			cfg.Providers = append([]config.ProviderConfig(nil), loaded.Providers...)
-		}
-	}
-	if err := config.ValidateRuntimeSettings(config.SettingsFromConfig(cfg)); err != nil {
-		return config.AdminConfig{}, err
-	}
-	if err := config.ValidateProviders(cfg.Providers); err != nil {
-		return config.AdminConfig{}, err
-	}
-	cfg.Providers = config.ReconcileProviderRevisions(current.Providers, cfg.Providers)
-	if err := a.store.SaveRuntimeConfig(ctx, config.RuntimeConfigFromConfig(cfg)); err != nil {
-		return config.AdminConfig{}, err
-	}
-	a.mu.Lock()
-	a.baseCfg = loaded
-	a.cfg = cfg
-	a.mu.Unlock()
-	a.wakeScheduler()
-	a.publishLatest(ctx)
-	return config.AdminConfigFromConfig(cfg), nil
 }
 
 func (a *application) ListTasks(ctx context.Context, query storage.TaskQuery) ([]storage.CheckTask, error) {

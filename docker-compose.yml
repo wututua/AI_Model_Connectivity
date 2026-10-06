@@ -9,9 +9,6 @@ services:
       - "8080:8080"
     volumes:
       - ./data:/app/data      # SQLite 数据库持久化
-    env_file:
-      - path: .env
-        required: false
     environment:
       # 容器内必须监听 0.0.0.0 才能接收外部流量
       - APP_HOST=0.0.0.0

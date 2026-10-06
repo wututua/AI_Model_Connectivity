@@ -72,6 +72,9 @@ func (c *Client) SendIfNeeded(ctx context.Context, value report.Report) error {
 	}
 	value = filterReport(value, c.cfg.NotifyProviders, c.cfg.NotifyModels)
 	current := alertState(value)
+	if current == "unknown" {
+		return nil
+	}
 	previous, err := c.stateStore.Read()
 	if err != nil {
 		return err
@@ -124,6 +127,19 @@ func inCooldown(previous State, now time.Time, minutes int) bool {
 func alertState(value report.Report) string {
 	if value.ErrorCount > 0 || value.UnknownCount > 0 || len(value.ProviderErrors) > 0 {
 		return "error"
+	}
+	unobserved := false
+	for _, provider := range value.Providers {
+		if provider.Status == "error" {
+			return "error"
+		}
+		if provider.Status == "unknown" {
+			unobserved = true
+		}
+	}
+	// An empty/paused scope or an unchecked provider is not evidence of recovery.
+	if unobserved || value.OKCount+value.SlowCount == 0 {
+		return "unknown"
 	}
 	if value.SlowCount > 0 {
 		return "slow"

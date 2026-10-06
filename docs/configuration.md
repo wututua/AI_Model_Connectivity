@@ -2,16 +2,18 @@
 
 > [项目主页](../README.md) · [文档索引](README.md) · [GitHub 仓库](https://github.com/wututua/AI_Model_Connectivity)
 
-首次启动时，基础配置按 **真实环境变量 > `.env` 文件 > 代码默认值** 解析，然后把可管理的运行时设置和 Provider 写入 SQLite。后续启动时，SQLite 中的运行时设置和 Provider 会覆盖基础配置中的同名值。
+首次启动时，基础配置按 **进程环境变量 > 代码默认值** 解析，然后把可管理的运行时设置和 Provider 写入 SQLite。后续启动时，SQLite 中的运行时设置和 Provider 会覆盖基础配置中的同名值。
 
-`.env` 不存在也能启动；后台修改的运行时参数写入 SQLite，重启后继续生效。需要让 `.env` 中的运行时参数重新进入 SQLite 时，应在管理面板执行热加载，而不是只重启进程。
+程序不读取本地配置文件。无需设置任何变量即可启动；Provider、通知、检测周期等日常配置通过管理面板或 JSON 导入维护，保存到 SQLite 后重启仍然生效。环境变量不会覆盖数据库中已有的运行时设置。
 
-`.env` 语法（见 `internal/config/config.go` 的 `readEnvFile`）：
+启动参数的设置方式：
 
-- 每行 `KEY=VALUE`，`export ` 前缀可选；
-- `#` 开头为注释，空行忽略；
-- 值首尾空白会被裁剪，首尾成对引号会被去掉；
-- 列表类变量支持 `,` `;` 换行分隔，自动去重。
+- Bash：`export APP_PORT=8081`，随后启动程序。
+- PowerShell：`$env:APP_PORT = '8081'`，随后启动程序。
+- Docker：通过 `docker run -e APP_PORT=8081` 或 Compose 的 `environment` 注入，并同步调整端口映射。
+- 列表类变量支持逗号、分号和换行分隔，自动去重。
+
+从旧版升级时，请先将文件式启动配置迁移到上述环境变量。尤其要保留 `DATA_DIR`、`DATABASE_PATH` 和 `SECURE_COOKIES` 的原值，避免连接到另一份数据库或改变安全设置；不要通过删除数据库来重新初始化配置。
 
 ---
 
@@ -95,10 +97,13 @@
 
 1. 平台不是 `disabled` 且配置完整（telegram 需 token + chat_id，其他需 webhook URL）；
 2. 按 `NOTIFY_PROVIDERS` / `NOTIFY_MODELS` 过滤后重新计算聚合状态；
-3. 与上次告警状态 `ok`/`slow`/`error` **不同**才发；
-4. `ok` 且上次状态为空（首次启动）不发；
-5. `ok` 且 `NOTIFY_ON_RECOVERY=false` 只落状态不发消息；
-6. 冷却期内不发，且不更新状态（下一轮仍可发）。
+3. 范围内存在没有模型结果的未检测 Provider，或范围为空/全部暂停且没有明确错误时，不发送通知，也不更新上次告警状态和冷却时间；
+4. 与上次告警状态 `ok`/`slow`/`error` **不同**才发；已知模型的 `unknown` 结果和明确的模型发现失败仍按异常处理；
+5. `ok` 且上次状态为空（首次启动）不发；
+6. `ok` 且 `NOTIFY_ON_RECOVERY=false` 只落状态不发消息；
+7. 冷却期内不发，且不更新状态（下一轮仍可发）。
+
+两个过滤条件同时设置时取交集。按模型过滤时，模型发现失败只计入已匹配模型结果的 Provider，或被带 Provider 前缀的模型条件明确选中的 Provider。仅填写裸模型名且该 Provider 没有任何匹配结果时，不推断其属于通知范围。无关 Provider 的发现失败不会触发该范围的告警；没有检测证据也不会被当作恢复。
 
 各平台消息体：
 
@@ -115,15 +120,18 @@
 
 ## 6. Provider 配置
 
-```env
-PROVIDER_1_ID=openai-main
-PROVIDER_1_NAME=OpenAI
-PROVIDER_1_TYPE=openai
-PROVIDER_1_BASE_URL=https://api.openai.com/v1
-PROVIDER_1_API_KEY=sk-xxx
-PROVIDER_1_MODELS=gpt-4o-mini,gpt-4.1-mini
-PROVIDER_1_ENABLED=true
-PROVIDER_1_PROBE_ENABLED=true
+日常管理请使用后台 **Provider** 页面。下面的 Bash 环境变量示例仅用于首次初始化空数据库：
+
+```bash
+export PROVIDER_1_ID=openai-main
+export PROVIDER_1_NAME=OpenAI
+export PROVIDER_1_TYPE=openai
+export PROVIDER_1_BASE_URL=https://api.openai.com/v1
+export PROVIDER_1_API_KEY='<替换为实际密钥>'
+export PROVIDER_1_MODELS=gpt-4o-mini,gpt-4.1-mini
+export PROVIDER_1_ENABLED=true
+export PROVIDER_1_PROBE_ENABLED=true
+go run ./cmd/cg
 ```
 
 - 编号从 `1` 开始连续递增；某一组所有字段都为空即停止读取。
@@ -149,19 +157,18 @@ PROVIDER_1_PROBE_ENABLED=true
 
 `provider.IconFor(id, type, name)` 依次用 ID → TYPE → NAME 小写精确匹配内置图标表；未命中则把 `_`、`-`、空格拆分后的关键词做前缀/包含匹配。内置键见仓库 README 的图标清单；未匹配时前端回退为名称首两字母占位块。
 
-## 7. 运行时修改与热加载
+## 7. 运行时修改与重启
 
 | 入口 | 行为 |
 |------|------|
 | 管理面板 **设置** / `PUT /api/admin/settings` | 校验后写入 SQLite 并立即生效，同时唤醒调度器 |
 | 管理面板 **Provider** / `POST,PUT,DELETE /api/admin/providers` | 同上；`api_key` 空表示保留旧值，`clear_api_key=true` 清除 |
 | `POST /api/admin/config/import` | 整体替换 settings + providers |
-| `POST /api/admin/config/reload` | 重读 `.env`；仅当 `.env` 有 Provider 时覆盖库内 Provider；成功后异步触发一次检测 |
 
-`reload` 在监听地址、`WEB_DIR`、`DATA_DIR`、`DATABASE_PATH`、`SECURE_COOKIES` 发生变化时返回错误并拒绝加载——这些必须重启。`ADMIN_USERNAME` 和 `ADMIN_PASSWORD` 仅供首次初始化；改环境变量或重启都不会重置已有账号。
+监听地址、`WEB_DIR`、`DATA_DIR`、`DATABASE_PATH`、`SECURE_COOKIES` 通过环境变量设置，变更后必须重启。`ADMIN_USERNAME` 和 `ADMIN_PASSWORD` 仅供首次初始化；改环境变量或重启都不会重置已有账号。
 
 `STATUS_LOGIN_REQUIRED` 属于运行时设置，SQLite 保存值优先于环境变量。管理员可在 **系统设置 → 访问控制** 修改；它同时保护状态 REST 和 SSE，不只是前端页面。用户管理独立于配置导入导出。
 
-`PROBE_PROMPT`、`PROBE_SYSTEM_PROMPT` 和 `AUTO_CHECK_RUN_ON_START` 不属于 SQLite `RuntimeSettings`：两个提示词来自基础配置，可通过 `.env` 热加载；`AUTO_CHECK_RUN_ON_START` 只在进程启动时判断。Provider 默认由 SQLite 接管，只有热加载的 `.env` 明确包含 Provider 时才会覆盖并保存 Provider 列表。
+`PROBE_PROMPT`、`PROBE_SYSTEM_PROMPT` 和 `AUTO_CHECK_RUN_ON_START` 不属于 SQLite `RuntimeSettings`，只在进程启动时读取。修改提示词需更新环境变量并重启。已保存的 Provider 由 SQLite 管理，只能通过后台或 JSON 导入更新，不会被后续启动环境变量替换。
 
 敏感字段写策略：告警 webhook / Telegram token / chat id 在 GET 接口只返回 `*_set` 布尔；PUT 时留空表示保持不变，传 `clear_*=true` 表示清除。

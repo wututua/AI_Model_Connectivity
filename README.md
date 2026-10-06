@@ -58,7 +58,7 @@ cd AI_Model_Connectivity
 
 ### 启动服务
 
-需要 Go 1.26.8。仓库已包含构建后的前端资源，因此首次体验不需要安装 Node.js，也不要求预先创建 `.env`。
+需要 Go 1.26.8。仓库已包含构建后的前端资源，因此首次体验不需要安装 Node.js 或准备配置文件。日常配置通过管理面板保存到 SQLite，启动参数可通过进程环境变量指定。
 
 ```bash
 go run ./cmd/cg
@@ -86,16 +86,15 @@ Initial administrator password: <随机生成的密码>
 Docker Compose 会从当前源码构建镜像。建议预设 `ADMIN_PASSWORD` 并通过 HTTPS 反向代理访问；HTTPS 部署设置 `SECURE_COOKIES=true`。
 
 ```bash
-cp .env.example .env
-# 编辑 .env，填写 ADMIN_PASSWORD；Provider 也可以稍后在管理面板添加
+export ADMIN_PASSWORD='<替换为符合规则的初始密码>'
+# Provider 在管理面板添加
 docker compose up -d --build
 ```
 
 Windows PowerShell：
 
 ```powershell
-Copy-Item .env.example .env
-# 编辑 .env 后启动
+$env:ADMIN_PASSWORD = '<替换为符合规则的初始密码>'
 docker compose up -d --build
 ```
 
@@ -121,7 +120,7 @@ docker run -d \
 
 ### 预编译二进制
 
-发布流水线提供 Linux、Windows、macOS 的 amd64/arm64 压缩包，包内包含固定名称的可执行文件、`.env.example`、README、LICENSE、`docs/`、`assets/` 和预构建的 `web/`（含字体许可），另提供 SHA-256 校验文件：
+发布流水线提供 Linux、Windows、macOS 的 amd64/arm64 压缩包，包内包含固定名称的可执行文件、README、LICENSE、`docs/`、`assets/` 和预构建的 `web/`（含字体许可），另提供 SHA-256 校验文件：
 
 - [GitHub Releases](https://github.com/wututua/AI_Model_Connectivity/releases)
 
@@ -129,18 +128,21 @@ docker run -d \
 
 ## 配置 Provider
 
-推荐在管理面板中维护 Provider。也可以复制 `.env.example` 并使用环境变量初始化：
+推荐在管理面板中维护 Provider。仅首次初始化空数据库时，也可以通过进程环境变量提供初始值，例如 Bash：
 
-```env
-PROVIDER_1_ID=openai-main
-PROVIDER_1_NAME=OpenAI
-PROVIDER_1_TYPE=openai
-PROVIDER_1_BASE_URL=https://api.openai.com/v1
-PROVIDER_1_API_KEY=sk-xxx
-PROVIDER_1_MODELS=gpt-4o-mini,gpt-4.1-mini
-PROVIDER_1_ENABLED=true
-PROVIDER_1_PROBE_ENABLED=true
+```bash
+export PROVIDER_1_ID=openai-main
+export PROVIDER_1_NAME=OpenAI
+export PROVIDER_1_TYPE=openai
+export PROVIDER_1_BASE_URL=https://api.openai.com/v1
+export PROVIDER_1_API_KEY='<替换为实际密钥>'
+export PROVIDER_1_MODELS=gpt-4o-mini,gpt-4.1-mini
+export PROVIDER_1_ENABLED=true
+export PROVIDER_1_PROBE_ENABLED=true
+go run ./cmd/cg
 ```
+
+数据库已有配置时，环境变量不会覆盖已保存的 Provider 和运行设置；请使用后台编辑或 JSON 配置导入。
 
 `PROVIDER_N_MODELS` 留空时，服务会从 `{BASE_URL}/models` 自动发现模型。`ENABLED=false` 会完全隐藏并停用 Provider；`PROBE_ENABLED=false` 会保留展示但暂停探测。
 
@@ -163,7 +165,7 @@ PROVIDER_1_PROBE_ENABLED=true
 | `AUTO_CHECK_INTERVAL_MIN_HOURS` | `0` | 自动检测最短间隔，`0` 表示关闭 |
 | `AUTO_CHECK_INTERVAL_MAX_HOURS` | `0` | 自动检测最长间隔 |
 
-完整变量、校验规则和热加载语义见 [配置参考](docs/configuration.md)。
+完整变量、校验规则和配置生效方式见 [配置参考](docs/configuration.md)。
 
 ## 管理与监控
 
@@ -174,7 +176,7 @@ PROVIDER_1_PROBE_ENABLED=true
 | 系统设置 | `/admin/settings` | 修改探测、历史、调度、告警和访问控制配置 |
 | 任务历史 | `/admin/tasks` | 筛选检测任务并查看结果明细 |
 | Token 用量 | `/admin/billing` | 查看汇总、每日趋势和模型用量 |
-| 配置管理 | `/admin/config` | 导入导出 JSON 配置、热加载 `.env` |
+| 配置管理 | `/admin/config` | 导入导出 JSON 配置 |
 | 用户管理 | `/admin/users` | 管理员新增、编辑、禁用、删除用户及重置密码 |
 | 账户安全 | `/admin/account` | 修改自己的密码 |
 | 登录 | `/login` | 管理员和普通用户共用登录入口 |
@@ -191,7 +193,7 @@ PROVIDER_1_PROBE_ENABLED=true
 |------|------|
 | [文档索引](docs/README.md) | 按使用者、运维者和开发者分类的阅读入口 |
 | [系统架构](docs/architecture.md) | 模块边界、启动流程、检测时序和状态模型 |
-| [配置参考](docs/configuration.md) | 环境变量、Provider、校验与热加载 |
+| [配置参考](docs/configuration.md) | 环境变量、Provider、校验与配置持久化 |
 | [HTTP API](docs/api.md) | 认证、错误码、端点和数据结构 |
 | [前后端对接](docs/backend-api.md) | 前端视角的 API、SSE 和类型契约 |
 | [数据存储](docs/data-storage.md) | SQLite 表、事务、统计、迁移和备份 |

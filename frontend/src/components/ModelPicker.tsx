@@ -10,6 +10,8 @@ interface ModelPickerProps {
   value: string[]
   available: string[]
   onChange: (models: string[]) => void
+  draft: string
+  onDraftChange: (value: string) => void
   onSync: () => void
   syncing: boolean
   disabled?: boolean
@@ -17,11 +19,10 @@ interface ModelPickerProps {
   syncMessage: string
 }
 
-export function ModelPicker({ value, available, onChange, onSync, syncing, disabled, syncError, syncMessage }: ModelPickerProps) {
+export function ModelPicker({ value, available, onChange, draft: input, onDraftChange: setInput, onSync, syncing, disabled, syncError, syncMessage }: ModelPickerProps) {
   const id = useId()
   const [expanded, setExpanded] = useState(false)
   const [adding, setAdding] = useState(false)
-  const [input, setInput] = useState('')
   const [query, setQuery] = useState('')
   const [manualModels, setManualModels] = useState(value)
   const [message, setMessage] = useState('')
@@ -69,12 +70,20 @@ export function ModelPicker({ value, available, onChange, onSync, syncing, disab
     <div className="flex flex-wrap items-center gap-2">
       <Button type="button" variant="outline" size="sm" disabled={disabled} aria-expanded={adding} aria-controls={`${id}-manual`} onClick={() => { setAdding(current => !current); setMessage('') }}><Plus />手动添加</Button>
       <Button type="button" variant="outline" size="sm" disabled={disabled || syncing} onClick={onSync} className="border-success/35 text-success hover:bg-success/10 hover:text-success"><RefreshCw className={syncing ? 'animate-spin' : ''} />{syncing ? '同步中' : '同步模型'}</Button>
-      <Tooltip><TooltipTrigger asChild><Button type="button" variant="outline" size="icon" className="size-8 border-destructive/35 text-destructive hover:bg-destructive/10 hover:text-destructive" disabled={disabled || !value.length} aria-label="清除所有模型" onClick={() => { onChange([]); setMessage('') }}><Trash2 /></Button></TooltipTrigger><TooltipContent>清空选择，恢复自动获取</TooltipContent></Tooltip>
+      <Tooltip><TooltipTrigger asChild><Button type="button" variant="outline" size="icon" className="size-8 border-destructive/35 text-destructive hover:bg-destructive/10 hover:text-destructive" disabled={disabled || (!value.length && !input.trim())} aria-label="清除所有模型" onClick={() => { onChange([]); setInput(''); setMessage('') }}><Trash2 /></Button></TooltipTrigger><TooltipContent>清空选择，恢复自动获取</TooltipContent></Tooltip>
     </div>
     {adding && <div id={`${id}-manual`} className="flex min-w-0 gap-2 animate-enter">
       <Input value={input} onChange={event => { setInput(event.target.value); setMessage('') }} disabled={disabled} className="min-w-0 flex-1 font-mono text-xs" placeholder="模型 ID" aria-label="手动添加模型" autoFocus
         onKeyDown={event => { if (event.key === 'Enter' && !event.nativeEvent.isComposing) { event.preventDefault(); add(input) } }}
-        onPaste={event => { const text = event.clipboardData.getData('text'); if (/[\n\r,;，；]/.test(text)) { event.preventDefault(); add(text) } }} />
+        onPaste={event => {
+          const text = event.clipboardData.getData('text')
+          if (/[\n\r,;，；]/.test(text)) {
+            event.preventDefault()
+            const start = event.currentTarget.selectionStart ?? input.length
+            const end = event.currentTarget.selectionEnd ?? start
+            add(input.slice(0, start) + text + input.slice(end))
+          }
+        }} />
       <Button type="button" variant="secondary" size="icon" disabled={disabled || !input.trim()} onClick={() => add(input)} aria-label="添加模型" title="添加模型"><Plus /></Button>
     </div>}
     {message && <p role="status" className="text-xs text-muted-foreground">{message}</p>}

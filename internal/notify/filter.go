@@ -22,6 +22,7 @@ func filterReport(value report.Report, providers, models []string) report.Report
 	filtered.Total = 0
 	filtered.UnknownCount = 0
 	names := map[string]string{}
+	inScope := map[string]bool{}
 	for _, provider := range value.Providers {
 		names[provider.ProviderID] = provider.ProviderName
 	}
@@ -53,21 +54,27 @@ func filterReport(value report.Report, providers, models []string) report.Report
 				copyProvider.UnknownCount++
 			}
 		}
-		if len(copyProvider.Results) == 0 {
+		if len(copyProvider.Results) == 0 && len(modelSet) > 0 &&
+			!matchesModelProvider(modelSet, provider.ProviderID, provider.ProviderName) {
 			continue
 		}
+		inScope[provider.ProviderID] = true
 		copyProvider.ModelCount = len(copyProvider.Results)
-		copyProvider.Status = "ok"
-		copyProvider.StatusLabel = "正常"
-		if copyProvider.ErrorCount > 0 {
-			copyProvider.Status = "error"
-			copyProvider.StatusLabel = "异常"
-		} else if copyProvider.UnknownCount > 0 {
-			copyProvider.Status = "unknown"
-			copyProvider.StatusLabel = "未检测"
-		} else if copyProvider.SlowCount > 0 {
-			copyProvider.Status = "slow"
-			copyProvider.StatusLabel = "较慢"
+		if copyProvider.ModelCount > 0 {
+			copyProvider.Status = "ok"
+			copyProvider.StatusLabel = "正常"
+			if copyProvider.ErrorCount > 0 {
+				copyProvider.Status = "error"
+				copyProvider.StatusLabel = "异常"
+			} else if copyProvider.UnknownCount > 0 {
+				copyProvider.Status = "unknown"
+				copyProvider.StatusLabel = "未检测"
+			} else if copyProvider.SlowCount > 0 {
+				copyProvider.Status = "slow"
+				copyProvider.StatusLabel = "较慢"
+			}
+		} else if copyProvider.Status != "paused" {
+			copyProvider.Status, copyProvider.StatusLabel = "unknown", "未检测"
 		}
 		filtered.Providers = append(filtered.Providers, copyProvider)
 		filtered.OKCount += copyProvider.OKCount
@@ -78,7 +85,9 @@ func filterReport(value report.Report, providers, models []string) report.Report
 	}
 
 	for _, item := range value.ProviderErrors {
-		if matchesProvider(providerSet, item.ProviderID, names[item.ProviderID]) {
+		if matchesProvider(providerSet, item.ProviderID, names[item.ProviderID]) &&
+			(len(modelSet) == 0 || inScope[item.ProviderID] ||
+				matchesModelProvider(modelSet, item.ProviderID, names[item.ProviderID])) {
 			filtered.ProviderErrors = append(filtered.ProviderErrors, item)
 		}
 	}
@@ -86,11 +95,28 @@ func filterReport(value report.Report, providers, models []string) report.Report
 	filtered.ProviderCount = len(filtered.Providers)
 	filtered.OverallStatus = "OPERATIONAL"
 	filtered.OverallClass = "ok"
-	if filtered.ErrorCount > 0 || filtered.UnknownCount > 0 || len(filtered.ProviderErrors) > 0 {
+	if state := alertState(filtered); state == "error" || state == "unknown" {
 		filtered.OverallStatus = "DEGRADED"
 		filtered.OverallClass = "error"
 	}
 	return filtered
+}
+
+func matchesModelProvider(set map[string]bool, providerID, providerName string) bool {
+	for _, name := range []string{providerID, providerName} {
+		if name == "" {
+			continue
+		}
+		for _, separator := range []string{"/", "::"} {
+			prefix := strings.ToLower(name) + separator
+			for selector := range set {
+				if strings.HasPrefix(selector, prefix) && len(selector) > len(prefix) {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 func lowerSet(items []string) map[string]bool {

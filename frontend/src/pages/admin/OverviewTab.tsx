@@ -19,21 +19,46 @@ export function OverviewTab({ readOnly = false }: { readOnly?: boolean }) {
   const [starting, setStarting] = useState(false)
   const [message, setMessage] = useAutoMsg()
   const watchedTask = useRef<number | null>(null)
+  const mounted = useRef(false)
+  const loadRequest = useRef(0)
+  const stateRequest = useRef(0)
+  const summaryRequest = useRef(0)
+  const feedbackRevision = useRef(0)
 
   const load = useCallback(() => {
+    const request = ++loadRequest.current
+    const stateID = ++stateRequest.current
+    const summaryID = ++summaryRequest.current
+    const feedback = feedbackRevision.current
     setLoading(true)
     Promise.all([api.detection(), readOnly ? Promise.resolve(null) : api.config(), api.status().catch(() => null)])
       .then(([runningState, adminConfig, report]) => {
-        setState(runningState)
-        if (runningState.running && !watchedTask.current) watchedTask.current = runningState.task_id
+        if (!mounted.current || request !== loadRequest.current) return
+        if (stateID === stateRequest.current) {
+          setState(runningState)
+          if (runningState.running && !watchedTask.current) watchedTask.current = runningState.task_id
+        }
         setConfig(adminConfig ? { providers: adminConfig.providers, settings: normalizeSettings(adminConfig.settings) } : null)
-        setSummary(report)
+        if (report && summaryID === summaryRequest.current) setSummary(report)
       })
-      .catch(cause => setMessage(`错误：${(cause as Error).message}`))
-      .finally(() => setLoading(false))
+      .catch(cause => {
+        if (mounted.current && request === loadRequest.current && feedback === feedbackRevision.current) {
+          setMessage(`错误：${(cause as Error).message}`)
+        }
+      })
+      .finally(() => { if (mounted.current && request === loadRequest.current) setLoading(false) })
   }, [readOnly, setMessage])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    mounted.current = true
+    load()
+    return () => {
+      mounted.current = false
+      loadRequest.current++
+      stateRequest.current++
+      summaryRequest.current++
+    }
+  }, [load])
   useEffect(() => {
     let active = true
     let pending = false
@@ -41,17 +66,25 @@ export function OverviewTab({ readOnly = false }: { readOnly?: boolean }) {
       if (pending) return
       pending = true
       try {
+        const stateID = ++stateRequest.current
         const value = await api.detection()
         if (!active) return
-        setState(value)
-        if (value.running && !watchedTask.current) watchedTask.current = value.task_id
+        if (stateID === stateRequest.current) {
+          setState(value)
+          if (value.running && !watchedTask.current) watchedTask.current = value.task_id
+        }
         if (watchedTask.current) {
           const taskId = watchedTask.current
           const task = await api.task(taskId)
           if (!active || watchedTask.current !== taskId || task.status === 'running') return
+          const summaryID = ++summaryRequest.current
           const report = await api.status()
-          if (!active || watchedTask.current !== taskId) return
+          if (!active || watchedTask.current !== taskId || summaryID !== summaryRequest.current) return
           watchedTask.current = null
+          feedbackRevision.current++
+          // A completed task also invalidates older in-flight running-state reads.
+          stateRequest.current++
+          setState(current => current?.task_id === taskId ? { ...current, running: false, task_id: 0, kind: '', provider_id: '' } : current)
           setMessage(task.status === 'success' ? `检测任务 #${task.id} 已完成` : `错误：检测任务 #${task.id} ${task.status === 'canceled' ? '已取消' : '失败'}${task.error_message ? `：${task.error_message}` : ''}`)
           setSummary(report)
         }
@@ -63,15 +96,18 @@ export function OverviewTab({ readOnly = false }: { readOnly?: boolean }) {
   }, [setMessage])
 
   const run = async () => {
+    feedbackRevision.current++
     setStarting(true); setMessage('')
     try {
       const { task } = await api.triggerCheck()
+      if (!mounted.current) return
+      stateRequest.current++
       watchedTask.current = task.id
       setMessage(`检测任务 #${task.id} 已启动`)
       load()
     }
-    catch (cause) { setMessage(`错误：${(cause as Error).message}`) }
-    finally { setStarting(false) }
+    catch (cause) { if (mounted.current) setMessage(`错误：${(cause as Error).message}`) }
+    finally { if (mounted.current) setStarting(false) }
   }
 
   if (!state && loading) return <OverviewSkeleton />

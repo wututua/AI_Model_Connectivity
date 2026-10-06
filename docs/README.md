@@ -19,7 +19,7 @@ AI Model Connectivity（简称 CG，Go module 名为 `cg`）是一个用于检�
 | 文档 | 内容 |
 |------|------|
 | [系统架构](architecture.md) | 模块边界、目录结构、启动流程、检测时序和状态模型 |
-| [配置参考](configuration.md) | 环境变量、Provider 配置、校验规则和热加载语义 |
+| [配置参考](configuration.md) | 环境变量、Provider 配置、校验规则和配置生效方式 |
 | [HTTP API](api.md) | 认证、错误码、全部端点、curl 示例和数据结构索引 |
 | [前后端对接](backend-api.md) | 前端视角的 API、SSE、权限状态和 TypeScript 数据契约 |
 | [数据存储](data-storage.md) | SQLite 表结构、事务、历史/用量聚合、迁移和备份 |
@@ -28,6 +28,7 @@ AI Model Connectivity（简称 CG，Go module 名为 `cg`）是一个用于检�
 | [安全说明](security.md) | 认证授权、限流、SSRF、防泄漏和部署加固 |
 | [运维指南](operations.md) | 健康检查、Prometheus、日志、告警、备份和故障排查 |
 | [开发指南](development.md) | 本地环境、常用命令、测试约定和发布流程 |
+| [v1.0.0-beta.2](releases/v1.0.0-beta.2.md) | 第二个预发布版本的修复、验证范围和升级注意事项 |
 
 ## 一分钟上手
 
@@ -45,7 +46,7 @@ go run ./cmd/cg
 ## 文档约定
 
 - 命令默认从仓库根目录执行；需要切换目录时会在代码块中明确写出。
-- 配置名以 `.env.example` 和 `internal/config` 为准；SQLite 中已保存的运行时配置会覆盖同名运行时初始值。
+- 配置名以 [配置参考](configuration.md) 和 `internal/config` 为准；SQLite 中已保存的运行时配置会覆盖同名运行时初始值。
 - 状态统一使用 `ok`（正常）、`slow`（较慢）、`error`（异常）、`unknown`（未检测）和 `paused`（暂停）。
 - 报告、模型和历史记录时间使用带时区的 RFC3339，前端按浏览器本地时区展示，用量按 UTC 自然日聚合。
 - 涉及 API Key、账号密码、会话 Cookie、Webhook 和日志的示例均为占位值，提交 Issue 前必须脱敏。

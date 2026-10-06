@@ -142,11 +142,10 @@ curl -X PUT -b cookies.txt -H "X-CSRF-Token: $CSRF" -H 'Content-Type: applicatio
   http://127.0.0.1:8080/api/admin/settings
 ```
 
-### `GET /api/admin/config/export`、`POST /api/admin/config/import`、`POST /api/admin/config/reload`
+### `GET /api/admin/config/export`、`POST /api/admin/config/import`
 
 - 导出：`{"settings":…,"providers":[…]}`，不含 API Key 与通知凭据，也不包含用户、密码和会话。
 - 导入：`{"settings":…,"providers":[ProviderUpdate…]}`。
-- 重载：重读 `.env`，成功后异步触发一次检测；监听地址、路径和 `SECURE_COOKIES` 变更会被拒绝。不会重置已有账号密码。
 
 ---
 

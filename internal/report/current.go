@@ -154,7 +154,7 @@ func currentModels(previous []ModelResult, provider config.SafeProviderConfig, s
 			model = ModelResult{
 				Result: probe.Result{
 					ProviderID: provider.ID, ProviderGroupID: provider.ID, ProviderInstanceID: provider.ID,
-					Model: name, HistoryKey: provider.ID + "::" + name, Status: "unknown",
+					Model: name, HistoryKey: providerpkg.ModelKey(provider.ID, name), Status: "unknown",
 				},
 				StatusLabel: "未检测", StatusClass: "unknown", Availability: "N/A",
 				History: []string{}, TimeLabels: []string{},
@@ -165,10 +165,11 @@ func currentModels(previous []ModelResult, provider config.SafeProviderConfig, s
 			// Retain historical aggregates, but remove all current-check measurements.
 			model.Result = probe.Result{
 				ProviderID: provider.ID, ProviderGroupID: provider.ID, ProviderInstanceID: provider.ID,
-				Model: name, HistoryKey: provider.ID + "::" + name, Status: "unknown",
+				Model: name, HistoryKey: providerpkg.ModelKey(provider.ID, name), Status: "unknown",
 			}
 			model.StatusLabel, model.StatusClass = "未检测", "unknown"
 		}
+		model.HistoryKey = providerpkg.ModelKey(provider.ID, name)
 		model.ProviderName, model.ProviderInstanceName, model.ProviderType = provider.Name, provider.Name, provider.Type
 		model.ProviderLogo = providerpkg.IconFor(provider.ID, provider.Type, provider.Name)
 		model.ShowCurveChart = settings.ShowCurveChart

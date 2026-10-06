@@ -34,11 +34,13 @@ PRAGMA mmap_size = 30000000;
 | `checked_at` | 实际探测结束时间，UTC RFC3339；旧记录的时区偏移仍可读取 |
 | `error_type` | `timeout` / `dns` / `auth` / `rate_limit` / `server` / `unknown` |
 | `error_message`、`response_preview` | 错误与响应预览 |
-| `history_key` | `provider::model` |
+| `history_key` | `url.QueryEscape(providerID) + "::" + model`；客户端应视为不透明标识 |
 | `prompt_tokens` / `completion_tokens` / `total_tokens` | 本次用量 |
 
-索引：`(history_key, checked_at DESC)`、`(checked_at DESC)`。
+索引：`(provider, model, checked_at DESC)`、`(history_key, checked_at DESC)`、`(checked_at DESC)`。
 旧库缺 token 列时通过 `PRAGMA table_info` 检测并 `ALTER TABLE ADD COLUMN`。
+
+探测去重和报告查找使用同一身份键。Provider 部分经过百分号编码，例如 `a::b` + `c` 对应 `a%3A%3Ab::c`，不会与 `a` + `b::c` 混淆。历史查询和裁剪直接使用独立的 `provider`、`model` 列；旧 SQLite 记录无需重写，也不会因旧键相同而合并。
 
 ### `latest_report`
 
@@ -86,7 +88,7 @@ PRAGMA mmap_size = 30000000;
 1. 写 `usage_daily`（`ON CONFLICT` 累加，实际调用无论成功与否都计，`unknown` 不计）；
 2. `ENABLE_HISTORY=true` 时批量插入 `probe_results`；
 3. 删除 90 天前记录（`sqliteRetentionDays`）；
-4. 按 `history_key` 保留最近 `MAX_HISTORY_RECORDS` 条；
+4. 按独立的 `(provider, model)` 保留最近 `MAX_HISTORY_RECORDS` 条；
 5. 若传入 `latest`，写入 `latest_report`；
 6. 提交。
 
@@ -96,7 +98,7 @@ PRAGMA mmap_size = 30000000;
 
 ## 4. 历史读取与裁剪
 
-- `LoadHistory(limitPerKey, statsWindowDays)`：按时间戳代表的实际时刻过滤统计窗口，通过 SQL 窗口函数限制每 key 最近 `limitPerKey` 条（默认 `MAX_HISTORY_RECORDS`）；时间相同按自增 ID 排序。
+- `LoadHistory(limitPerKey, statsWindowDays)`：按时间戳代表的实际时刻过滤统计窗口，通过 SQL 窗口函数限制每 `(provider, model)` 最近 `limitPerKey` 条（默认 `MAX_HISTORY_RECORDS`），再生成身份键；时间相同按自增 ID 排序。
 - `report.Build` 追加本次结果后再次按 `MaxHistoryRecords` 截断。
 - 有效窗口是配置天数、90 天保留策略及每模型条数上限的交集；扩大显示窗口不能恢复已裁剪样本。
 - `pruneHistory` 按统计窗口裁剪，但若裁剪后少于 `HISTORY_SIZE`，会回退保留最近 `HISTORY_SIZE` 条，保证曲线和状态灯仍有足够数据点。
@@ -114,7 +116,7 @@ PRAGMA mmap_size = 30000000;
 
 历史被裁剪或关闭不影响 `usage_daily`，因此关闭历史后用量统计仍完整。
 
-回复为空、缺失消息或因 token 上限被截断时，探测记为失败，但保留上游返回的有效 usage；未返回 usage 的消耗仍无法估算。
+HTTP 错误、成功 HTTP 状态中的错误信封，以及回复为空、缺失消息或因 token 上限被截断时，探测记为失败，但保留上游返回的有效 usage；未返回 usage 的消耗仍无法估算。
 
 ## 6. 迁移
 
@@ -127,6 +129,8 @@ PRAGMA mmap_size = 30000000;
 | `data/notify_state.txt` | `notify_state`（支持纯文本与 JSON 两种格式） |
 
 `usage_daily` 首次初始化时由 `probe_results` 聚合回填一次，并用 `usage_daily_migrated` 标记避免重复。
+
+升级后建议执行一次完整检测，以重建旧快照中的历史统计。已因旧身份键冲突而漏测、裁剪的样本无法恢复；仅保存拼接键的旧 JSON 无法可靠区分本来就有歧义的 Provider/模型组合，仍按首次 `::` 分隔导入。
 
 账号系统首次启动创建 `users`、`sessions`。用户表为空时，管理员密码优先取 `ADMIN_PASSWORD`；否则迁移符合新规则的旧管理 Token，不符合时生成新密码。创建初始管理员和删除旧 Token KV 在同一事务提交，所有初始账号要求首次改密。已有账号不因重启被重置。迁移前应备份，回滚须恢复旧数据库备份。
 

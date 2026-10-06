@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"cg/internal/config"
+	"cg/internal/provider"
 )
 
 func TestIsSkipped(t *testing.T) {
@@ -149,5 +150,31 @@ func TestFailedCompletionPreservesUsageInResult(t *testing.T) {
 	results, _, err := runner.Run(context.Background())
 	if err != nil || len(results) != 1 || results[0].Status != "error" || results[0].TotalTokens != 8 || results[0].CheckedAt == "" {
 		t.Fatalf("wrong failed probe result: %+v, %v", results, err)
+	}
+}
+
+func TestProviderModelIdentityDoesNotCollide(t *testing.T) {
+	pairs := [][2]string{
+		{"a", "b::c"}, {"a::b", "c"},
+		{"a:", "c"}, {"a", ":c"},
+		{"a%3A", "c"}, {"a%253A", "c"},
+	}
+	cfg := config.Config{}
+	for _, pair := range pairs {
+		cfg.Providers = append(cfg.Providers, config.ProviderConfig{
+			ID: pair[0], Models: []string{pair[1]}, Enabled: true, ProbeEnabled: true,
+		})
+	}
+	targets, failures := NewRunner(cfg).collectTargets(context.Background())
+	if len(failures) != 0 || len(targets) != len(pairs) {
+		t.Fatalf("identity collision skipped probes: got %d targets, want %d", len(targets), len(pairs))
+	}
+	keys := map[string]bool{}
+	for _, target := range targets {
+		key := resultPayload(target, "ok", 1, "", "", provider.Usage{}).HistoryKey
+		if keys[key] {
+			t.Errorf("history identity collision: %q", key)
+		}
+		keys[key] = true
 	}
 }

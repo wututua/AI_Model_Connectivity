@@ -35,7 +35,7 @@ cmd/cg/              程序入口
   main.go            application：配置、调度、HTTP 生命周期
   users.go           初始管理员与旧版 Token 迁移
 internal/auth/       用户名/密码规则、密码哈希与校验
-internal/config/     .env 解析、运行时配置模型与校验
+internal/config/     进程环境变量解析、运行时配置模型与校验
 internal/provider/   Provider 抽象与 OpenAI 兼容实现、图标映射
 internal/probe/      探测编排（收集目标 → 并发探测 → 结果）
 internal/report/     报告构建、历史裁剪、延迟统计、SVG 曲线
@@ -62,10 +62,10 @@ docs/                本目录
 
 ## 4. 启动流程（`cmd/cg/main.go`）
 
-1. `config.Load(".env")` — 读 `.env` 再叠加真实环境变量（环境变量优先）。
+1. `config.Load()` — 读取进程环境变量，未提供的配置使用代码默认值，不读取本地配置文件。
 2. `healthcheck` 子命令：请求 `127.0.0.1:<port>/health`，成功退出 0（供容器健康检查使用）。
 3. 打开 SQLite，将上次异常退出遗留的 `running` 任务标记为 `canceled`。
-4. 若已有运行时配置则用其覆盖 `.env` 默认值，否则把当前配置写入。
+4. 若已有运行时配置则用其覆盖基础配置中的同名值，否则把当前配置写入。
 5. 校验持久化的运行时参数与 Provider，任一非法即退出（避免脏配置带病启动）。
 6. `initializeUsers`：用户表非空则保留现有账号；否则按 `ADMIN_PASSWORD`、符合规则的旧管理 Token、随机密码的优先级创建初始管理员，并标记首次改密。创建账号和删除旧 Token KV 在同一事务内完成；后续认证只接受账号会话。
 7. 按子命令分叉：`check` / `once` 跑一次就退出；`serve`（默认）常驻。
@@ -133,7 +133,7 @@ HTTP 接受任务后用服务端独立上下文执行，断开连接不会取消
 管理面板 / PUT /api/admin/settings  ──►  SQLite runtime_config（持久）
 导入配置 / POST /api/admin/config/import ─┘        │
                                                   ▼
-.env 文件 ──► 环境变量（覆盖 .env）──► 基础配置 ──► 生效配置
+代码默认值 ──► 进程环境变量覆盖 ──► 基础配置 ──► 生效配置
 ```
 
-监听地址、静态/数据路径和 `SECURE_COOKIES` 变更需重启；探测提示词可从 `.env` 热加载，`AUTO_CHECK_RUN_ON_START` 只在启动时判断，其余可管理参数（含监控登录开关）由 SQLite 持久化并即时生效。环境账号密码仅在初次创建管理员时使用。详见 [configuration.md](configuration.md)。
+监听地址、静态/数据路径、`SECURE_COOKIES`、探测提示词及 `AUTO_CHECK_RUN_ON_START` 只在启动时读取，变更需重启。其余可管理参数（含监控登录开关）由 SQLite 持久化，后台保存或 JSON 导入后即时生效。环境账号密码仅在初次创建管理员时使用。详见 [configuration.md](configuration.md)。

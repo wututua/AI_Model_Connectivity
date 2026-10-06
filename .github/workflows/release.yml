@@ -136,16 +136,15 @@ jobs:
         run: |
           cd dist
           asset="model-connectivity-${{ matrix.goos }}-${{ matrix.goarch }}"
-          cp ../.env.example .env.example
           cp ../README.md README.md
           cp ../LICENSE LICENSE
           cp -r ../docs docs
           cp -r ../assets assets
           cp -r ../web web
           if [ "${{ matrix.goos }}" = "windows" ]; then
-            zip -r "${asset}.zip" "model-connectivity.exe" ".env.example" "README.md" "LICENSE" "docs/" "assets/" "web/"
+            zip -r "${asset}.zip" "model-connectivity.exe" "README.md" "LICENSE" "docs/" "assets/" "web/"
           else
-            tar -czf "${asset}.tar.gz" "model-connectivity" ".env.example" "README.md" "LICENSE" "docs/" "assets/" "web/"
+            tar -czf "${asset}.tar.gz" "model-connectivity" "README.md" "LICENSE" "docs/" "assets/" "web/"
           fi
 
       - name: Upload artifact
@@ -196,7 +195,7 @@ jobs:
             ### 发布说明
 
             - 下载与操作系统和架构相匹配的压缩包。
-            - 完整解压后可直接使用，内含可执行文件、`.env.example`、`README.md`、`LICENSE`、`docs/`、`assets/` 和预构建的 `web/`。
+            - 完整解压后可直接使用，内含可执行文件、`README.md`、`LICENSE`、`docs/`、`assets/` 和预构建的 `web/`。
             - 启动后可在管理面板添加 Provider；使用 `--version` 查看构建信息。
             - 使用 `SHA256SUMS.txt` 校验下载文件。
             - 检测会真实调用模型接口并消耗 token，建议适当延长自动检测间隔。
@@ -214,7 +213,7 @@ jobs:
             ### Release Notes
 
             - Download the archive matching your operating system and architecture.
-            - Extract the complete archive to get the executable, `.env.example`, `README.md`, `LICENSE`, `docs/`, `assets/`, and prebuilt `web/`.
+            - Extract the complete archive to get the executable, `README.md`, `LICENSE`, `docs/`, `assets/`, and prebuilt `web/`.
             - Start the service and add providers in the admin panel; use `--version` to inspect build information.
             - Verify downloaded files against `SHA256SUMS.txt`.
             - Checks make real model API requests and consume tokens. Consider a longer automatic check interval.

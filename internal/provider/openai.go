@@ -187,12 +187,6 @@ func (p *OpenAICompatible) Chat(ctx context.Context, model, systemPrompt, prompt
 	}
 	var parsed chatResponse
 	parseErr := json.Unmarshal(respBody, &parsed)
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 || parsed.Error != nil {
-		return "", Usage{}, p.redactError(responseError(resp.StatusCode, parsed.Error, string(respBody)))
-	}
-	if parseErr != nil {
-		return "", Usage{}, fmt.Errorf("parse chat response: %w", parseErr)
-	}
 	usage := Usage{}
 	if parsed.Usage != nil {
 		usage.PromptTokens = parsed.Usage.PromptTokens
@@ -201,6 +195,12 @@ func (p *OpenAICompatible) Chat(ctx context.Context, model, systemPrompt, prompt
 		if usage.TotalTokens == 0 && (usage.PromptTokens > 0 || usage.CompletionTokens > 0) {
 			usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
 		}
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 || parsed.Error != nil {
+		return "", usage, p.redactError(responseError(resp.StatusCode, parsed.Error, string(respBody)))
+	}
+	if parseErr != nil {
+		return "", usage, fmt.Errorf("parse chat response: %w", parseErr)
 	}
 	if len(parsed.Choices) == 0 {
 		return "", usage, fmt.Errorf("empty choices")

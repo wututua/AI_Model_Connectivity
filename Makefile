@@ -32,7 +32,7 @@ lint:
 clean:
 	rm -rf $(DIST) frontend/dist
 
-## 本地开发 — 后端（读取 .env）
+## 本地开发 — 后端（使用进程环境变量）
 dev-backend:
 	go run $(CMD)
 

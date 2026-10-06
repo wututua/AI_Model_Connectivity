@@ -178,10 +178,6 @@ Server-Sent Events，推送最新 `Report`。
 
 导入配置。请求体 `ConfigImport`：`{ "settings": RuntimeSettings, "providers": ProviderUpdate[] }`，响应更新后的 `AdminConfig`。若已有 Provider 的 Base URL 改变，必须重新填写 `api_key` 或显式 `clear_api_key: true`；否则返回 400，整个导入不生效。
 
-#### `POST /api/admin/config/reload`
-
-从 `.env` 重载配置，响应 `AdminConfig`；成功后后端异步触发一次检测。
-
 ### 5.4 Provider 管理
 
 #### `POST /api/admin/provider-models`（仅管理员）
@@ -190,7 +186,7 @@ Server-Sent Events，推送最新 `Report`。
 
 编辑时 Key 留空复用服务端已有值，显式清除优先于传入新 Key。复用旧 Key 时不能同时变更 Base URL，须重新输入或显式清除。不写配置、不调用聊天接口、不创建检测任务；超时受模型列表超时设置控制且不超过 30 秒。
 
-前端 `ModelPicker` 使用双列标签、模型数量与可搜索勾选列表。同步结果与当前选择合并去重，保留手动模型；清空 `models` 恢复检测时自动发现全部模型。切换连接参数或关闭弹窗会取消未完成同步。
+前端 `ModelPicker` 使用双列标签、模型数量与可搜索勾选列表。同步结果与当前选择合并去重，保留手动模型；点击保存时也会合并尚未按 Enter 或点击添加的输入，保存失败后保留这些选择供重试。清除所有模型会同时清除待添加输入，空 `models` 恢复检测时自动发现全部模型。切换连接参数或关闭弹窗会取消未完成同步。
 
 #### `GET /api/admin/providers`（只读可用）
 

@@ -274,32 +274,86 @@ func TestInFlightOldGenerationCannotResurrectStatus(t *testing.T) {
 	}
 }
 
-func TestReloadReconcilesProviderGeneration(t *testing.T) {
+func TestImportReconcilesProviderGeneration(t *testing.T) {
 	app := testApplication(t)
-	t.Chdir(t.TempDir())
-	t.Setenv("PROVIDER_1_ID", "production")
-	t.Setenv("PROVIDER_1_BASE_URL", "https://old.invalid/v1")
-	t.Setenv("PROVIDER_1_API_KEY", "fixture-secret")
-	t.Setenv("PROVIDER_1_MODELS", "fixture")
-	loaded, err := config.Load(".env")
-	if err != nil {
-		t.Fatal(err)
-	}
-	app.baseCfg, app.cfg = loaded, loaded
+	app.cfg.Providers = []config.ProviderConfig{fixtureProvider()}
 	seedProviderStatus(t, app)
 	before := app.cfg.Providers[0].ConnectionRevision
-	if _, err := app.ReloadConfig(context.Background()); err != nil {
+	value := config.ConfigImport{
+		Settings:  config.SettingsFromConfig(app.cfg),
+		Providers: []config.ProviderUpdate{providerDraft(app.cfg.Providers[0])},
+	}
+	if _, err := app.ImportConfig(context.Background(), value); err != nil {
 		t.Fatal(err)
 	}
 	if app.cfg.Providers[0].ConnectionRevision != before {
-		t.Fatal("unchanged reload rotated the generation")
+		t.Fatal("unchanged import rotated the generation")
 	}
-	t.Setenv("PROVIDER_1_BASE_URL", "https://changed.invalid/v1")
-	if _, err := app.ReloadConfig(context.Background()); err != nil {
+	value.Providers[0].BaseURL = "https://changed.invalid/v1"
+	value.Providers[0].APIKey = "explicit-replacement"
+	if _, err := app.ImportConfig(context.Background(), value); err != nil {
 		t.Fatal(err)
 	}
 	latest, err := app.store.LatestReport(context.Background())
 	if err != nil || latest.OKCount != 0 || latest.UnknownCount != 1 {
-		t.Fatalf("reload kept old status: %+v, %v", latest, err)
+		t.Fatalf("import kept old status: %+v, %v", latest, err)
+	}
+}
+
+func TestStartupEnvironmentPreservesSavedConfiguration(t *testing.T) {
+	app := testApplication(t)
+	ctx := context.Background()
+	app.cfg.Providers = []config.ProviderConfig{fixtureProvider()}
+	app.cfg.DashboardTitle = "Saved title"
+	app.cfg.StatusLoginRequired = true
+	seedProviderStatus(t, app)
+	stored, ok, err := app.store.LoadRuntimeConfig(ctx)
+	if err != nil || !ok {
+		t.Fatal("saved configuration is missing")
+	}
+	t.Setenv("APP_PORT", "9091")
+	t.Setenv("SECURE_COOKIES", "true")
+	t.Setenv("DASHBOARD_TITLE", "New environment title")
+	t.Setenv("STATUS_LOGIN_REQUIRED", "false")
+	t.Setenv("PROVIDER_1_ID", "replacement")
+	t.Setenv("PROVIDER_1_BASE_URL", "https://replacement.invalid/v1")
+	loaded, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	restarted := config.ApplyRuntimeConfig(loaded, stored)
+	if !reflect.DeepEqual(restarted.Providers, app.cfg.Providers) ||
+		!reflect.DeepEqual(config.SettingsFromConfig(restarted), config.SettingsFromConfig(app.cfg)) {
+		t.Fatal("startup environment replaced saved providers or runtime settings")
+	}
+	if restarted.AppPort != 9091 || !restarted.SecureCookies {
+		t.Fatal("saved runtime configuration replaced startup-only settings")
+	}
+	app.cfg, app.baseCfg = restarted, loaded
+	handler := web.NewServer(restarted, app.store, app.check, nil, app).Handler()
+	for _, path := range []string{"/api/status", "/api/events"} {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil).WithContext(ctx))
+		cancel()
+		if recorder.Code != http.StatusUnauthorized {
+			t.Fatalf("saved login requirement did not protect %s: %d", path, recorder.Code)
+		}
+	}
+	for _, required := range []bool{false, true} {
+		settings := config.SettingsFromConfig(app.currentConfig())
+		settings.StatusLoginRequired = required
+		if _, err := app.UpdateSettings(ctx, settings); err != nil {
+			t.Fatal(err)
+		}
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/status", nil))
+		want := http.StatusOK
+		if required {
+			want = http.StatusUnauthorized
+		}
+		if recorder.Code != want {
+			t.Fatalf("runtime login update did not take effect: got %d, want %d", recorder.Code, want)
+		}
 	}
 }

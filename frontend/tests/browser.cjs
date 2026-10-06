@@ -60,6 +60,7 @@ async function main() {
   let reportFailures = 0
   let finishTaskOnDetection = false
   let providerWrites = 0
+  let configImports = 0
   const delayed = []
   let page
   try {
@@ -74,6 +75,14 @@ async function main() {
       if (url.pathname.startsWith('/api/')) {
         const respond = (body, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) })
         if (route.request().method() !== 'GET') {
+          if (url.pathname === '/api/admin/config/import') {
+            assert.equal(route.request().method(), 'POST')
+            const value = route.request().postDataJSON()
+            assert.deepEqual(value.providers, providers)
+            settings = value.settings
+            configImports++
+            return respond({ settings, providers })
+          }
           if (url.pathname === '/api/admin/providers') {
             assert.equal(route.request().method(), 'POST')
             assert.equal(route.request().postDataJSON().id, 'production-main')
@@ -108,7 +117,7 @@ async function main() {
           }
           return respond(report)
         }
-        if (url.pathname === '/api/admin/config') return respond({ settings, providers })
+        if (url.pathname === '/api/admin/config' || url.pathname === '/api/admin/config/export') return respond({ settings, providers })
         if (url.pathname === '/api/admin/providers') return respond(providers)
         if (url.pathname === '/api/admin/detection') {
           const state = { running: acceptedTask?.status === 'running', task_id: acceptedTask?.id || 0, provider_id: acceptedTask?.provider_id || '', auto_check_interval_min_hours: 0, auto_check_interval_max_hours: 0 }
@@ -242,6 +251,35 @@ async function main() {
     await capture('settings-mobile')
     await page.setViewportSize({ width: 1440, height: 960 })
     console.log('PASS settings tags, pending input, save retry, navigation guard, browser back, transient session failure and real session expiry')
+
+    await navigate('配置管理')
+    await page.getByRole('button', { name: '导出 JSON', exact: true }).waitFor()
+    assert.equal(await page.getByRole('button', { name: '重新加载', exact: true }).count(), 0)
+    const downloadReady = page.waitForEvent('download')
+    await page.getByRole('button', { name: '导出 JSON', exact: true }).click()
+    const download = await downloadReady
+    assert.match(download.suggestedFilename(), /^model-connectivity-config-\d{4}-\d{2}-\d{2}\.json$/)
+    await page.getByText('配置已导出', { exact: true }).waitFor()
+    const exported = JSON.parse(await page.getByRole('textbox', { name: '导出的配置内容', exact: true }).inputValue())
+    assert.deepEqual(exported, { settings, providers })
+    await page.locator('textarea:not([readonly])').fill(JSON.stringify(exported, null, 2))
+    await page.getByRole('button', { name: '导入配置', exact: true }).click()
+    await page.getByRole('alertdialog').waitFor()
+    await page.getByRole('button', { name: '取消', exact: true }).click()
+    await page.getByRole('alertdialog').waitFor({ state: 'detached' })
+    assert.equal(configImports, 0)
+    await page.getByRole('button', { name: '导入配置', exact: true }).click()
+    await page.getByRole('button', { name: '确认导入', exact: true }).click()
+    await page.getByText('配置已导入并生效', { exact: true }).waitFor()
+    await page.getByRole('alertdialog').waitFor({ state: 'detached' })
+    assert.equal(configImports, 1)
+    for (const width of [1440, 320, 375]) {
+      await page.setViewportSize({ width, height: width === 1440 ? 960 : 812 })
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true)
+      await capture(`config-${width}`)
+    }
+    await page.setViewportSize({ width: 1440, height: 960 })
+    console.log('PASS configuration export/download, confirmed import, removed reload control and desktop/mobile layout')
 
     await navigate('运行概览')
     await page.getByRole('button', { name: '立即检测', exact: true }).click()
@@ -391,6 +429,7 @@ async function main() {
     assert.deepEqual(errors, [])
     console.log(`PASS desktop/mobile themes and reduced motion; screenshots: ${artifacts}`)
     await require('./status-regressions.cjs')(browser, artifacts)
+    await require('./admin-regressions.cjs')(browser, artifacts)
   } catch (error) {
     if (page && !page.isClosed()) {
       console.error('Browser failure URL:', page.url())

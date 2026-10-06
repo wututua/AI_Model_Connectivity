@@ -54,9 +54,9 @@ func TestHistoryLimitPerKeyWithMixedTimezoneAndTies(t *testing.T) {
 	store := newTestSQLiteStore(t)
 	ctx := context.Background()
 	now := time.Now().UTC().Truncate(time.Second)
-	for _, key := range []string{"p1::m1", "p1::m2"} {
+	for _, model := range []string{"m1", "m2"} {
 		for i, at := range []time.Time{now.Add(-time.Hour).In(time.FixedZone("UTC+8", 8*3600)), now, now} {
-			_, err := store.db.ExecContext(ctx, `INSERT INTO probe_results (provider, model, result, latency_ms, checked_at, history_key) VALUES ('p1', 'm', 'ok', ?, ?, ?)`, i, at.Format(time.RFC3339), key)
+			_, err := store.db.ExecContext(ctx, `INSERT INTO probe_results (provider, model, result, latency_ms, checked_at, history_key) VALUES ('p1', ?, 'ok', ?, ?, ?)`, model, i, at.Format(time.RFC3339), "p1::"+model)
 			if err != nil {
 				t.Fatal(err)
 			}

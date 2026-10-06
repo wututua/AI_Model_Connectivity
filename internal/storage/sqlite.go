@@ -15,6 +15,7 @@ import (
 	"cg/internal/config"
 	"cg/internal/notify"
 	"cg/internal/probe"
+	"cg/internal/provider"
 	"cg/internal/report"
 
 	_ "modernc.org/sqlite"
@@ -198,6 +199,7 @@ func (s *SQLiteStore) init(ctx context.Context) error {
 			total_tokens INTEGER NOT NULL DEFAULT 0
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_probe_results_history_checked ON probe_results(history_key, checked_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_probe_results_identity_checked ON probe_results(provider, model, checked_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_probe_results_checked ON probe_results(checked_at DESC)`,
 		`CREATE TABLE IF NOT EXISTS latest_report (
 			id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -283,11 +285,11 @@ func (s *SQLiteStore) LoadHistory(ctx context.Context, limitPerKey int, statsWin
 		statsWindowDays = 1
 	}
 	cutoff := time.Now().UTC().Add(-time.Duration(statsWindowDays) * 24 * time.Hour).Format(time.RFC3339)
-	rows, err := s.db.QueryContext(ctx, `SELECT history_key, result, latency_ms, checked_at FROM (
-		SELECT id, history_key, result, latency_ms, checked_at,
-		       ROW_NUMBER() OVER (PARTITION BY history_key ORDER BY julianday(checked_at) DESC, id DESC) AS row_number
+	rows, err := s.db.QueryContext(ctx, `SELECT provider, model, result, latency_ms, checked_at FROM (
+		SELECT id, provider, model, result, latency_ms, checked_at,
+		       ROW_NUMBER() OVER (PARTITION BY provider, model ORDER BY julianday(checked_at) DESC, id DESC) AS row_number
 		FROM probe_results WHERE julianday(checked_at) >= julianday(?)
-	) WHERE row_number <= ? ORDER BY history_key, julianday(checked_at) ASC, id ASC`, cutoff, limitPerKey)
+	) WHERE row_number <= ? ORDER BY provider, model, julianday(checked_at) ASC, id ASC`, cutoff, limitPerKey)
 	if err != nil {
 		return nil, err
 	}
@@ -295,11 +297,12 @@ func (s *SQLiteStore) LoadHistory(ctx context.Context, limitPerKey int, statsWin
 
 	history := map[string][]report.HistoryRecord{}
 	for rows.Next() {
-		var key, status, checkedAt string
+		var providerID, model, status, checkedAt string
 		var latency int
-		if err := rows.Scan(&key, &status, &latency, &checkedAt); err != nil {
+		if err := rows.Scan(&providerID, &model, &status, &latency, &checkedAt); err != nil {
 			return nil, err
 		}
+		key := provider.ModelKey(providerID, model)
 		history[key] = append(history[key], report.HistoryRecord{Status: status, LatencyMS: latency, CheckedAt: checkedAt})
 	}
 	if err := rows.Err(); err != nil {
@@ -355,7 +358,7 @@ func (s *SQLiteStore) RecordCheck(ctx context.Context, results []probe.Result, c
 
 	for _, result := range results {
 		checked := resultTime(result, checkedAt).Format(time.RFC3339)
-		if _, err := stmt.ExecContext(ctx, result.ProviderID, result.ProviderType, result.ProviderName, result.Model, result.Status, result.LatencyMS, checked, errorType(result), result.Error, result.ResponsePreview, result.HistoryKey, result.PromptTokens, result.CompletionTokens, result.TotalTokens); err != nil {
+		if _, err := stmt.ExecContext(ctx, result.ProviderID, result.ProviderType, result.ProviderName, result.Model, result.Status, result.LatencyMS, checked, errorType(result), result.Error, result.ResponsePreview, provider.ModelKey(result.ProviderID, result.Model), result.PromptTokens, result.CompletionTokens, result.TotalTokens); err != nil {
 			return err
 		}
 	}
@@ -364,12 +367,12 @@ func (s *SQLiteStore) RecordCheck(ctx context.Context, results []probe.Result, c
 		return err
 	}
 	if maxPerKey > 0 {
-		keys := map[string]struct{}{}
+		keys := map[[2]string]struct{}{}
 		for _, result := range results {
-			keys[result.HistoryKey] = struct{}{}
+			keys[[2]string{result.ProviderID, result.Model}] = struct{}{}
 		}
 		for key := range keys {
-			if _, err := tx.ExecContext(ctx, `DELETE FROM probe_results WHERE history_key = ? AND id NOT IN (SELECT id FROM probe_results WHERE history_key = ? ORDER BY julianday(checked_at) DESC, id DESC LIMIT ?)`, key, key, maxPerKey); err != nil {
+			if _, err := tx.ExecContext(ctx, `DELETE FROM probe_results WHERE provider = ? AND model = ? AND id NOT IN (SELECT id FROM probe_results WHERE provider = ? AND model = ? ORDER BY julianday(checked_at) DESC, id DESC LIMIT ?)`, key[0], key[1], key[0], key[1], maxPerKey); err != nil {
 				return err
 			}
 		}
@@ -699,7 +702,7 @@ func (s *SQLiteStore) importLegacyHistory(ctx context.Context) error {
 			if record.Status == "error" {
 				errorType = "unknown"
 			}
-			if _, err := stmt.ExecContext(ctx, providerID, model, record.Status, record.LatencyMS, record.CheckedAt, errorType, key); err != nil {
+			if _, err := stmt.ExecContext(ctx, providerID, model, record.Status, record.LatencyMS, record.CheckedAt, errorType, provider.ModelKey(providerID, model)); err != nil {
 				return err
 			}
 		}

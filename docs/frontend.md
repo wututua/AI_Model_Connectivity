@@ -88,7 +88,7 @@ frontend/src/
 | `/admin/settings` | 检测、历史、调度、通知和访问控制 |
 | `/admin/tasks` | 任务状态筛选、结果明细和分页 |
 | `/admin/billing` | Token 汇总、每日趋势和模型明细 |
-| `/admin/config` | JSON 导入导出和 `.env` 热加载 |
+| `/admin/config` | JSON 配置导入导出 |
 | `/admin/users` | 管理员创建、编辑、禁用、删除用户和重置密码 |
 | `/admin/account` | 修改自己的密码 |
 | `/login` | 共用登录页，按 next 返回目标页面 |
