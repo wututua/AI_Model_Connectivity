@@ -61,6 +61,7 @@ async function main() {
   let finishTaskOnDetection = false
   let providerWrites = 0
   const delayed = []
+  let page
   try {
     const context = await browser.newContext({ viewport: { width: 1440, height: 960 } })
     await context.addInitScript(() => {
@@ -135,7 +136,7 @@ async function main() {
       const type = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.ttf': 'font/ttf' }[path.extname(file)] || 'application/octet-stream'
       return route.fulfill({ contentType: type, body: await fs.readFile(file) })
     })
-    const page = await context.newPage()
+    page = await context.newPage()
     page.on('pageerror', error => errors.push(error.message))
     page.setDefaultTimeout(10000)
     const capture = async name => {
@@ -232,7 +233,11 @@ async function main() {
     await page.getByRole('alertdialog').waitFor()
     await capture('unsaved-mobile')
     await page.getByRole('button', { name: '继续编辑', exact: true }).click()
+    // Let dialog focus restoration finish before Playwright selects the input.
+    await page.getByRole('alertdialog').waitFor({ state: 'detached' })
     await page.locator('#dashboard-title').fill('Audit Monitor')
+    assert.equal(await page.locator('#dashboard-title').inputValue(), 'Audit Monitor')
+    await page.waitForFunction(() => document.querySelector('[role="status"]')?.textContent?.includes('已同步'))
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true)
     await capture('settings-mobile')
     await page.setViewportSize({ width: 1440, height: 960 })
@@ -386,6 +391,13 @@ async function main() {
     assert.deepEqual(errors, [])
     console.log(`PASS desktop/mobile themes and reduced motion; screenshots: ${artifacts}`)
     await require('./status-regressions.cjs')(browser, artifacts)
+  } catch (error) {
+    if (page && !page.isClosed()) {
+      console.error('Browser failure URL:', page.url())
+      console.error('Browser failure page:', await page.locator('body').innerText().catch(() => '(unavailable)'))
+      await page.screenshot({ path: path.join(artifacts, 'failure.png'), fullPage: true }).catch(() => {})
+    }
+    throw error
   } finally {
     delayed.splice(0).forEach(resolve => resolve())
     await browser.close()
