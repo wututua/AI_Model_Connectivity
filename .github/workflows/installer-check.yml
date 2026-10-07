@@ -10,12 +10,17 @@ jobs:
   test:
     name: Linux installer regression tests
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      - name: Install ShellCheck
+      - name: Ensure ShellCheck
+        timeout-minutes: 5
         run: |
-          sudo apt-get update
-          sudo apt-get install -y shellcheck
+          if ! command -v shellcheck >/dev/null 2>&1; then
+            sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update
+            sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y --no-install-recommends shellcheck
+          fi
+          shellcheck --version
       - name: Shell syntax and lint
         run: |
           bash -n install-model-connectivity.sh

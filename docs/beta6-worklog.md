@@ -86,6 +86,11 @@ Confirmed findings and fixes:
    Dockerfile ran `npm ci` before copying the postinstall patch runner. The
    Docker build now copies that single script before dependency installation;
    the full frontend source is still copied afterwards.
+7. Installer gates stalled in unconditional package installation before running
+   tests, despite ShellCheck being included in the hosted runner image. The
+   workflow now checks the existing installation first and bounds fallback
+   downloads, the setup step and the job. Syntax, lint and all installer tests
+   remain required.
 
 Review inventory:
 
