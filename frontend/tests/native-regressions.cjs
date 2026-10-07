@@ -58,12 +58,16 @@ module.exports = async function nativeRegressions(browser, artifacts) {
       assert.equal(await page.getByLabel('Base URL', { exact: true }).inputValue(), 'https://example.invalid/v1')
       await page.getByRole('combobox', { name: '检测能力', exact: true }).click()
       assert.equal(await page.getByRole('option', { name: '工具调用结构', exact: true }).getAttribute('aria-disabled'), 'true')
+      await page.waitForFunction(() => document.querySelector('[role="listbox"]')?.contains(document.activeElement))
       await page.keyboard.press('Escape')
+      await page.getByRole('listbox').waitFor({ state: 'hidden' })
+      await page.getByRole('dialog').waitFor({ state: 'visible' })
       assert.equal(discoveries.length, 0, 'protocol selection made automatic requests')
       delayed = new Promise(resolve => { release = resolve })
-      const requested = page.waitForRequest(request => new URL(request.url()).pathname === '/api/admin/provider-models')
-      await page.getByRole('button', { name: '同步模型', exact: true }).click()
-      await requested
+      await Promise.all([
+        page.waitForRequest(request => new URL(request.url()).pathname === '/api/admin/provider-models'),
+        page.getByRole('button', { name: '同步模型', exact: true }).click(),
+      ])
       await select('探测协议', 'Gemini generateContent')
       release()
       await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
@@ -83,6 +87,10 @@ module.exports = async function nativeRegressions(browser, artifacts) {
       assert.deepEqual(saves[0].models, ['model-gemini'])
       assert.deepEqual(errors, [])
       console.log(`PASS native protocol configuration, discovery cancellation, payload and viewport ${width}`)
+    } catch (error) {
+      console.error(`Native regression failure at viewport ${width}:`, await page.locator('body').innerText().catch(() => '(unavailable)'))
+      await page.screenshot({ path: path.join(artifacts, `native-failure-${width}.png`), fullPage: true }).catch(() => {})
+      throw error
     } finally { release(); await context.close() }
   }
 }

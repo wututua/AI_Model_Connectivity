@@ -141,6 +141,12 @@ This file records pre-publication evidence. The remaining checkboxes above must
 be verified against the corresponding GitHub Actions runs and published tag,
 not inferred from local tests:
 
+- The initial main CI #59 and release #40 passed Go/installer/build gates but
+  failed in the native browser regression while waiting for model discovery.
+  The request waiter could reject before the click was awaited, hiding the
+  useful interaction error. The regression now joins both promises, waits for
+  select focus/closure and saves failure screenshots in CI artifacts. Local
+  Chromium repetitions alone do not establish that the Linux gate is fixed.
 - Push main and wait for Linux race, Windows, dependency and installer gates.
 - Create beta.6 only after those gates pass, then verify the Release, all eight
   assets/checksums, downloaded binary/version/migration and Docker prerelease tag.

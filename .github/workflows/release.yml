@@ -74,6 +74,7 @@ jobs:
         working-directory: frontend
         env:
           PLAYWRIGHT_CHANNEL: chromium
+          BROWSER_ARTIFACT_DIR: ${{ runner.temp }}/browser-artifacts
         run: npm run test:browser
 
       - name: Monitoring center browser tests
@@ -87,6 +88,15 @@ jobs:
         with:
           name: web-dist
           path: web/
+
+      - name: Upload browser failure screenshots
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-browser-failure
+          path: ${{ runner.temp }}/browser-artifacts/
+          if-no-files-found: ignore
+          retention-days: 7
 
   build:
     name: Build ${{ matrix.goos }}-${{ matrix.goarch }}
