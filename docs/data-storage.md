@@ -1,6 +1,6 @@
 # 数据存储
 
-beta.4 新增的监控配置、诊断列、模型清单、备份、事件、调度和费用表见[监控中心的数据说明](monitoring-center.md#api-与存储)。这些表随数据库整体备份，不包含在原配置 JSON 导出中。
+beta.5 新增的监控配置、诊断列、模型清单、备份、事件、调度和费用表见[监控中心的数据说明](monitoring-center.md#api-与存储)。这些表随数据库整体备份，不包含在原配置 JSON 导出中。
 
 [项目首页](../README.md) · [文档索引](README.md) · [系统架构](architecture.md) · [备份与恢复](operations.md#备份与恢复)
 

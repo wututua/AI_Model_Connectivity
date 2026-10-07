@@ -20,11 +20,11 @@ AI Model Connectivity（简称 CG）定期检测多个服务商及其模型，�
 
 > **版本状态**
 >
-> 当前版本为 [v1.0.0-beta.4](docs/releases/v1.0.0-beta.4.md)，适合评估和试用，不是稳定版。升级前请备份数据库，并阅读对应版本的 Release 说明。检测会调用真实模型接口并消耗 Token。
+> 当前版本为 [v1.0.0-beta.5](docs/releases/v1.0.0-beta.5.md)，适合评估和试用，不是稳定版。升级前请备份数据库，并阅读对应版本的 Release 说明。检测会调用真实模型接口并消耗 Token。
 
 ## 功能
 
-beta.4 新增[监控中心](docs/monitoring-center.md)：诊断详情、模型清单提醒、定期备份、独立告警、事件、Provider 调度、能力断言及费用估算。
+beta.5 新增[监控中心](docs/monitoring-center.md)：诊断详情、模型清单提醒、定期备份、独立告警、事件、Provider 调度、能力断言及费用估算。
 
 - **多服务商管理**：分组、标签、批量启停与暂停，无密钥复制配置，支持单模型和失败项重测。
 - **探测兼容性**：按 Provider 配置提示词、输出上限、temperature 和超时，支持 Chat Completions、Responses 及流式首段文本延迟。

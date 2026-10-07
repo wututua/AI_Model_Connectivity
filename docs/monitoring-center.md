@@ -2,7 +2,7 @@
 
 [文档索引](README.md) · [检测与运维](monitoring-features.md) · [备份恢复](operations.md#备份与恢复)
 
-本文描述 beta.4 新增功能。管理入口为 `/admin/monitoring`，仅管理员可访问。能力探测参数仍位于 Provider 编辑页。
+本文描述 beta.5 新增功能。管理入口为 `/admin/monitoring`，仅管理员可访问。能力探测参数仍位于 Provider 编辑页。
 
 ## 诊断
 

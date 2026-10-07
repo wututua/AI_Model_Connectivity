@@ -44,7 +44,8 @@ func TestHTTPAcceptedTaskIntegration(t *testing.T) {
 	service := httptest.NewServer(web.NewServer(app.cfg, app.store, app.check, nil, app).Handler())
 	defer service.Close()
 	jar, _ := cookiejar.New(nil)
-	client := &http.Client{Jar: jar, Timeout: 2 * time.Second}
+	// Password verification is slower under race instrumentation on shared runners.
+	client := &http.Client{Jar: jar, Timeout: 15 * time.Second}
 	login, err := client.Post(service.URL+"/api/auth/login", "application/json", strings.NewReader(`{"username":"admin","password":"Integration123"}`))
 	if err != nil {
 		t.Fatal(err)
@@ -57,6 +58,7 @@ func TestHTTPAcceptedTaskIntegration(t *testing.T) {
 	if err != nil || login.StatusCode != 200 || session.CSRF == "" {
 		t.Fatalf("login failed: %d, %v", login.StatusCode, err)
 	}
+	client.Timeout = 2 * time.Second
 	ctx, cancel := context.WithCancel(context.Background())
 	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, service.URL+"/api/admin/check", nil)
 	req.Header.Set("X-CSRF-Token", session.CSRF)
