@@ -2,6 +2,7 @@
 FROM node:24-slim AS frontend-builder
 WORKDIR /app/frontend
 COPY frontend/package*.json ./
+COPY frontend/scripts/patch-radix.cjs ./scripts/patch-radix.cjs
 RUN npm ci
 COPY frontend/ ./
 RUN npm run build

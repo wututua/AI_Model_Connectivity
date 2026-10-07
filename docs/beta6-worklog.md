@@ -82,6 +82,10 @@ Confirmed findings and fixes:
    regression also failed locally before the fix. A fail-closed postinstall
    patch with version/hash checks rechecks the layer stack in both module formats;
    see upstream issue #4143 and `frontend.md` for removal criteria.
+6. The first Docker run after that fix exposed a packaging omission: the
+   Dockerfile ran `npm ci` before copying the postinstall patch runner. The
+   Docker build now copies that single script before dependency installation;
+   the full frontend source is still copied afterwards.
 
 Review inventory:
 
@@ -136,6 +140,8 @@ Fresh local evidence during implementation:
   320px/1440px, including three Chromium repetitions and the full browser suite.
   A candidate patching dependency introduced audit findings and was removed;
   the final patch runner uses only Node built-ins and adds no dependencies.
+- The first Docker packaging gate failed because the postinstall runner was not
+  present during `npm ci`; this is fixed and remains a required remote gate.
 - `govulncheck` v1.8.0 on the final tree: no vulnerabilities found. The Go proxy
   timed out during tool resolution; built the same pinned, cached module and
   ran the scanner normally against the vulnerability database.
