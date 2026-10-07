@@ -260,7 +260,7 @@ function ProviderDialog({ value, onOpenChange, onSave }: { value: EditingState; 
     pending.current = null
     setAvailable([]); setSyncing(false); setSyncError(''); setSyncMessage('')
     return () => { pending.current?.abort(); pending.current = null }
-  }, [form.base_url, form.api_key, form.clear_api_key, form.type])
+  }, [form.base_url, form.api_key, form.clear_api_key, form.type, form.probe.protocol])
 
   const sync = async () => {
     if (pending.current || saving) return
@@ -270,7 +270,7 @@ function ProviderDialog({ value, onOpenChange, onSave }: { value: EditingState; 
     pending.current = controller
     setSyncing(true); setSyncError(''); setSyncMessage('')
     try {
-      const models = await api.discoverModels({ provider_id: initial?.id, type: form.type, base_url: form.base_url, api_key: form.api_key, clear_api_key: form.clear_api_key }, controller.signal)
+      const models = await api.discoverModels({ provider_id: initial?.id, type: form.type, protocol: form.probe.protocol || 'chat', base_url: form.base_url, api_key: form.api_key, clear_api_key: form.clear_api_key }, controller.signal)
       if (controller.signal.aborted) return
       setAvailable(models)
       setForm(current => ({ ...current, models: mergeModels(current.models, models) }))
@@ -302,12 +302,12 @@ function ProviderDialog({ value, onOpenChange, onSave }: { value: EditingState; 
   return (
     <Dialog open={value !== null} onOpenChange={open => { if (!saving) onOpenChange(open) }}>
       <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
-        <DialogHeader><DialogTitle>{initial ? '编辑 Provider' : '新增 Provider'}</DialogTitle><DialogDescription>配置 OpenAI 兼容接口、模型范围与检测状态。</DialogDescription></DialogHeader>
+        <DialogHeader><DialogTitle>{initial ? '编辑 Provider' : '新增 Provider'}</DialogTitle><DialogDescription>接口与模型配置</DialogDescription></DialogHeader>
         <fieldset disabled={saving} className="field-grid min-w-0 py-2">
           <Field label="唯一 ID" htmlFor="provider-id" hint={initial ? '创建后不可修改' : '建议使用小写字母、数字和连字符'}><Input id="provider-id" value={form.id} onChange={event => set('id', event.target.value)} placeholder="openai-main" disabled={Boolean(initial)} className="font-mono" /></Field>
           <Field label="显示名称" htmlFor="provider-name"><Input id="provider-name" value={form.name} onChange={event => set('name', event.target.value)} placeholder="OpenAI" /></Field>
           <Field label="Provider 类型" htmlFor="provider-type"><Input id="provider-type" value={form.type} onChange={event => set('type', event.target.value)} placeholder="openai" className="font-mono" /></Field>
-          <Field label="Base URL" htmlFor="provider-url"><Input id="provider-url" type="url" value={form.base_url} onChange={event => set('base_url', event.target.value)} placeholder="https://api.openai.com/v1" className="font-mono" /></Field>
+          <Field label="Base URL" htmlFor="provider-url"><Input id="provider-url" type="url" value={form.base_url} onChange={event => set('base_url', event.target.value)} placeholder={form.probe.protocol === 'anthropic' ? 'https://api.anthropic.com/v1' : form.probe.protocol === 'gemini' ? 'https://generativelanguage.googleapis.com/v1beta' : 'https://api.openai.com/v1'} className="font-mono" /></Field>
           <Field label="分组" htmlFor="provider-group"><Input id="provider-group" maxLength={128} value={form.group} onChange={e => set('group', e.target.value)} /></Field>
           <Field label="标签" htmlFor="provider-tags"><Input id="provider-tags" value={form.tags} onChange={e => set('tags', e.target.value)} placeholder="production, backup" /></Field>
           <Field className="md:col-span-2" label={`API Key${initial?.api_key_set ? (endpointChanged ? '（地址已变更）' : '（留空保留现有值）') : ''}`} htmlFor="provider-key"><Input id="provider-key" type="password" value={form.api_key} onChange={event => set('api_key', event.target.value)} placeholder={initial?.api_key_set ? '已设置' : 'sk-...'} className="font-mono" /></Field>

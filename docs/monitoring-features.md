@@ -8,15 +8,15 @@
 
 ## 探测协议与参数
 
-Provider 编辑页的「探测配置」提供轻量 Chat、推理参数、Responses 和 Chat 流式预设。预设只填入参数，不检测或推断模型能力；上游不支持时需按其要求调整。
+Provider 编辑页的「探测配置」提供轻量 Chat、推理参数、Responses、Chat 流式及 Anthropic / Gemini 原生文本预设。预设只填入参数，不检测或推断模型能力；上游不支持时需按其要求调整。原生协议的地址、鉴权、分页与费用限制见[原生模型协议](native-protocols.md)。
 
 | `probe` 字段 | 默认 / 范围 | 行为 |
 | --- | --- | --- |
-| `protocol` | 空值或 `chat`、`responses` | 相对 Base URL 请求 `/chat/completions` 或 `/responses` |
+| `protocol` | 空值或 `chat`、`responses`、`anthropic`、`gemini` | 空值仍为 OpenAI 兼容 Chat，Provider 类型不改变协议 |
 | `stream` | `false` | 使用相应协议的 SSE 流式响应 |
-| `max_tokens` | `0` 等效 16，最高 131072 | 输出上限；Responses 映射为 `max_output_tokens` |
+| `max_tokens` | `0` 等效 16，最高 131072 | Responses 映射为 `max_output_tokens`，Gemini 为 `maxOutputTokens` |
 | `token_limit_field` | 空值等效 `max_tokens` | Chat 可选 `max_tokens` / `max_completion_tokens` |
-| `omit_temperature` / `temperature` | `false` / `0`，温度范围 0–2 | 可完全省略 temperature |
+| `omit_temperature` / `temperature` | `false` / `0`，温度范围 0–2 | 可完全省略；Anthropic 发送时最多为 1 |
 | `timeout_seconds` | `0` 使用全局值，最高 86400 秒 | 包括请求到流结束的完整耗时 |
 | `prompt` / `system_prompt` | 空值使用全局启动默认，最多 4096 字符 | 自定义文本提示词 |
 | `omit_system_prompt` | `false` | 为 true 时不发送系统消息或 instructions |
@@ -52,6 +52,8 @@ Provider 可保存一个 `group`（最多 128 字符）及最多 20 个 `tags`�
 - `discovery_model_limit`：自动发现原始模型数的确认阈值，0 不限制，最高 100000。超过阈值时不探测该 Provider，需在编辑页明确选择并保存模型。这一检查在跳过规则和模型数量裁剪之前执行。
 
 预算按 UTC 日界重置，持久保存已预留的请求次数；发出前在事务内预留，失败、超时和进程中断不退回。编辑页的模型同步也计数；通知请求不计数。升级前的请求不会回填预算计数，预算从新功能启用的实际预留开始。
+
+原生模型发现每页分别计数；任何一页失败不会返回部分目录或覆盖已批准的模型清单。
 
 达到上限后，新的检测/发现请求被拒绝；调度器继续运行但跳过检测，UTC 次日或提高限额后恢复后续调度。进行中的已预留请求可以结束。若一个任务中途耗尽预算，任务以错误结束，不覆盖最新报告，但已确认用量仍保存。
 

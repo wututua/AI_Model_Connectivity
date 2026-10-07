@@ -10,6 +10,22 @@ import (
 	"cg/internal/config"
 )
 
+func TestChatInvalidUsageCannotSubtractConsumption(t *testing.T) {
+	for _, status := range []int{200, 429} {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(status)
+			w.Write([]byte(`{"choices":[{"message":{"content":"pang"}}],"usage":{"prompt_tokens":-5,"completion_tokens":3,"total_tokens":-2}}`))
+		}))
+		client := NewOpenAICompatible(config.ProviderConfig{BaseURL: server.URL})
+		_, usage, _ := client.Chat(context.Background(), "m", "", "ping")
+		client.CloseIdleConnections()
+		server.Close()
+		if usage.Known || usage.PromptTokens != 0 || usage.CompletionTokens != 3 || usage.TotalTokens < 0 {
+			t.Fatalf("invalid consumption retained: %+v", usage)
+		}
+	}
+}
+
 func TestErrorResponsesAndCredentialRedaction(t *testing.T) {
 	for _, status := range []int{200, 302, 401, 503} {
 		server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {

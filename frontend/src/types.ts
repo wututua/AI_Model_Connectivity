@@ -186,6 +186,7 @@ export interface ProviderUpdate {
 
 export interface ModelDiscoveryRequest {
   provider_id?: string
+  protocol?: string
   type: string
   base_url: string
   api_key: string

@@ -103,7 +103,10 @@ func (p *OpenAICompatible) capabilityProbe(ctx context.Context, model, prompt st
 	if parsed.Usage != nil {
 		usage = parsed.Usage.usage(false, 0)
 		if p.cfg.Probe.Capability == "embedding" {
-			usage.Known = parsed.Usage.promptReported
+			// Embeddings have no output tokens; retain the shared consistency checks.
+			embeddingUsage := *parsed.Usage
+			embeddingUsage.completionReported = embeddingUsage.CompletionTokens == 0
+			usage = embeddingUsage.usage(false, 0)
 		}
 	}
 	if res.StatusCode < 200 || res.StatusCode >= 300 {

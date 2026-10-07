@@ -38,9 +38,17 @@ func (s *SQLiteStore) initMonitoring(ctx context.Context) error {
 		`CREATE TABLE IF NOT EXISTS backups (name TEXT PRIMARY KEY, created_at TEXT NOT NULL, size INTEGER NOT NULL, sha256 TEXT NOT NULL, verified_at TEXT NOT NULL)`,
 		`CREATE TABLE IF NOT EXISTS incidents (id INTEGER PRIMARY KEY,provider TEXT NOT NULL,model TEXT NOT NULL,revision TEXT NOT NULL,status TEXT NOT NULL,opened_at TEXT NOT NULL,last_seen_at TEXT NOT NULL,resolved_at TEXT NOT NULL DEFAULT '',acknowledged_at TEXT NOT NULL DEFAULT '',note TEXT NOT NULL DEFAULT '')`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS incidents_open_identity ON incidents(provider,model,revision) WHERE status='open'`,
+		`CREATE INDEX IF NOT EXISTS incidents_provider_id ON incidents(provider,model,id DESC)`,
+		`CREATE INDEX IF NOT EXISTS incidents_status_id ON incidents(status,id DESC)`,
+		`CREATE INDEX IF NOT EXISTS probe_results_provider_id ON probe_results(provider,model,id DESC)`,
+		`CREATE INDEX IF NOT EXISTS probe_results_result_id ON probe_results(result,id DESC)`,
 		`CREATE TABLE IF NOT EXISTS provider_schedule (provider TEXT PRIMARY KEY, revision TEXT NOT NULL, interval_minutes INTEGER NOT NULL, next_at TEXT NOT NULL)`,
 		`CREATE TABLE IF NOT EXISTS cost_daily (day TEXT NOT NULL,provider TEXT NOT NULL,model TEXT NOT NULL,usd REAL NOT NULL,priced INTEGER NOT NULL,unknown INTEGER NOT NULL,PRIMARY KEY(day,provider,model))`,
 		`CREATE TABLE IF NOT EXISTS monitoring_notices (key TEXT PRIMARY KEY,status TEXT NOT NULL,attempts INTEGER NOT NULL,updated_at TEXT NOT NULL)`,
+		`CREATE TABLE IF NOT EXISTS admin_audit (id INTEGER PRIMARY KEY AUTOINCREMENT,actor_id INTEGER NOT NULL,actor TEXT NOT NULL,role TEXT NOT NULL,action TEXT NOT NULL,result TEXT NOT NULL,http_status INTEGER NOT NULL,created_at TEXT NOT NULL)`,
+		`CREATE INDEX IF NOT EXISTS admin_audit_actor_id ON admin_audit(actor,id DESC)`,
+		`CREATE INDEX IF NOT EXISTS admin_audit_action_id ON admin_audit(action,id DESC)`,
+		`CREATE INDEX IF NOT EXISTS admin_audit_created ON admin_audit(created_at)`,
 	} {
 		if _, err := s.db.ExecContext(ctx, query); err != nil {
 			return err

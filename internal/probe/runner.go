@@ -137,6 +137,7 @@ func (r *Runner) collectTargets(ctx context.Context) ([]Target, []ProviderError)
 			break
 		}
 		modelsCtx, cancel := context.WithTimeout(ctx, durationSeconds(r.cfg.ModelListTimeoutSeconds))
+		modelsCtx = provider.WithDiscoveryPageGuard(modelsCtx, r.beforeRequest)
 		models, err := item.Models(modelsCtx)
 		cancel()
 		if err != nil {

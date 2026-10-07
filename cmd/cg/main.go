@@ -753,6 +753,9 @@ func (a *application) runCheck(ctx context.Context, options checkOptions, counts
 			discoveryFailed[failure.ProviderID] = true
 		}
 		for _, observedProvider := range cfg.Providers {
+			if !observedProvider.Enabled || !observedProvider.ProbeEnabled {
+				continue
+			}
 			for _, current := range currentProviders.Providers {
 				if current.ID != observedProvider.ID || current.ConnectionRevision != observedProvider.ConnectionRevision {
 					continue

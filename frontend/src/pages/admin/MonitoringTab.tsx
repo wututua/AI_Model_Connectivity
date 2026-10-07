@@ -12,9 +12,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../components/ui/tabs'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '../../components/ui/alert-dialog'
 import { Feedback, Field } from './shared'
+import { MonitoringHistory } from './MonitoringHistory'
 
 const date = (value: string) => value ? new Date(value).toLocaleString() : '-'
-const ms = (value?: number) => value == null ? '-' : `${value} ms`
 const dollars = (value: number) => `$${value.toFixed(6)}`
 const tabs = [['diagnostics', '诊断'], ['catalog', '模型变更'], ['backups', '备份'], ['rules', '告警规则'], ['incidents', '事件'], ['schedules', '调度'], ['costs', '费用']] as const
 
@@ -29,6 +29,7 @@ export function MonitoringTab() {
   const [note, setNote] = useState('')
   const [approval, setApproval] = useState<string | null>(null)
   const [discard, setDiscard] = useState(false)
+  const [historyRefresh, setHistoryRefresh] = useState(0)
   const alive = useRef(false)
   const locked = useRef(false)
   const dirty = !!data && !!draft && JSON.stringify(draft) !== JSON.stringify(data.settings)
@@ -48,6 +49,7 @@ export function MonitoringTab() {
     try {
       if (operation) await operation()
       if (!alive.current) return
+      setHistoryRefresh(value => value + 1)
       const value = await api.monitoring()
       if (!alive.current) return
       setData(value); setDraft(value.settings); setAck(null); setApproval(null)
@@ -83,20 +85,8 @@ export function MonitoringTab() {
     {!data || !draft ? <p className="py-8 text-sm text-muted-foreground">{busy ? '正在加载' : '暂无数据'}</p> : <Tabs value={tab} onValueChange={setTab}>
       <TabsList className="h-auto flex-wrap justify-start gap-y-1">{tabs.map(([id, label]) => <TabsTrigger key={id} value={id}>{label}</TabsTrigger>)}</TabsList>
       <fieldset disabled={busy} className="min-w-0">
-        <TabsContent value="diagnostics" className="mt-5 space-y-3">
-          <DataTable headers={['Provider / 模型', '检测时间', '结果', '网络阶段', '响应阶段']}>
-            {data.diagnostics.map(row => <tr key={row.id}>
-              <Cell><span className="font-medium">{row.provider_id}</span><br />{row.model}<br /><span className="text-muted-foreground">{row.capability || 'text'}</span></Cell>
-              <Cell>{date(row.checked_at)}</Cell>
-              <Cell>{row.status} · {row.error_type || row.capability_status || '-'}<br />HTTP {row.diagnostics?.http_status || '-'}
-                {row.diagnostics?.request_id && <details><summary className="cursor-pointer">请求 ID</summary><span className="break-all">{row.diagnostics.request_id}</span></details>}
-                {row.diagnostics?.retry_after && <div>Retry-After: {row.diagnostics.retry_after}</div>}
-              </Cell>
-              <Cell>DNS {ms(row.diagnostics?.dns_ms)}<br />连接 {ms(row.diagnostics?.connect_ms)}<br />TLS {ms(row.diagnostics?.tls_ms)}{row.diagnostics?.connection_reused && <div>复用连接</div>}</Cell>
-              <Cell>首字节 {ms(row.diagnostics?.first_byte_ms)}<br />首段文本 {ms(row.first_token_ms || undefined)}<br />完整响应 {ms(row.latency_ms)}</Cell>
-            </tr>)}
-          </DataTable>
-          {!data.diagnostics.length && <Empty />}
+        <TabsContent forceMount value="diagnostics" className={tab === 'diagnostics' ? 'mt-5' : 'hidden'}>
+          <MonitoringHistory kind="diagnostics" active={tab === 'diagnostics'} refresh={historyRefresh} readOnly={dirty} />
         </TabsContent>
         <TabsContent value="catalog" className="mt-5 space-y-5">
           <div className="divide-y border-y">{data.catalogs.map(catalog => <section key={catalog.provider_id} className="space-y-3 py-4">
@@ -135,12 +125,8 @@ export function MonitoringTab() {
             </div>
           </section>)}{!draft.rules.length && <Empty />}</div>
         </TabsContent>
-        <TabsContent value="incidents" className="mt-5">
-          <DataTable headers={['Provider / 模型', '状态', '发现 / 最近观测', '恢复 / 处理', '操作']}>{data.incidents.map(incident => <tr key={incident.id}>
-            <Cell>{incident.provider_id}<br />{incident.model || '模型发现'}</Cell><Cell>{({ open: '待恢复', resolved: '已恢复', superseded: '配置已变更' } as Record<string, string>)[incident.status] || incident.status}</Cell>
-            <Cell>{date(incident.opened_at)}<br />{date(incident.last_seen_at)}</Cell><Cell>{date(incident.resolved_at)}<br />{incident.acknowledged_at ? `已接手 ${date(incident.acknowledged_at)}` : '未接手'}<p className="break-words">{incident.note}</p></Cell>
-            <Cell><Button variant="outline" size="sm" disabled={dirty || incident.status !== 'open'} onClick={() => { setAck(incident.id); setNote(incident.note) }}><Check />接手 / 备注</Button></Cell>
-          </tr>)}</DataTable>{!data.incidents.length && <Empty />}
+        <TabsContent forceMount value="incidents" className={tab === 'incidents' ? 'mt-5' : 'hidden'}>
+          <MonitoringHistory kind="incidents" active={tab === 'incidents'} refresh={historyRefresh} readOnly={dirty} onAcknowledge={incident => { setAck(incident.id); setNote(incident.note) }} />
         </TabsContent>
         <TabsContent value="schedules" className="mt-5 space-y-5">
           <Button variant="outline" onClick={() => update('schedules', [...draft.schedules, { provider_id: '', interval_minutes: 0, slow_threshold_ms: 0, maintenance_start: '', maintenance_end: '' }])}><Plus />添加 Provider 策略</Button>

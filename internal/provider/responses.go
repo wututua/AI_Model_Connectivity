@@ -55,8 +55,10 @@ func (u responseUsage) usage(responses bool, first int) Usage {
 		known = u.inputReported && u.outputReported
 	}
 	total := u.TotalTokens
+	sum, validTotal := addTokens(max(0, input), max(0, output))
+	known = known && validTotal && total >= 0 && (total == 0 || total == sum)
 	if total == 0 {
-		total = input + output
+		total = sum
 	}
 	return Usage{Known: known, PromptTokens: max(0, input), CompletionTokens: max(0, output), TotalTokens: max(0, total), FirstTokenMS: first}
 }

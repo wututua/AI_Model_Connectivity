@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -109,5 +110,58 @@ func TestDiscoverModelsValidationRedactionAndCancellation(t *testing.T) {
 	start := time.Now()
 	if _, err := app.DiscoverModels(ctx, config.ModelDiscoveryRequest{BaseURL: upstream.URL + "/slow"}); err == nil || time.Since(start) > 3*time.Second {
 		t.Fatal("discovery did not respect cancellation")
+	}
+}
+
+func TestDiscoverNativeModelsInheritsProtocolAndBudgetsEveryPage(t *testing.T) {
+	for _, protocol := range []string{"anthropic", "gemini"} {
+		for _, limit := range []int{1, 2} {
+			t.Run(fmt.Sprintf("%s/budget=%d", protocol, limit), func(t *testing.T) {
+				app := testApplication(t)
+				app.cfg.DailyRequestLimit = limit
+				var calls atomic.Int32
+				upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					calls.Add(1)
+					if r.Method != "GET" || r.URL.Path != "/models" || r.Header.Get("Authorization") != "" {
+						t.Error("discovery used a probe or the wrong protocol")
+					}
+					if protocol == "anthropic" {
+						if r.Header.Get("x-api-key") != "stored-key" {
+							t.Error("missing stored key")
+						}
+						if r.URL.Query().Get("after_id") == "" {
+							fmt.Fprint(w, `{"data":[{"id":"a"}],"has_more":true,"last_id":"a"}`)
+						} else {
+							fmt.Fprint(w, `{"data":[{"id":"b"}]}`)
+						}
+					} else {
+						if r.Header.Get("x-goog-api-key") != "stored-key" {
+							t.Error("missing stored key")
+						}
+						if r.URL.Query().Get("pageToken") == "" {
+							fmt.Fprint(w, `{"models":[{"name":"models/a","supportedGenerationMethods":["generateContent"]}],"nextPageToken":"next"}`)
+						} else {
+							fmt.Fprint(w, `{"models":[{"name":"models/b","supportedGenerationMethods":["generateContent"]}]}`)
+						}
+					}
+				}))
+				defer upstream.Close()
+				app.cfg.Providers = []config.ProviderConfig{{ID: "native", BaseURL: upstream.URL, APIKey: "stored-key", Models: []string{"manual"}, Probe: config.ProbeOptions{Protocol: protocol}}}
+				models, err := app.DiscoverModels(context.Background(), config.ModelDiscoveryRequest{ProviderID: "native", BaseURL: upstream.URL})
+				if calls.Load() != int32(limit) {
+					t.Fatal("request budget mismatch", calls.Load())
+				}
+				if limit == 1 {
+					if err == nil || models != nil {
+						t.Fatal("partial models returned after budget exhaustion", models, err)
+					}
+				} else if err != nil || !reflect.DeepEqual(models, []string{"a", "b"}) {
+					t.Fatal(models, err)
+				}
+				if !reflect.DeepEqual(app.currentConfig().Providers[0].Models, []string{"manual"}) {
+					t.Fatal("discovery saved draft models")
+				}
+			})
+		}
 	}
 }

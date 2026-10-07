@@ -29,6 +29,9 @@ type Provider interface {
 }
 
 func New(cfg config.ProviderConfig) Provider {
+	if cfg.Probe.Protocol == "anthropic" || cfg.Probe.Protocol == "gemini" {
+		return &Native{OpenAICompatible: NewOpenAICompatible(cfg)}
+	}
 	switch strings.ToLower(cfg.Type) {
 	case "", "openai", "openai-compatible", "ollama", "openrouter", "siliconflow", "deepseek", "dashscope":
 		return NewOpenAICompatible(cfg)

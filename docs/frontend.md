@@ -94,6 +94,9 @@ TypeScript 与 Vite 均使用 `@/*` 映射到 `src/*`。复用现有组件、工
 | `/admin/billing` | Token 汇总、趋势与模型明细 |
 | `/admin/config` | JSON 导入导出 |
 | `/admin/operations` | 管理员 CSV / 诊断导出与指标凭据管理 |
+| `/admin/monitoring` | 管理员诊断、事件筛选分页、模型清单、备份、规则、调度和费用 |
+| `/admin/audit` | 管理员操作记录、身份、结果和日期筛选分页 |
+| `/admin/updates` | 管理员版本检查与支持部署的更新确认 |
 | `/admin/users` | 用户、角色、禁用与密码重置 |
 | `/admin/account` | 当前账号改密 |
 

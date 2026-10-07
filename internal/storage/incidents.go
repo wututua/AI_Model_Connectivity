@@ -76,6 +76,10 @@ func (s *SQLiteStore) Incidents(ctx context.Context) ([]Incident, error) {
 		return nil, err
 	}
 	defer rows.Close()
+	return readIncidents(rows)
+}
+
+func readIncidents(rows *sql.Rows) ([]Incident, error) {
 	out := []Incident{}
 	for rows.Next() {
 		var v Incident

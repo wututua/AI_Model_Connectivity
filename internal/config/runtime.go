@@ -79,6 +79,7 @@ type ProviderUpdate struct {
 }
 
 type ModelDiscoveryRequest struct {
+	Protocol    string `json:"protocol"`
 	ProviderID  string `json:"provider_id"`
 	Type        string `json:"type"`
 	BaseURL     string `json:"base_url"`

@@ -26,6 +26,19 @@ export interface DiagnosticRecord {
   checked_at: string; latency_ms: number; first_token_ms: number; capability: string; capability_status: string
   diagnostics?: { dns_ms?: number; connect_ms?: number; tls_ms?: number; first_byte_ms?: number; connection_reused: boolean; http_status?: number; request_id?: string; retry_after?: string }
 }
+export interface HistoryPage<T> { items: T[]; has_more: boolean; next_before: number }
+export interface MonitoringHistoryQuery {
+  provider_id: string; model: string; status: string; start: string; end: string
+  scope: string; capability: string; error_type: string; limit: number; before: number
+}
+export interface AuditEvent {
+  id: number; actor_id: number; actor: string; role: string; action: string
+  result: string; http_status: number; created_at: string
+}
+export interface AuditQuery {
+  actor: string; action: string; result: string; start: string; end: string; before: number; limit: number
+}
+export interface AuditPage extends HistoryPage<AuditEvent> { actions: string[] }
 export interface MonitoringData {
   settings: MonitoringSettings; catalogs: Catalog[]; backups: Backup[]; incidents: Incident[]; diagnostics: DiagnosticRecord[]
   catalog_events: { id: number; provider_id: string; added: string[]; removed: string[]; created_at: string }[]

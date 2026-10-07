@@ -30,9 +30,14 @@ func (a *application) DiscoverModels(ctx context.Context, query config.ModelDisc
 	if baseURL == "" {
 		return nil, errors.New("请先填写 Base URL")
 	}
+	protocol := query.Protocol
+	if protocol == "" {
+		protocol = existing.Probe.Protocol
+	}
 	draft, err := config.ApplyProviderUpdate(existing, config.ProviderUpdate{
 		ID: "model-discovery", Type: query.Type, BaseURL: baseURL,
 		APIKey: query.APIKey, ClearAPIKey: query.ClearAPIKey,
+		Probe: config.ProbeOptions{Protocol: protocol},
 	})
 	if err != nil {
 		return nil, err
@@ -53,6 +58,7 @@ func (a *application) DiscoverModels(ctx context.Context, query config.ModelDisc
 	if err := a.reserveRequest(ctx); err != nil {
 		return nil, err
 	}
+	ctx = provider.WithDiscoveryPageGuard(ctx, a.reserveRequest)
 	models, err := client.Models(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("同步模型失败: %w", err)

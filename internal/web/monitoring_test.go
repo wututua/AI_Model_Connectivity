@@ -21,6 +21,8 @@ func TestMonitoringPermissionAndCSRF(t *testing.T) {
 		status             int
 	}{
 		{"GET", "/api/admin/monitoring", "", 200},
+		{"GET", "/api/admin/monitoring/diagnostics", "", 200},
+		{"GET", "/api/admin/monitoring/incidents", "", 200},
 		{"PUT", "/api/admin/monitoring/settings", `{"version":0,"backup_keep":3,"rules":[],"schedules":[],"prices":[]}`, 200},
 		{"POST", "/api/admin/monitoring/backup", "", 201},
 		{"POST", "/api/admin/monitoring/verify", `{"name":"../../cg.sqlite"}`, 400},
@@ -49,6 +51,24 @@ func TestMonitoringPermissionAndCSRF(t *testing.T) {
 			if rec.Code != 403 {
 				t.Fatal("missing CSRF protection", endpoint.path)
 			}
+		}
+	}
+}
+
+func TestMonitoringHistoryRejectsInvalidQueries(t *testing.T) {
+	s, _ := newTestServer(t)
+	for _, path := range []string{"/api/admin/monitoring/diagnostics", "/api/admin/monitoring/incidents"} {
+		for _, query := range []string{"limit=0", "limit=101", "limit=oops", "before=-1", "before=9223372036854775808", "start=2026-10-01", "end=", "status=invalid", "start=2026-10-02T00:00:00Z&end=2026-10-01T00:00:00Z"} {
+			if rec := perform(s, "GET", path+"?"+query, "", "admin"); rec.Code != 400 {
+				t.Fatal(path, query, rec.Code, rec.Body)
+			}
+		}
+		rec := perform(s, "GET", path+"?limit=25", "", "admin")
+		if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"items":[]`) || !strings.Contains(rec.Body.String(), `"has_more":false`) {
+			t.Fatal(rec.Code, rec.Body)
+		}
+		if rec := perform(s, "POST", path, "", "admin"); rec.Code != 405 {
+			t.Fatal("method guard missing", rec.Code)
 		}
 	}
 }

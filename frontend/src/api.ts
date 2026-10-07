@@ -16,7 +16,7 @@ import type {
   AuthSession, User, UserInput,
   SystemUpdateStatus, SystemUpdateCheck, SystemUpdateJob,
 } from './types'
-import type { MonitoringData, MonitoringSettings } from './monitoring'
+import type { AuditPage, AuditQuery, DiagnosticRecord, HistoryPage, Incident, MonitoringData, MonitoringHistoryQuery, MonitoringSettings } from './monitoring'
 
 try { localStorage.removeItem('cg_admin_token') } catch { /* Storage may be disabled. */ }
 let csrfToken = ''
@@ -54,6 +54,16 @@ async function sessionRequest(method: string, path: string, body?: unknown): Pro
 }
 
 export const api = {
+  audit: (query: AuditQuery, signal?: AbortSignal) => {
+    const params = new URLSearchParams()
+    Object.entries(query).forEach(([key, value]) => { if (value !== '' && value !== 0) params.set(key, String(value)) })
+    return request<AuditPage>('GET', `/api/admin/audit?${params}`, undefined, false, signal)
+  },
+  monitoringHistory: <K extends 'diagnostics' | 'incidents'>(kind: K, query: MonitoringHistoryQuery, signal?: AbortSignal) => {
+    const params = new URLSearchParams()
+    Object.entries(query).forEach(([key, value]) => { if (value !== '' && value !== 0) params.set(key, String(value)) })
+    return request<HistoryPage<K extends 'diagnostics' ? DiagnosticRecord : Incident>>('GET', `/api/admin/monitoring/${kind}?${params}`, undefined, false, signal)
+  },
   monitoring: (signal?: AbortSignal) => request<MonitoringData>('GET', '/api/admin/monitoring', undefined, false, signal),
   saveMonitoring: (value: MonitoringSettings) => request<MonitoringSettings>('PUT', '/api/admin/monitoring/settings', value),
   monitoringAction: (action: 'backup' | 'verify' | 'approve' | 'ack' | 'test-rule', value?: unknown) => request('POST', `/api/admin/monitoring/${action}`, value),

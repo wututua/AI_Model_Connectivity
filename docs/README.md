@@ -12,7 +12,9 @@
 | [系统更新](system-updates.md) | 版本检查、独立更新服务、后台更新、失败恢复与权限边界 |
 | [配置参考](configuration.md) | 启动变量、运行时设置、Provider 和通知规则 |
 | [检测与运维功能](monitoring-features.md) | 探测协议、模型重测、实时进度、预算、导出和指标凭据 |
+| [原生模型协议](native-protocols.md) | Anthropic / Gemini 配置、分页预算、流式完成与用量限制 |
 | [监控中心](monitoring-center.md) | 诊断、模型变更、定期备份、独立告警、事件、调度、能力与费用 |
+| [操作审计](audit.md) | 管理操作身份、结果、筛选分页与保留边界 |
 | [运维指南](operations.md) | 健康检查、任务、日志、备份、密码恢复与排障 |
 | [安全与访问控制](security.md) | 认证、权限、网络访问和数据保护边界 |
 

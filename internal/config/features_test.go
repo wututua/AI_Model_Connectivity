@@ -52,3 +52,34 @@ func TestNewSettingsLegacyDefaultsAndRoundTrip(t *testing.T) {
 		}
 	}
 }
+
+func TestNativeProbeValidation(t *testing.T) {
+	for _, protocol := range []string{"anthropic", "gemini"} {
+		for _, stream := range []bool{false, true} {
+			if err := (ProbeOptions{Protocol: protocol, Stream: stream}).Validate(); err != nil {
+				t.Fatal(protocol, stream, err)
+			}
+		}
+		for _, options := range []ProbeOptions{
+			{Protocol: protocol, Capability: "tools"},
+			{Protocol: protocol, Capability: "embedding"},
+			{Protocol: protocol, TokenLimitField: "max_completion_tokens"},
+		} {
+			if options.Validate() == nil {
+				t.Fatal("invalid native combination accepted", options)
+			}
+		}
+		base := ProviderConfig{ID: "p", ConnectionRevision: "old"}
+		changed := base
+		changed.Probe.Protocol = protocol
+		if ReconcileProviderRevisions([]ProviderConfig{base}, []ProviderConfig{changed})[0].ConnectionRevision == "old" {
+			t.Fatal("native protocol kept old result revision")
+		}
+	}
+	if (ProbeOptions{Protocol: "anthropic", Temperature: 1.1}).Validate() == nil {
+		t.Fatal("invalid Anthropic temperature accepted")
+	}
+	if err := (ProbeOptions{Protocol: "anthropic", Temperature: 2, OmitTemperature: true}).Validate(); err != nil {
+		t.Fatal("omitted temperature rejected", err)
+	}
+}

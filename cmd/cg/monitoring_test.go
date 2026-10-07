@@ -10,6 +10,7 @@ import (
 
 	"cg/internal/config"
 	"cg/internal/notify"
+	"cg/internal/probe"
 	"cg/internal/storage"
 )
 
@@ -39,6 +40,45 @@ func TestRuleNotificationRetryPreservesRoute(t *testing.T) {
 	retry, err := app.SendNotification(ctx, record.ID)
 	if err != nil || retry.RuleID != "r" || correct.Load() != 1 || wrong.Load() != 0 {
 		t.Fatalf("wrong route: %+v %v correct=%d wrong=%d", retry, err, correct.Load(), wrong.Load())
+	}
+}
+
+func TestSkippedProvidersCannotResolveDiscoveryIncidents(t *testing.T) {
+	app := testApplication(t)
+	ctx := context.Background()
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.Write([]byte(`{"data":[{"id":"m"}],"choices":[{"message":{"content":"pang"}}]}`))
+	}))
+	defer server.Close()
+	app.cfg.Providers = []config.ProviderConfig{
+		{ID: "disabled", BaseURL: server.URL, ProbeEnabled: true, ConnectionRevision: "one"},
+		{ID: "paused", BaseURL: server.URL, Enabled: true, ConnectionRevision: "two"},
+		{ID: "active", BaseURL: server.URL, Enabled: true, ProbeEnabled: true, ConnectionRevision: "three"},
+	}
+	results := []probe.Result{}
+	for _, p := range app.cfg.Providers {
+		results = append(results, probe.Result{ProviderID: p.ID, Status: "error", Completed: true})
+	}
+	if err := app.store.ObserveIncidents(ctx, app.cfg, results); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.runCheck(ctx, checkOptions{SaveLatest: true}, &storage.CheckTaskUpdate{}); err != nil {
+		t.Fatal(err)
+	}
+	incidents, err := app.store.Incidents(ctx)
+	if err != nil || len(incidents) != 3 || calls.Load() != 2 {
+		t.Fatal(incidents, err, calls.Load())
+	}
+	for _, incident := range incidents {
+		want := "open"
+		if incident.ProviderID == "active" {
+			want = "resolved"
+		}
+		if incident.Status != want {
+			t.Fatalf("unobserved incident changed: %+v", incident)
+		}
 	}
 }
 

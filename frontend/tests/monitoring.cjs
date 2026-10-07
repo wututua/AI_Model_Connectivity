@@ -29,6 +29,11 @@ async function main() {
   let acks = 0
   let verifies = 0
   let failNextRead = false
+  let bulkHistory = false
+  let failNextHistory = false
+  let delayedHistory = null
+  const historyRequests = []
+  const releases = []
   try {
     const context = await browser.newContext({ viewport: { width: 1440, height: 960 } })
     await context.addInitScript(() => { localStorage.setItem('theme', 'light'); window.EventSource = undefined })
@@ -38,6 +43,28 @@ async function main() {
       const respond = (body, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) })
       if (url.pathname === '/api/auth/session') return respond({ user: { id: 1, username: 'test-admin', role: 'admin', enabled: true, must_change_password: false }, csrf_token: 'fixture-csrf', status_login_required: true, expires_at: 9999999999 })
       if (url.pathname === '/api/admin/providers') return respond([provider])
+      if (['/api/admin/monitoring/diagnostics', '/api/admin/monitoring/incidents'].includes(url.pathname)) {
+        assert.equal(route.request().method(), 'GET')
+        const query = Object.fromEntries(url.searchParams)
+        historyRequests.push(query)
+        if (query.provider_id === 'delayed' && delayedHistory) {
+          const pending = delayedHistory
+          delayedHistory = null
+          pending.started()
+          await pending.wait
+          return respond({ error: 'stale history failure' }, 500)
+        }
+        if (failNextHistory) { failNextHistory = false; return respond({ error: 'history unavailable' }, 503) }
+        const incidents = url.pathname.endsWith('/incidents')
+        const initial = incidents ? fixture.incidents : fixture.diagnostics
+        const source = bulkHistory ? Array.from({ length: 125 }, (_, index) => ({ ...initial[0], id: index + 1, model: `history-${index + 1}` })) : initial
+        const matches = source.filter(row => (!query.provider_id || row.provider_id === query.provider_id) &&
+          (!query.model || row.model === query.model) && (!query.status || row.status === query.status) &&
+          (!query.before || row.id < Number(query.before))).sort((a, b) => b.id - a.id)
+        const limit = Number(query.limit || 50)
+        const items = matches.slice(0, limit), has_more = matches.length > limit
+        return respond({ items, has_more, next_before: has_more ? items.at(-1).id : 0 })
+      }
       if (url.pathname === '/api/admin/monitoring') {
         if (failNextRead) { failNextRead = false; return respond({ error: 'fixture refresh failure' }, 503) }
         return respond(fixture)
@@ -80,10 +107,13 @@ async function main() {
     page.setDefaultTimeout(10000)
     await page.goto(`${origin}/admin/monitoring`)
     await page.getByText('配置版本 1', { exact: true }).waitFor()
-    for (const [name, width, height] of [['desktop', 1440, 960], ['mobile', 390, 844]]) {
+    for (const [name, width, height] of [['desktop', 1440, 960], ['mobile', 390, 844], ['narrow', 320, 812]]) {
       await page.setViewportSize({ width, height })
       for (const tab of ['诊断', '模型变更', '备份', '告警规则', '事件', '调度', '费用']) {
         await page.getByRole('tab', { name: tab, exact: true }).click()
+        if (tab === '诊断' || tab === '事件') {
+          await page.getByRole('region', { name: `${tab}历史` }).locator('tbody tr').first().waitFor()
+        }
         await page.screenshot({ path: path.join(artifacts, `${name}-${tab}.png`), fullPage: true, animations: 'disabled' })
         assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), `${name} ${tab} overflow`)
       }
@@ -132,8 +162,55 @@ async function main() {
     await page.getByRole('button', { name: '放弃并刷新', exact: true }).click()
     await page.getByText('已刷新', { exact: true }).waitFor()
     assert.equal(await page.getByLabel('保留数量', { exact: true }).inputValue(), '4')
+    bulkHistory = true
+    await page.getByRole('tab', { name: '诊断', exact: true }).click()
+    const history = page.getByRole('region', { name: '诊断历史' })
+    await history.getByText('history-125', { exact: true }).waitFor()
+    await history.getByRole('combobox', { name: '每页记录数' }).click()
+    await page.getByRole('option', { name: '25', exact: true }).click()
+    await history.getByRole('button', { name: '筛选', exact: true }).click()
+    await history.getByText('第 1 页 · 25 条', { exact: true }).waitFor()
+    await history.getByRole('button', { name: '下一页', exact: true }).click()
+    await history.getByText('history-100', { exact: true }).waitFor()
+    assert.equal(historyRequests.at(-1).before, '101')
+    assert.equal(await history.getByText('history-125', { exact: true }).count(), 0)
+    await history.getByRole('button', { name: '上一页', exact: true }).click()
+    await history.getByText('history-125', { exact: true }).waitFor()
+    await history.getByLabel('模型', { exact: true }).fill('history-12')
+    await history.getByRole('button', { name: '筛选', exact: true }).click()
+    await history.getByText('第 1 页 · 1 条', { exact: true }).waitFor()
+    assert.equal(historyRequests.at(-1).before, undefined)
+    await history.getByRole('button', { name: '重置筛选', exact: true }).click()
+    await history.getByText('第 1 页 · 50 条', { exact: true }).waitFor()
+    const pending = {}
+    pending.ready = new Promise(resolve => { pending.started = resolve })
+    pending.wait = new Promise(resolve => { pending.release = resolve })
+    releases.push(pending.release)
+    delayedHistory = pending
+    await history.getByLabel('Provider ID', { exact: true }).fill('delayed')
+    await history.getByRole('button', { name: '筛选', exact: true }).click()
+    await pending.ready
+    await history.getByLabel('Provider ID', { exact: true }).fill('production')
+    await history.getByRole('button', { name: '筛选', exact: true }).click()
+    await history.getByText('history-125', { exact: true }).waitFor()
+    pending.release()
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+    assert.equal(await history.getByText('stale history failure', { exact: true }).count(), 0)
+    failNextHistory = true
+    await history.getByRole('button', { name: '刷新历史' }).click()
+    await history.getByText('history unavailable', { exact: true }).waitFor()
+    assert.equal(await history.locator('tbody tr').count(), 0, 'failed refresh kept stale history visible')
+    await history.getByRole('button', { name: '刷新历史' }).click()
+    await history.getByText('history-125', { exact: true }).waitFor()
+    await page.getByRole('tab', { name: '事件', exact: true }).click()
+    await page.getByRole('region', { name: '事件历史' }).getByText('history-125', { exact: true }).waitFor()
+    await page.getByRole('tab', { name: '诊断', exact: true }).click()
+    assert.equal(await history.getByLabel('Provider ID', { exact: true }).inputValue(), 'production')
+    await history.getByText('history-125', { exact: true }).waitFor()
+    await page.screenshot({ path: path.join(artifacts, 'narrow-filtered-history.png'), fullPage: true })
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1))
     assert.deepEqual(errors, [])
     console.log(`PASS monitoring desktop/mobile, settings, secret redaction, catalog approval, incidents, backup verification; screenshots: ${artifacts}`)
-  } finally { await browser.close() }
+  } finally { releases.forEach(release => release()); await browser.close() }
 }
 main().catch(error => { console.error(error); process.exitCode = 1 })

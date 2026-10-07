@@ -15,6 +15,10 @@ func (s *Server) adminMonitoring(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	action := strings.TrimPrefix(r.URL.Path, "/api/admin/monitoring")
+	if action == "/diagnostics" || action == "/incidents" {
+		s.monitoringHistory(w, r, action == "/incidents")
+		return
+	}
 	if action == "" {
 		if r.Method != http.MethodGet {
 			methodNotAllowed(w)

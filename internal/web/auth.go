@@ -82,6 +82,7 @@ func (s *Server) authorize(w http.ResponseWriter, r *http.Request, adminOnly, al
 		writeErrorText(w, http.StatusUnauthorized, "请先登录")
 		return false
 	}
+	*r = *r.WithContext(context.WithValue(r.Context(), sessionContextKey{}, session))
 	if session.User.MustChangePassword && !allowPasswordChange {
 		writeJSON(w, http.StatusForbidden, map[string]any{"error": "请先修改初始密码", "code": "password_change_required"})
 		return false
@@ -99,7 +100,6 @@ func (s *Server) authorize(w http.ResponseWriter, r *http.Request, adminOnly, al
 			return false
 		}
 	}
-	*r = *r.WithContext(context.WithValue(r.Context(), sessionContextKey{}, session))
 	return true
 }
 
@@ -178,6 +178,7 @@ func (s *Server) issueSession(w http.ResponseWriter, r *http.Request, user stora
 		_ = s.store.DeleteSession(r.Context(), old.Value)
 	}
 	s.setSessionCookie(w, r, token, expires)
+	*r = *r.WithContext(context.WithValue(r.Context(), sessionContextKey{}, storage.Session{User: user}))
 	s.writeSession(w, r, storage.Session{User: user, CSRFToken: csrf, ExpiresAt: expires.Unix()})
 }
 

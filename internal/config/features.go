@@ -55,14 +55,22 @@ func (p ProbeOptions) Validate() error {
 	if p.Capability != "" && p.Capability != "text" && p.Capability != "tools" && p.Capability != "embedding" {
 		return errors.New("unsupported capability")
 	}
-	if (p.Capability == "tools" || p.Capability == "embedding") && (p.Stream || p.Protocol == "responses") {
+	if (p.Capability == "tools" || p.Capability == "embedding") && (p.Stream || p.Protocol != "" && p.Protocol != "chat") {
 		return errors.New("tools and embedding probes require non-streaming Chat configuration")
 	}
 	if len(p.AssertContains) > 4096 || len(p.AssertJSONKeys) > 1024 {
 		return errors.New("assertion too long")
 	}
-	if p.Protocol != "" && p.Protocol != "chat" && p.Protocol != "responses" {
-		return errors.New("probe.protocol must be chat or responses")
+	switch p.Protocol {
+	case "", "chat", "responses", "anthropic", "gemini":
+	default:
+		return errors.New("probe.protocol must be chat, responses, anthropic or gemini")
+	}
+	if (p.Protocol == "anthropic" || p.Protocol == "gemini") && p.TokenLimitField == "max_completion_tokens" {
+		return errors.New("native protocols do not support max_completion_tokens")
+	}
+	if p.Protocol == "anthropic" && !p.OmitTemperature && p.Temperature > 1 {
+		return errors.New("Anthropic temperature must be between 0 and 1")
 	}
 	if p.TokenLimitField != "" && p.TokenLimitField != "max_tokens" && p.TokenLimitField != "max_completion_tokens" {
 		return errors.New("invalid probe.token_limit_field")

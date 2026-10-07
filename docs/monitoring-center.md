@@ -2,7 +2,7 @@
 
 [文档索引](README.md) · [检测与运维](monitoring-features.md) · [备份恢复](operations.md#备份与恢复)
 
-本文描述 beta.5 新增功能。管理入口为 `/admin/monitoring`，仅管理员可访问。能力探测参数仍位于 Provider 编辑页。
+本文描述当前开发分支；监控中心自 beta.5 提供，beta.6 增加历史筛选分页。管理入口为 `/admin/monitoring`，仅管理员可访问。能力探测参数仍位于 Provider 编辑页。
 
 ## 诊断
 
@@ -12,7 +12,7 @@
 - DNS/连接可发生多次，展示累积值；它们不是可直接相加的服务端耗时分解。
 - HTTP 首字节与首段模型文本不同，流式响应中角色或思考片段不算有效文本。
 - 不记录任意响应头、请求头和完整响应；请求 ID 中的当前 Provider 密钥会被替换。
-- 诊断历史依赖历史记录开关与原有保留策略，面板读取最近 100 条；公开状态接口及 SSE 不暴露诊断元数据。
+- 诊断历史依赖历史记录开关与原有保留策略。面板可按 Provider、模型、结果、能力、错误类型和时间筛选，每页 25 / 50 / 100 条；公开状态接口及 SSE 不暴露诊断元数据。
 
 ## 模型清单
 
@@ -52,7 +52,7 @@
 
 人工接手只记录接手时间与备注，不把模型标为正常。新连接版本的观测会将旧版本未恢复事件标为“配置已变更”，不伪造旧接口恢复。
 
-面板最多显示 200 条，未恢复事件优先；数据库保留未恢复事件和最近 2000 条内的已结束事件。时间是检测观测边界，不代表精确故障发生时间或连续 uptime。事件与通知分别记录，不是一条事件对应一次通知。
+面板支持 Provider、模型、状态、发现时间筛选，并可单独查看模型发现事件；按 ID 倒序翻页，可选择「待恢复」查看未结束事件。数据库保留未恢复事件和最近 2000 条内的已结束事件。停用 / 暂停 Provider 不会被当作发现恢复证据。时间是检测观测边界，不代表精确故障发生时间或连续 uptime。事件与通知分别记录，不是一条事件对应一次通知。
 
 ## Provider 调度
 
@@ -77,7 +77,7 @@
 | `assert_json` | 文本必须是合法 JSON 对象，不接受数组或 null |
 | `assert_json_keys` | 逗号分隔的必需顶层字段名，启用时也要求 JSON 对象 |
 
-工具检测使用非流式 Chat Completions，要求返回指定函数名与 `{"ok":true}` 参数，只校验结构，永不执行外部工具。Embedding 检测调用 `/embeddings`，要求非空数值向量。两者不支持 Responses 或流式配置。
+工具检测使用非流式 Chat Completions，要求返回指定函数名与 `{"ok":true}` 参数，只校验结构，永不执行外部工具。Embedding 检测调用 `/embeddings`，要求非空数值向量。两者不支持 Responses、原生 Anthropic / Gemini 或流式配置。
 
 诊断分别记录 `passed`、`assertion_failed` 和 `request_failed`。断言不符只说明本次能力校验失败，不能据此断定模型质量或认定整个服务离线；仍按失败探测参与所配置范围的状态与告警。可选能力不会额外自动执行第二个请求。
 
@@ -96,6 +96,8 @@
 | 方法 | 路径 | 功能 |
 | --- | --- | --- |
 | GET | `/api/admin/monitoring` | 安全配置、诊断、清单、事件、备份、调度与费用 |
+| GET | `/api/admin/monitoring/diagnostics` | 诊断历史筛选及游标分页 |
+| GET | `/api/admin/monitoring/incidents` | 事件历史筛选及游标分页 |
 | PUT | `/api/admin/monitoring/settings` | 保存完整监控配置，必须携带读取到的 `version`；过期版本返回 409 |
 | POST | `/api/admin/monitoring/backup` | 手动备份 |
 | POST | `/api/admin/monitoring/verify` | `{ "name": "已登记的备份文件名" }` |
@@ -104,6 +106,12 @@
 | POST | `/api/admin/monitoring/test-rule` | `{ "id": "规则 ID" }` |
 
 监控配置在 SQLite `runtime_config` 的 `monitoring` 项中保存，不读取启动环境变量。原配置导入导出仍仅覆盖原运行设置和 Provider，不包含新监控配置；完整迁移应使用数据库备份。新表包括 `model_catalog`、`catalog_events`、`backups`、`incidents`、`provider_schedule`、`cost_daily`、`monitoring_events` 和 `monitoring_notices`，均在启动时创建。
+
+两个历史接口接受 `provider_id` / `model` 精确匹配、`status`、带时区 RFC3339 的 `start` / `end`（含开始、不含结束）、`limit`（1–100，默认 50）和 `before`（上一页 `next_before`）。诊断额外支持 `capability` 和 `error_type`；事件支持 `scope=models` / `discovery`，后者不能同时指定模型。
+
+返回 `{"items":[],"has_more":false,"next_before":0}`。历史按 ID 倒序；改变筛选条件须清空游标。新写入记录不会挤动后续页，但这不是跨请求的数据库快照，已恢复或被清理的记录可能改变筛选结果。旧聚合接口保留最近 100 条诊断与 200 条事件，兼容既有客户端。
+
+管理员请求的身份及结果在独立的[操作审计](audit.md)中查看，不与备份运行记录混为一谈。
 
 ## 验证
 

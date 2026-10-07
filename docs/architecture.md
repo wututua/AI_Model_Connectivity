@@ -35,7 +35,7 @@ cmd/cg/              程序入口
   users.go           初始管理员与旧版 Token 迁移
 internal/auth/       用户名/密码规则、密码哈希与校验
 internal/config/     进程环境变量解析、运行时配置模型与校验
-internal/provider/   Provider 抽象与 OpenAI 兼容实现、图标映射
+internal/provider/   OpenAI 兼容 / Anthropic / Gemini 协议适配、用量与图标映射
 internal/probe/      探测编排（收集目标 → 并发探测 → 结果）
 internal/report/     报告构建、历史裁剪、延迟统计、SVG 曲线
 internal/notify/     告警客户端与过滤、告警状态
@@ -52,7 +52,7 @@ docs/                本目录
 
 | 概念 | 说明 |
 |------|------|
-| Provider | 一个 OpenAI 兼容服务（base_url + api_key + 模型列表） |
+| Provider | 一个模型服务（base_url + api_key + 模型列表 + 显式探测协议） |
 | Model | Provider 下的一个模型，探测的最小单位 |
 | Target | `Provider × Model` 组合，探测任务单元 |
 | Result | 单次探测结果（状态、延迟、预览、错误、token 用量） |
@@ -89,7 +89,7 @@ application.StartCheck（HTTP 202）/ checkWithOptions（CLI、调度）
    │     │     └─ 失败/空列表 → ProviderError（仍生成 DEGRADED 报告）
    │     ├─ 去重、应用 SKIP_MODELS、MAX_MODELS_PER_PROVIDER 截断
    │     └─ probeTargets：先获取单 Provider 信号量，再获取全局信号量（CONCURRENCY）
-   │           └─ probeOne：POST /chat/completions，超时 TIMEOUT_SECONDS
+   │           └─ probeOne：按显式协议请求，应用全局或 Provider 超时
    │                 ├─ 延迟 ≥ SLOW_THRESHOLD_MS → slow
    │                 └─ 剥离 <think>/<thinking> 后校验非空；拒绝缺失消息与长度截断，成功时取前 80 字符为预览
    ├─ 模型发现失败：为上次报告中仍符合配置的已知模型补 unknown 记录
@@ -101,7 +101,7 @@ application.StartCheck（HTTP 202）/ checkWithOptions（CLI、调度）
    └─ 完成 check_tasks（success / error / canceled）
 ```
 
-HTTP 接受任务后用服务端独立上下文执行，断开连接不会取消；最长运行 30 分钟，停服会取消并等待收尾。取消时不更新最新报告、历史或告警，已确认响应的用量使用独立上下文保存。停止 API 仅作运维兼容，前端没有停止按钮。
+HTTP 接受任务后用服务端独立上下文执行，断开连接不会取消；最长运行 30 分钟，停服会取消并等待收尾。取消时不更新最新报告、历史或告警，已确认响应的用量使用独立上下文保存。管理员可通过概览进度或停止 API 取消任务。
 
 配置更新与最新快照写入通过 `configMu` 串行化；`report.WithConfig` 将报告投影到当前启用的 Provider/模型，删除或停用立即反映到持久快照和 SSE，防止在途检测把已删除项目重新放回监控页。
 

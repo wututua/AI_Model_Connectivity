@@ -155,6 +155,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/admin/diagnostics", s.adminDiagnostics)
 	mux.HandleFunc("/api/admin/monitoring", s.adminMonitoring)
 	mux.HandleFunc("/api/admin/monitoring/", s.adminMonitoring)
+	mux.HandleFunc("/api/admin/audit", s.adminAudit)
 	mux.HandleFunc("/api/admin/updates", s.adminUpdates)
 	mux.HandleFunc("/api/admin/updates/check", s.adminUpdateCheck)
 	mux.HandleFunc("/api/admin/updates/start", s.adminUpdateStart)
@@ -180,7 +181,7 @@ func (s *Server) Handler() http.Handler {
 		if strings.HasPrefix(r.URL.Path, "/api/") || r.URL.Path == "/metrics" {
 			w.Header().Set("Cache-Control", "no-store")
 		}
-		mux.ServeHTTP(w, r)
+		s.serveAudited(mux, w, r)
 	})
 }
 

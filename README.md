@@ -1,7 +1,7 @@
 <div align="center">
   <img src="assets/gpt_uptime_v2.png" alt="AI Model Connectivity" width="120">
   <h1>AI Model Connectivity</h1>
-  <p>自托管的 OpenAI 兼容接口连通性监控工具</p>
+  <p>自托管的 AI 模型接口连通性监控工具</p>
   <p>
     <a href="https://github.com/wututua/AI_Model_Connectivity/actions/workflows/ci.yml"><img src="https://github.com/wututua/AI_Model_Connectivity/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
     <a href="https://go.dev/"><img src="https://img.shields.io/badge/Go-1.26.8-00ADD8?logo=go&amp;logoColor=white" alt="Go 1.26.8"></a>
@@ -20,19 +20,20 @@ AI Model Connectivity（简称 CG）定期检测多个服务商及其模型，�
 
 > **版本状态**
 >
-> 当前版本为 [v1.0.0-beta.5](docs/releases/v1.0.0-beta.5.md)，适合评估和试用，不是稳定版。升级前请备份数据库，并阅读对应版本的 Release 说明。检测会调用真实模型接口并消耗 Token。
+> 当前版本为 [v1.0.0-beta.6](docs/releases/v1.0.0-beta.6.md)，适合评估和试用，不是稳定版。升级前请备份数据库，并阅读对应版本的 Release 说明。检测会调用真实模型接口并消耗 Token。
 
 ## 功能
 
-beta.5 新增[监控中心](docs/monitoring-center.md)：诊断详情、模型清单提醒、定期备份、独立告警、事件、Provider 调度、能力断言及费用估算。
+beta.6 新增 [Anthropic/Gemini 原生协议](docs/native-protocols.md)、监控历史筛选分页和[管理员操作审计](docs/audit.md)。[监控中心](docs/monitoring-center.md)还提供模型清单提醒、定期备份、独立告警、事件、Provider 调度、能力断言及费用估算。
 
 - **多服务商管理**：分组、标签、批量启停与暂停，无密钥复制配置，支持单模型和失败项重测。
-- **探测兼容性**：按 Provider 配置提示词、输出上限、temperature 和超时，支持 Chat Completions、Responses 及流式首段文本延迟。
+- **探测兼容性**：按 Provider 显式选择 Chat Completions、Responses、Anthropic Messages 或 Gemini generateContent，配置提示词、输出上限、temperature、超时和流式探测。
 - **模型选择**：手动指定模型或自动发现，支持全局与单 Provider 并发限制。
 - **状态监控**：实时状态、历史状态灯、延迟曲线、P50/P95/P99 和检测成功率。
 - **任务与用量**：实时检测进度、每日请求预算、自动发现确认阈值，支持历史与用量 CSV 导出。
 - **通知**：支持 Webhook、Telegram、Discord、Bark、企业微信和钉钉，提供范围过滤、恢复通知、冷却、防抖、维护窗口、测试、发送历史和手动重试。
 - **运维**：脱敏诊断导出、可轮换与撤销的 Prometheus 指标专用凭据。
+- **审计**：记录管理员操作及已验证身份，支持结果、操作、操作者和日期筛选；不记录请求正文或凭据。
 - **系统更新**：检查稳定版与预发布版本；脚本安装的 Linux 可显式启用管理员确认的一键更新、备份及失败恢复。
 - **账号权限**：管理员和只读用户，可为状态页开启登录保护。
 - **部署**：支持 Linux、Windows、macOS 二进制，以及 Docker 和 Docker Compose。
@@ -141,7 +142,7 @@ APP_PORT=8081 ./model-connectivity
 
 ## 兼容范围与限制
 
-- 支持 OpenAI 兼容的 Chat Completions / Responses 文本及流式探测，以及非流式工具调用结构与 Embedding 探测；不直接支持原生 Anthropic/Gemini、图像或音频探测。
+- 支持 OpenAI 兼容 Chat / Responses 和 Anthropic / Gemini 原生文本及流式探测。Provider 类型仅用于展示，升级不会自动切换协议。非流式工具调用结构与 Embedding 探测仍仅限 OpenAI 兼容配置；不支持图像或音频探测。
 - 旧配置默认仍为 `temperature=0`、`max_tokens=16`；参数支持取决于上游，兼容预设不能保证所有模型可用。详见[检测与运维功能](docs/monitoring-features.md)。
 - 未指定模型时会自动发现模型，可能扩大探测范围和 Token 消耗。
 - 检测成功率反映采样请求结果，不等于连续在线时间；用量仅来自上游返回的数据，不能替代供应商账单。
@@ -156,6 +157,8 @@ APP_PORT=8081 ./model-connectivity
 | 检查版本或启用后台更新 | [系统更新](docs/system-updates.md) |
 | 设置 Provider、通知或检测周期 | [配置参考](docs/configuration.md) |
 | 配置探测、预算、批量管理或数据导出 | [检测与运维功能](docs/monitoring-features.md) |
+| 连接 Anthropic / Gemini 原生接口 | [原生模型协议](docs/native-protocols.md) |
+| 查询管理员操作与审计限制 | [操作审计](docs/audit.md) |
 | 备份、恢复密码或排查故障 | [运维指南](docs/operations.md) |
 | 调用 API 或集成状态数据 | [HTTP API](docs/api.md) |
 | 了解架构并参与开发 | [开发指南](docs/development.md) |

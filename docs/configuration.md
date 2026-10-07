@@ -191,7 +191,7 @@ go run ./cmd/cg
 
 ### 图标匹配
 
-`provider.IconFor(id, type, name)` 依次用 ID、TYPE、NAME 小写精确匹配内置图标表，再按关键词匹配。完整映射见 [icons.go](../internal/provider/icons.go)，未命中时前端使用名称占位。品牌图标不代表支持该服务商的原生协议，检测仍使用 OpenAI 兼容接口。
+`provider.IconFor(id, type, name)` 依次用 ID、TYPE、NAME 小写精确匹配内置图标表，再按关键词匹配。完整映射见 [icons.go](../internal/provider/icons.go)，未命中时前端使用名称占位。品牌图标与协议独立；默认仍为 OpenAI 兼容接口，原生 Anthropic / Gemini 需显式配置 `probe.protocol`，见[原生模型协议](native-protocols.md)。
 
 ## 运行时修改与重启
 

@@ -1,6 +1,6 @@
 import { useState, type ComponentType } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
-import { Activity, ArrowLeft, BarChart3, Bell, Clock3, Database, Download, FileJson, KeyRound, LayoutDashboard, LogOut, Settings2, ShieldCheck, Users } from 'lucide-react'
+import { Activity, ArrowLeft, BarChart3, Bell, Clock3, Database, Download, FileJson, KeyRound, LayoutDashboard, LogOut, ScrollText, Settings2, ShieldCheck, Users } from 'lucide-react'
 import { useAuth } from '../hooks/useAuth'
 import { ThemeToggle } from '../components/ThemeToggle'
 import { ChangePassword } from '../components/ChangePassword'
@@ -21,8 +21,9 @@ import { NotificationsTab } from './admin/NotificationsTab'
 import { OperationsTab } from './admin/OperationsTab'
 import { UpdatesTab } from './admin/UpdatesTab'
 import { MonitoringTab } from './admin/MonitoringTab'
+import { AuditTab } from './admin/AuditTab'
 
-type Tab = 'overview' | 'providers' | 'settings' | 'tasks' | 'billing' | 'config' | 'users' | 'account' | 'notifications' | 'operations' | 'updates' | 'monitoring'
+type Tab = 'overview' | 'providers' | 'settings' | 'tasks' | 'billing' | 'config' | 'users' | 'account' | 'notifications' | 'operations' | 'updates' | 'monitoring' | 'audit'
 const TABS: { id: Tab; label: string; icon: ComponentType<{ className?: string }>; ownerOnly?: boolean }[] = [
   { id: 'overview', label: '运行概览', icon: LayoutDashboard },
   { id: 'providers', label: 'Provider', icon: Database },
@@ -32,6 +33,7 @@ const TABS: { id: Tab; label: string; icon: ComponentType<{ className?: string }
   { id: 'notifications', label: '通知记录', icon: Bell, ownerOnly: true },
   { id: 'billing', label: 'Token 用量', icon: BarChart3 },
   { id: 'users', label: '用户管理', icon: Users, ownerOnly: true },
+  { id: 'audit', label: '操作审计', icon: ScrollText, ownerOnly: true },
   { id: 'config', label: '配置管理', icon: FileJson, ownerOnly: true },
   { id: 'operations', label: '运维工具', icon: ShieldCheck, ownerOnly: true },
   { id: 'updates', label: '系统更新', icon: Download, ownerOnly: true },
@@ -99,6 +101,7 @@ export default function Admin() {
           {activeTab === 'notifications' && !readOnly && <NotificationsTab />}
           {activeTab === 'billing' && <BillingTab />}
           {activeTab === 'users' && !readOnly && <UsersTab />}
+          {activeTab === 'audit' && !readOnly && <AuditTab />}
           {activeTab === 'config' && !readOnly && <ConfigTab />}
           {activeTab === 'operations' && !readOnly && <OperationsTab />}
           {activeTab === 'updates' && !readOnly && <UpdatesTab />}

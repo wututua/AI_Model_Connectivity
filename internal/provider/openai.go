@@ -222,13 +222,7 @@ func (p *OpenAICompatible) Chat(ctx context.Context, model, systemPrompt, prompt
 			Usage responseUsage `json:"usage"`
 		}
 		if json.Unmarshal(respBody, &envelope) == nil {
-			usage.Known = envelope.Usage.promptReported && envelope.Usage.completionReported
-		}
-		usage.PromptTokens = parsed.Usage.PromptTokens
-		usage.CompletionTokens = parsed.Usage.CompletionTokens
-		usage.TotalTokens = parsed.Usage.TotalTokens
-		if usage.TotalTokens == 0 && (usage.PromptTokens > 0 || usage.CompletionTokens > 0) {
-			usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
+			usage = envelope.Usage.usage(false, 0)
 		}
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 || parsed.Error != nil {

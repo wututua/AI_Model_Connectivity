@@ -133,6 +133,10 @@ func (s *SQLiteStore) DiagnosticRecords(ctx context.Context) ([]DiagnosticRecord
 		return nil, err
 	}
 	defer rows.Close()
+	return readDiagnostics(rows)
+}
+
+func readDiagnostics(rows *sql.Rows) ([]DiagnosticRecord, error) {
 	out := []DiagnosticRecord{}
 	for rows.Next() {
 		var v DiagnosticRecord

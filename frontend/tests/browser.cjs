@@ -433,6 +433,8 @@ async function main() {
     await require('./admin-regressions.cjs')(browser, artifacts)
     await require('./notification-regressions.cjs')(browser, artifacts)
     await require('./feature-regressions.cjs')(browser, artifacts)
+    await require('./native-regressions.cjs')(browser, artifacts)
+    await require('./audit-regressions.cjs')(browser, artifacts)
     await require('./update-regressions.cjs')(browser, artifacts)
   } catch (error) {
     if (page && !page.isClosed()) {

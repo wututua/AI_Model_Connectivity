@@ -83,3 +83,38 @@ func TestEmbeddingAndToolProbes(t *testing.T) {
 		})
 	}
 }
+
+func TestEmbeddingUsageCannotOverrideInvalidCounts(t *testing.T) {
+	for _, test := range []struct {
+		name, raw string
+		known     bool
+	}{
+		{"complete", `{"prompt_tokens":2,"total_tokens":2}`, true},
+		{"prompt-only", `{"prompt_tokens":2}`, true},
+		{"negative-total", `{"prompt_tokens":2,"total_tokens":-1}`, false},
+		{"inconsistent-total", `{"prompt_tokens":2,"total_tokens":7}`, false},
+		{"negative-completion", `{"prompt_tokens":2,"completion_tokens":-1,"total_tokens":2}`, false},
+		{"unexpected-completion", `{"prompt_tokens":2,"completion_tokens":3,"total_tokens":5}`, false},
+		{"missing-prompt", `{"total_tokens":2}`, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.Write([]byte(`{"data":[{"index":0,"embedding":[0.1]}],"usage":` + test.raw + `}`))
+			}))
+			defer server.Close()
+			p := NewOpenAICompatible(config.ProviderConfig{BaseURL: server.URL, Probe: config.ProbeOptions{Capability: "embedding"}})
+			defer p.CloseIdleConnections()
+			_, usage, err := p.Chat(context.Background(), "fixture", "", "ping")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if usage.Known != test.known {
+				t.Fatalf("known=%v, want %v", usage.Known, test.known)
+			}
+			if test.name != "missing-prompt" && usage.PromptTokens != 2 {
+				t.Fatal("valid reported prompt tokens were lost")
+			}
+		})
+	}
+}

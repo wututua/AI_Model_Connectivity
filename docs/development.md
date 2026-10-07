@@ -68,7 +68,7 @@ Windows 构建输出可改为 `model-connectivity.exe`。二进制运行时仍�
 | `cmd/cg` | 应用生命周期、配置更新、检测事务与调度 |
 | `internal/config` | 环境变量解析、配置模型和校验 |
 | `internal/auth` | 账号规则、密码哈希与校验 |
-| `internal/provider` | Provider 抽象与 OpenAI 兼容客户端 |
+| `internal/provider` | Provider 抽象、OpenAI 兼容与 Anthropic / Gemini 原生客户端 |
 | `internal/probe` | 目标收集、并发与探测，不直接写库 |
 | `internal/report` | 报告聚合、投影、历史和统计 |
 | `internal/storage` | SQL、迁移与持久化领域操作 |
@@ -110,6 +110,16 @@ Windows 构建输出可改为 `model-connectivity.exe`。二进制运行时仍�
 CI 执行 Go 静态检查、Linux race 测试、govulncheck、npm audit、前端单元测试、构建和浏览器回归；发布工作流另有 Windows 单元测试。跨平台编译不代表已在每个目标平台运行测试。
 
 文档改动需检查链接、锚点和命令，不必重建应用。无法在本地执行的检查请在 PR 中说明，不能把“未运行”写成“通过”。
+
+### 发布包升级验收
+
+完整解压旧版与候选发布包后，可用 Node.js 24 执行真实 HTTP 升级检查：
+
+```bash
+node scripts/tests/test_release_upgrade.cjs /path/to/previous/model-connectivity /path/to/candidate/model-connectivity
+```
+
+Windows 使用对应的 `.exe` 路径。源码构建可用第三个参数指定候选 `web/` 的路径。脚本使用临时数据库、随机本地端口和模拟上游，检查账号 / 会话、配置、历史、用量、事件、备份以及新增原生协议和审计；完成后关闭自己的进程并删除临时数据，不读写部署数据或调用付费模型。此脚本面向 beta.5 到 beta.6 的升级，不替代 systemd、容器或生产数据的恢复演练。
 
 ## 发布
 

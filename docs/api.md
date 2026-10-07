@@ -143,7 +143,7 @@ curl -X POST -b cookies.txt -H "X-CSRF-Token: $CSRF" http://127.0.0.1:8080/api/a
 
 ### `POST /api/admin/detection/stop`
 
-仅保留管理员 API，前端不显示停止按钮。返回 `{"ok":true,"stopped":true}`。未完成任务标记 `canceled`，不更新报告/历史/告警，但已确认响应的用量仍会入账。正常停服也会取消并收尾后台任务。
+仅管理员可用，概览的运行中检测进度提供停止操作。返回 `{"ok":true,"stopped":true}`。未完成任务标记 `canceled`，不更新报告/历史/告警，但已确认响应的用量仍会入账。正常停服也会取消并收尾后台任务。
 
 ## 账号与用户管理
 
@@ -221,6 +221,22 @@ curl -X POST -b cookies.txt -H "X-CSRF-Token: $CSRF" -H 'Content-Type: applicati
 ```
 
 `{id}` 需 URL 编码。单 Provider 重跑会用 `report.MergeProvider` 把结果合并回上次完整报告，其余 Provider 数据保持不变。
+
+模型同步的 `ModelDiscoveryRequest` 可额外指定 `protocol`（`chat` / `responses` / `anthropic` / `gemini`）；省略时继承 `provider_id` 对应配置，未指定 Provider 时默认为兼容 Chat。切回兼容协议应显式传 `chat`。原生发现每页计入预算，失败不返回部分模型列表，见[原生协议](native-protocols.md)。
+
+## 监控历史与审计
+
+以下均仅管理员可读取，不返回请求 / 响应正文：
+
+| 接口 | 行为 |
+| --- | --- |
+| `GET /api/admin/monitoring/diagnostics` | 按 Provider、模型、状态、能力、错误类型及检测时间筛选 |
+| `GET /api/admin/monitoring/incidents` | 按 Provider、模型、状态、事件范围及发现时间筛选 |
+| `GET /api/admin/audit` | 按已验证操作者、操作、结果及时间筛选 |
+
+返回 `items` / `has_more` / `next_before`，按 ID 倒序。`limit` 为 1–100，默认 50；下一页传入 `before=next_before`，改变筛选时清空游标。`start` / `end` 为带时区 RFC3339 时间，含开始、不含结束，不同于 CSV 导出的自然日参数。
+
+具体筛选字段及保留限制见[监控中心](monitoring-center.md#api-与存储)和[操作审计](audit.md#api)。普通用户返回 403，未登录返回 401；历史读取不会触发模型请求。
 
 ## 任务历史
 
