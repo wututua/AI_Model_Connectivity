@@ -56,7 +56,24 @@ module.exports = async function nativeRegressions(browser, artifacts) {
       assert.equal(await page.getByRole('combobox', { name: 'Token 参数', exact: true }).count(), 0)
       assert.equal(await page.getByLabel('Temperature', { exact: true }).getAttribute('max'), '1')
       assert.equal(await page.getByLabel('Base URL', { exact: true }).inputValue(), 'https://example.invalid/v1')
+      // Dispatch Escape in the registration window before the parent layer rerenders.
+      await page.evaluate(() => {
+        window.escapeDuringRegistration = false
+        const onLayerUpdate = () => {
+          const listbox = document.querySelector('[role="listbox"]')
+          if (!listbox) return
+          document.removeEventListener('dismissableLayer.update', onLayerUpdate)
+          window.escapeDuringRegistration = true
+          listbox.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+        }
+        document.addEventListener('dismissableLayer.update', onLayerUpdate)
+      })
       await page.getByRole('combobox', { name: '检测能力', exact: true }).click()
+      assert.equal(await page.evaluate(() => window.escapeDuringRegistration), true, 'nested layer registration was not exercised')
+      await page.getByRole('dialog').waitFor({ state: 'visible' })
+      if (!await page.getByRole('listbox').count()) {
+        await page.getByRole('combobox', { name: '检测能力', exact: true }).click()
+      }
       assert.equal(await page.getByRole('option', { name: '工具调用结构', exact: true }).getAttribute('aria-disabled'), 'true')
       await page.waitForFunction(() => document.querySelector('[role="listbox"]')?.contains(document.activeElement))
       await page.keyboard.press('Escape')

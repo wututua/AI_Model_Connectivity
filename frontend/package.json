@@ -4,8 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "postinstall": "node scripts/patch-radix.cjs",
     "dev": "vite",
-    "test": "node --test tests/status.test.mjs tests/liveStatus.test.mjs tests/usageChart.test.mjs tests/password.test.mjs tests/models.test.mjs tests/fonts.test.mjs tests/preferences.test.mjs tests/theme.test.mjs",
+    "test": "node --test tests/status.test.mjs tests/liveStatus.test.mjs tests/usageChart.test.mjs tests/password.test.mjs tests/models.test.mjs tests/fonts.test.mjs tests/preferences.test.mjs tests/theme.test.mjs tests/radixPatch.test.cjs",
     "test:browser": "node tests/browser.cjs",
     "test:monitoring": "node tests/monitoring.cjs",
     "build": "tsc -b && vite build",

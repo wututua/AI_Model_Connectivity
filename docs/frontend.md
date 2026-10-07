@@ -179,6 +179,19 @@ npm run build --prefix frontend
 
 发布包与后端依赖预构建 `web/`，前端源码与产物需要同步提交。不要把本地数据库、凭据或测试截图放入静态目录。
 
+### Radix 弹层补丁
+
+`npm ci --prefix frontend` 的 `postinstall` 运行不增加依赖的
+`frontend/scripts/patch-radix.cjs`，校验版本及补丁前后 SHA-256；
+两个模块入口全部验证成功后才写入，重复运行不会重复修改。应用失败会使安装失败，不要用
+`--ignore-scripts` 跳过。补丁仅在 Escape 事件发生时重新核对最上层弹层，
+避免下拉菜单刚注册时误关闭外层编辑窗口并丢失草稿。
+
+对应上游 [Radix #4143](https://github.com/radix-ui/primitives/issues/4143)。
+截至本次检查，1.1.19 和 1.1.20 的发布包仍包含该问题。升级依赖时应核对上游修复，
+重新运行 `native-regressions.cjs` 中注册时序和正常 Escape 的回归，再移除补丁；
+不要在补丁不能应用时直接关闭安装检查。CommonJS 和 ESM 入口均已覆盖。
+
 ## 浏览器回归
 
 浏览器测试直接读取构建后的 `web/` 并模拟 API，不启动真实检测、不读写业务数据库。先构建，再使用本机 Chrome：

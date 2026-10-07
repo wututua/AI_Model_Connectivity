@@ -77,6 +77,11 @@ Confirmed findings and fixes:
    contradictory totals, negative totals/output or unexpected output as known.
    Four regression cases failed before the fix. Embeddings now declare only
    their inherent zero output while retaining shared consistency validation.
+5. Linux browser gates exposed Radix's stale Escape listener closing the outer
+   Provider dialog while a select layer registers. The new deterministic browser
+   regression also failed locally before the fix. A fail-closed postinstall
+   patch with version/hash checks rechecks the layer stack in both module formats;
+   see upstream issue #4143 and `frontend.md` for removal criteria.
 
 Review inventory:
 
@@ -113,7 +118,8 @@ Fresh local evidence during implementation:
 
 - `go test ./... -count=1 -timeout=180s`: PASS after the final embedding fix.
 - `go vet ./...`: PASS after the final embedding fix.
-- `npm test --prefix frontend`: 36 PASS.
+- `npm test --prefix frontend`: 39 PASS, including patch integrity/idempotence
+  and rejection of unreviewed source/version changes.
 - `npm run build --prefix frontend`: PASS after native/history/audit UI integration.
 - `npm run test:browser --prefix frontend`: PASS for the complete combined suite,
   including native protocol, audit and all prior regressions.
@@ -125,6 +131,11 @@ Fresh local evidence during implementation:
   audit captures disable theme transitions.
 - Installer isolation suite: 39 PASS with Git Bash on Windows.
 - `npm audit --prefix frontend --audit-level=low`: zero vulnerabilities.
+- Clean `npm ci` applies the version/hash-checked Radix patch. The deterministic
+  Escape registration regression failed before it and passed afterwards at
+  320px/1440px, including three Chromium repetitions and the full browser suite.
+  A candidate patching dependency introduced audit findings and was removed;
+  the final patch runner uses only Node built-ins and adds no dependencies.
 - `govulncheck` v1.8.0 on the final tree: no vulnerabilities found. The Go proxy
   timed out during tool resolution; built the same pinned, cached module and
   ran the scanner normally against the vulnerability database.
@@ -145,8 +156,10 @@ not inferred from local tests:
   failed in the native browser regression while waiting for model discovery.
   The request waiter could reject before the click was awaited, hiding the
   useful interaction error. The regression now joins both promises, waits for
-  select focus/closure and saves failure screenshots in CI artifacts. Local
-  Chromium repetitions alone do not establish that the Linux gate is fixed.
+  select focus/closure and saves failure screenshots in CI artifacts. CI #60
+  and release #41 exposed the prematurely closed dialog, identifying the
+  dependency defect above. Local Chromium repetitions alone do not establish
+  that the Linux gate is fixed.
 - Push main and wait for Linux race, Windows, dependency and installer gates.
 - Create beta.6 only after those gates pass, then verify the Release, all eight
   assets/checksums, downloaded binary/version/migration and Docker prerelease tag.
