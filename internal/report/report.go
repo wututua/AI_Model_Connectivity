@@ -40,6 +40,7 @@ type ModelResult struct {
 }
 
 type ProviderReport struct {
+	StaleAfterSeconds  int           `json:"stale_after_seconds,omitempty"`
 	ConnectionRevision string        `json:"connection_revision,omitempty"`
 	ProviderID         string        `json:"provider_id"`
 	ProviderType       string        `json:"provider_type"`

@@ -22,6 +22,16 @@ func (s *SQLiteStore) initNotifications(ctx context.Context) error {
 		summary TEXT NOT NULL,
 		error_message TEXT NOT NULL DEFAULT ''
 	)`)
+	if err != nil {
+		return err
+	}
+	exists, err := columnExists(ctx, s.db, "notification_deliveries", "rule_id")
+	if err != nil {
+		return err
+	}
+	if !exists {
+		_, err = s.db.ExecContext(ctx, `ALTER TABLE notification_deliveries ADD COLUMN rule_id TEXT NOT NULL DEFAULT ''`)
+	}
 	return err
 }
 
@@ -39,8 +49,8 @@ func (s *SQLiteStore) CreateDelivery(ctx context.Context, value notify.Delivery)
 	}
 	defer tx.Rollback()
 	result, err := tx.ExecContext(ctx, `INSERT INTO notification_deliveries
-		(kind, retry_of, platform, status, created_at, summary) VALUES (?, ?, ?, 'sending', ?, ?)`,
-		value.Kind, value.RetryOf, value.Platform, value.CreatedAt, value.Summary)
+		(kind, retry_of, platform, status, created_at, summary, rule_id) VALUES (?, ?, ?, 'sending', ?, ?, ?)`,
+		value.Kind, value.RetryOf, value.Platform, value.CreatedAt, value.Summary, value.RuleID)
 	if err != nil {
 		return notify.Delivery{}, err
 	}
@@ -77,7 +87,7 @@ func (s *SQLiteStore) FinishDelivery(ctx context.Context, value notify.Delivery)
 	return err
 }
 
-const deliveryColumns = `id, kind, retry_of, platform, status, created_at, finished_at, elapsed_ms, http_status, summary, error_message`
+const deliveryColumns = `id, kind, retry_of, platform, status, created_at, finished_at, elapsed_ms, http_status, summary, error_message, rule_id`
 
 func (s *SQLiteStore) ListDeliveries(ctx context.Context, query notify.DeliveryQuery) ([]notify.Delivery, error) {
 	if query.Limit <= 0 {
@@ -110,6 +120,6 @@ func (s *SQLiteStore) GetDelivery(ctx context.Context, id int64) (notify.Deliver
 func scanDelivery(row interface{ Scan(...any) error }) (notify.Delivery, error) {
 	var value notify.Delivery
 	err := row.Scan(&value.ID, &value.Kind, &value.RetryOf, &value.Platform, &value.Status,
-		&value.CreatedAt, &value.FinishedAt, &value.ElapsedMS, &value.HTTPStatus, &value.Summary, &value.ErrorMessage)
+		&value.CreatedAt, &value.FinishedAt, &value.ElapsedMS, &value.HTTPStatus, &value.Summary, &value.ErrorMessage, &value.RuleID)
 	return value, err
 }

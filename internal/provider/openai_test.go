@@ -79,7 +79,7 @@ func TestErrorEnvelopePreservesReportedUsage(t *testing.T) {
 			if err == nil || text != "" || strings.Contains(err.Error(), "secret-key") {
 				t.Fatalf("HTTP %d: unsafe or missing error: %v", status, err)
 			}
-			if usage != (Usage{PromptTokens: 3, CompletionTokens: 5, TotalTokens: 8}) {
+			if usage != (Usage{Known: true, PromptTokens: 3, CompletionTokens: 5, TotalTokens: 8}) {
 				t.Errorf("HTTP %d discarded reported usage: %+v", status, usage)
 			}
 		}

@@ -158,6 +158,8 @@ func main() {
 		defer background.Done()
 		app.scheduler(ctx)
 	}()
+	background.Add(1)
+	go func() { defer background.Done(); app.backupScheduler(ctx) }()
 
 	srv := web.NewServer(cfg, store, app.check, broker, app)
 	srv.SetMetrics(app.metrics)
@@ -610,6 +612,10 @@ func (a *application) runCheck(ctx context.Context, options checkOptions, counts
 	started := time.Now()
 	cfg := a.currentConfig()
 	fullCfg := cfg
+	monitoring, err := a.store.MonitoringSettings(ctx)
+	if err != nil {
+		return report.Report{}, err
+	}
 	if options.ProviderID != "" {
 		filtered, ok := filterProvider(cfg, options.ProviderID)
 		if !ok {
@@ -631,6 +637,17 @@ func (a *application) runCheck(ctx context.Context, options checkOptions, counts
 		cfg = selectedConfig(cfg, options.Targets)
 	}
 	runner := probe.NewRunner(cfg)
+	runner.SetSlowThresholds(monitoring.Schedules)
+	runner.SetCatalogObserver(func(ctx context.Context, observed config.ProviderConfig, models []string) ([]string, error) {
+		a.configMu.Lock()
+		defer a.configMu.Unlock()
+		for _, current := range a.currentConfig().Providers {
+			if current.ID == observed.ID && current.ConnectionRevision == observed.ConnectionRevision && len(current.Models) == 0 {
+				return a.store.ObserveCatalog(ctx, observed, models)
+			}
+		}
+		return nil, errors.New("provider changed during discovery")
+	})
 	runner.SetRequestGuard(a.reserveRequest)
 	runner.SetObserver(func(progress probe.Progress) {
 		a.mu.Lock()
@@ -716,10 +733,48 @@ func (a *application) runCheck(ctx context.Context, options checkOptions, counts
 		return report.Report{}, fmt.Errorf("save probe results: %w", err)
 	}
 	usageSaved = true
+	currentProviders := a.currentConfig()
+	validResults := []probe.Result{}
+	for _, result := range results {
+		for _, p := range cfg.Providers {
+			if p.ID != result.ProviderID {
+				continue
+			}
+			for _, current := range currentProviders.Providers {
+				if p.ID == current.ID && p.ConnectionRevision == current.ConnectionRevision {
+					validResults = append(validResults, result)
+				}
+			}
+		}
+	}
+	if len(options.Targets) == 0 {
+		discoveryFailed := map[string]bool{}
+		for _, failure := range providerErrors {
+			discoveryFailed[failure.ProviderID] = true
+		}
+		for _, observedProvider := range cfg.Providers {
+			for _, current := range currentProviders.Providers {
+				if current.ID != observedProvider.ID || current.ConnectionRevision != observedProvider.ConnectionRevision {
+					continue
+				}
+				status := "ok"
+				if discoveryFailed[current.ID] {
+					status = "error"
+				}
+				validResults = append(validResults, probe.Result{ProviderID: current.ID, Model: "", Status: status, Completed: true, CheckedAt: time.Now().UTC().Format(time.RFC3339)})
+			}
+		}
+	}
+	if err := a.store.ObserveIncidents(ctx, cfg, validResults); err != nil {
+		slog.Warn("save incidents failed", "err", err)
+	}
 	if options.SaveLatest && a.broker != nil {
 		a.broker.Publish(value)
 	}
 	a.configMu.Unlock()
+	if options.SaveLatest && len(options.Targets) == 0 {
+		a.sendRuleAlerts(ctx, observed, fullCfg, options.ProviderID, monitoring)
+	}
 	if options.SaveLatest && len(options.Targets) == 0 && options.ProviderID == "" {
 		a.setPhase("notifying")
 		notifyCfg := a.currentConfig()
@@ -732,36 +787,46 @@ func (a *application) runCheck(ctx context.Context, options checkOptions, counts
 }
 
 func (a *application) scheduler(ctx context.Context) {
+	nextGlobal := time.Time{}
+	var previousRange [2]float64
 	for {
 		cfg := a.currentConfig()
 		minHours, maxHours, ok := intervalRange(cfg)
-		if !ok {
-			select {
-			case <-a.schedulerWake:
+		settings, err := a.store.MonitoringSettings(ctx)
+		independent := false
+		for _, schedule := range settings.Schedules {
+			if schedule.IntervalMinutes <= 0 {
 				continue
-			case <-ctx.Done():
-				return
+			}
+			for _, p := range cfg.Providers {
+				if p.ID == schedule.ProviderID && p.Enabled && p.ProbeEnabled {
+					independent = true
+				}
 			}
 		}
-		interval := max(time.Duration((minHours+mathrand.Float64()*(maxHours-minHours))*float64(time.Hour)), time.Minute)
-		slog.Info("next scheduled check", "interval", interval.Round(time.Minute).String(), "at", time.Now().Add(interval).Format("15:04"))
-		timer := time.NewTimer(interval)
+		if err == nil && independent {
+			nextGlobal = time.Time{}
+			a.runProviderSchedules(ctx, cfg, settings)
+		} else if err == nil && ok {
+			currentRange := [2]float64{minHours, maxHours}
+			if nextGlobal.IsZero() || previousRange != currentRange {
+				interval := max(time.Duration((minHours+mathrand.Float64()*(maxHours-minHours))*float64(time.Hour)), time.Minute)
+				nextGlobal, previousRange = time.Now().Add(interval), currentRange
+			}
+			if !time.Now().Before(nextGlobal) {
+				if _, err := a.checkWithOptions(ctx, checkOptions{Kind: "scheduled", SaveLatest: true}); err != nil && !errors.Is(err, web.ErrCheckAlreadyRunning) && !errors.Is(err, storage.ErrBudgetExceeded) {
+					slog.Warn("scheduled check failed", "err", err)
+				}
+				nextGlobal = time.Time{}
+			}
+		} else if !ok {
+			nextGlobal = time.Time{}
+		}
+		timer := time.NewTimer(time.Minute)
 		select {
 		case <-timer.C:
-			budget, err := a.store.RequestBudget(ctx, a.currentConfig().DailyRequestLimit)
-			if err != nil || budget.Exhausted {
-				continue
-			}
-			if _, err := a.checkWithOptions(ctx, checkOptions{Kind: "scheduled", SaveLatest: true}); err != nil {
-				if errors.Is(err, web.ErrCheckAlreadyRunning) {
-					slog.Warn("scheduled check skipped", "err", err)
-					continue
-				}
-				slog.Error("scheduled check failed", "err", err)
-			}
 		case <-a.schedulerWake:
 			timer.Stop()
-			continue
 		case <-ctx.Done():
 			timer.Stop()
 			return

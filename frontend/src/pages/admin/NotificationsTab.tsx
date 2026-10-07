@@ -13,7 +13,7 @@ import { Feedback, ListSkeleton, LoadingButton } from './shared'
 
 const LIMIT = 20
 const STATUS = { sending: '发送中', success: '平台已接受', error: '发送失败', unknown: '结果未知' } as const
-const KIND = { alert: '状态告警', test: '测试通知', retry: '手动重试' } as const
+const KIND = { alert: '状态告警', test: '测试通知', retry: '手动重试', operations: '运维提醒' } as const
 const PLATFORM: Record<string, string> = { webhook: 'Webhook', discord: 'Discord', telegram: 'Telegram', bark: 'Bark', wecom: '企业微信', wechat_work: '企业微信', dingtalk: '钉钉' }
 
 export function NotificationsTab() {
@@ -106,7 +106,7 @@ export function NotificationsTab() {
           <TableHeader><TableRow><TableHead>时间与类型</TableHead><TableHead>渠道</TableHead><TableHead>发送结果</TableHead><TableHead>摘要</TableHead><TableHead className="w-12"><span className="sr-only">操作</span></TableHead></TableRow></TableHeader>
           <TableBody>{items.map(item => <TableRow key={item.id}>
             <TableCell className="align-top"><p className="whitespace-nowrap text-xs">{formatDate(item.created_at)}</p><p className="mt-1 text-xs text-muted-foreground">#{item.id} · {KIND[item.kind]}{item.retry_of ? ` · 原记录 #${item.retry_of}` : ''}</p></TableCell>
-            <TableCell className="align-top text-xs">{PLATFORM[item.platform] ?? item.platform}</TableCell>
+            <TableCell className="align-top text-xs">{PLATFORM[item.platform] ?? item.platform}{item.rule_id && <p className="mt-1 break-all text-muted-foreground">规则 {item.rule_id}</p>}</TableCell>
             <TableCell className="align-top"><DeliveryStatus value={item} /></TableCell>
             <TableCell className="max-w-sm align-top"><p className="break-words text-xs">{item.summary}</p>{item.error_message && <p className="mt-1 break-words text-xs text-destructive">{item.error_message}</p>}</TableCell>
             <TableCell className="align-top">{retryButton(item)}</TableCell>
@@ -117,6 +117,7 @@ export function NotificationsTab() {
         <div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="text-sm font-medium">{KIND[item.kind]} · {PLATFORM[item.platform] ?? item.platform}</p><p className="mt-1 text-xs text-muted-foreground">#{item.id} · {formatDate(item.created_at)}</p></div>{retryButton(item)}</div>
         <DeliveryStatus value={item} />
         {item.retry_of > 0 && <p className="text-xs text-muted-foreground">原记录 #{item.retry_of}</p>}
+        {item.rule_id && <p className="break-all text-xs text-muted-foreground">规则 {item.rule_id}</p>}
         <p className="break-words text-xs">{item.summary}</p>
         {item.error_message && <p className="break-words text-xs text-destructive">{item.error_message}</p>}
       </section>)}</div>

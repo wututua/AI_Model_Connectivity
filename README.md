@@ -20,9 +20,11 @@ AI Model Connectivity（简称 CG）定期检测多个服务商及其模型，�
 
 > **版本状态**
 >
-> 当前版本为 [v1.0.0-beta.3](docs/releases/v1.0.0-beta.3.md)，适合评估和试用，不是稳定版。升级前请备份数据库，并阅读对应版本的 Release 说明。检测会调用真实模型接口并消耗 Token。
+> 当前版本为 [v1.0.0-beta.4](docs/releases/v1.0.0-beta.4.md)，适合评估和试用，不是稳定版。升级前请备份数据库，并阅读对应版本的 Release 说明。检测会调用真实模型接口并消耗 Token。
 
 ## 功能
+
+beta.4 新增[监控中心](docs/monitoring-center.md)：诊断详情、模型清单提醒、定期备份、独立告警、事件、Provider 调度、能力断言及费用估算。
 
 - **多服务商管理**：分组、标签、批量启停与暂停，无密钥复制配置，支持单模型和失败项重测。
 - **探测兼容性**：按 Provider 配置提示词、输出上限、temperature 和超时，支持 Chat Completions、Responses 及流式首段文本延迟。
@@ -139,7 +141,7 @@ APP_PORT=8081 ./model-connectivity
 
 ## 兼容范围与限制
 
-- 支持 OpenAI 兼容的 Chat Completions / Responses 文本探测及对应流式响应，不直接支持原生 Anthropic/Gemini、图像、音频、嵌入或工具调用探测。
+- 支持 OpenAI 兼容的 Chat Completions / Responses 文本及流式探测，以及非流式工具调用结构与 Embedding 探测；不直接支持原生 Anthropic/Gemini、图像或音频探测。
 - 旧配置默认仍为 `temperature=0`、`max_tokens=16`；参数支持取决于上游，兼容预设不能保证所有模型可用。详见[检测与运维功能](docs/monitoring-features.md)。
 - 未指定模型时会自动发现模型，可能扩大探测范围和 Token 消耗。
 - 检测成功率反映采样请求结果，不等于连续在线时间；用量仅来自上游返回的数据，不能替代供应商账单。

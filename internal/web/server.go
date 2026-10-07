@@ -153,6 +153,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/admin/billing", s.adminBilling)
 	mux.HandleFunc("/api/admin/export", s.adminExportData)
 	mux.HandleFunc("/api/admin/diagnostics", s.adminDiagnostics)
+	mux.HandleFunc("/api/admin/monitoring", s.adminMonitoring)
+	mux.HandleFunc("/api/admin/monitoring/", s.adminMonitoring)
 	mux.HandleFunc("/api/admin/updates", s.adminUpdates)
 	mux.HandleFunc("/api/admin/updates/check", s.adminUpdateCheck)
 	mux.HandleFunc("/api/admin/updates/start", s.adminUpdateStart)
@@ -212,7 +214,30 @@ func (s *Server) publicReport(ctx context.Context, value report.Report) report.R
 			return report.WithConfig(report.Report{}, config.AdminConfig{})
 		}
 	}
-	return report.WithConfig(value, cfg)
+	value = report.WithConfig(value, cfg)
+	var monitoring config.MonitoringSettings
+	var monitoringErr error
+	if s.store != nil {
+		monitoring, monitoringErr = s.store.MonitoringSettings(ctx)
+	}
+	baseStale := value.StaleAfterSeconds
+	value.Providers = append([]report.ProviderReport{}, value.Providers...)
+	for i := range value.Providers {
+		if monitoringErr == nil {
+			value.Providers[i].StaleAfterSeconds = baseStale
+			for _, schedule := range monitoring.Schedules {
+				if schedule.ProviderID == value.Providers[i].ProviderID && schedule.IntervalMinutes > 0 {
+					value.Providers[i].StaleAfterSeconds = max(600, schedule.IntervalMinutes*60+120)
+					value.StaleAfterSeconds = max(value.StaleAfterSeconds, value.Providers[i].StaleAfterSeconds)
+				}
+			}
+		}
+		value.Providers[i].Results = append([]report.ModelResult{}, value.Providers[i].Results...)
+		for j := range value.Providers[i].Results {
+			value.Providers[i].Results[j].Diagnostics = nil
+		}
+	}
+	return value
 }
 
 func (s *Server) events(w http.ResponseWriter, r *http.Request) {

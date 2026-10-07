@@ -120,9 +120,12 @@ func (p *OpenAICompatible) Models(ctx context.Context) ([]string, error) {
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, (1<<20)+1))
 	if err != nil {
 		return nil, err
+	}
+	if len(body) > 1<<20 {
+		return nil, errors.New("models response exceeds 1 MiB")
 	}
 	var parsed modelsResponse
 	parseErr := json.Unmarshal(body, &parsed)
@@ -157,6 +160,9 @@ func (p *OpenAICompatible) Chat(ctx context.Context, model, systemPrompt, prompt
 	}
 	if options.OmitSystemPrompt {
 		systemPrompt = ""
+	}
+	if options.Capability == "embedding" || options.Capability == "tools" {
+		return p.capabilityProbe(ctx, model, prompt)
 	}
 	if options.Protocol == "responses" {
 		return p.responses(ctx, model, systemPrompt, prompt)
@@ -212,6 +218,12 @@ func (p *OpenAICompatible) Chat(ctx context.Context, model, systemPrompt, prompt
 	parseErr := json.Unmarshal(respBody, &parsed)
 	usage := Usage{}
 	if parsed.Usage != nil {
+		var envelope struct {
+			Usage responseUsage `json:"usage"`
+		}
+		if json.Unmarshal(respBody, &envelope) == nil {
+			usage.Known = envelope.Usage.promptReported && envelope.Usage.completionReported
+		}
 		usage.PromptTokens = parsed.Usage.PromptTokens
 		usage.CompletionTokens = parsed.Usage.CompletionTokens
 		usage.TotalTokens = parsed.Usage.TotalTokens

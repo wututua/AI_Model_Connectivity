@@ -10,7 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 import { Feedback, ListSkeleton, StatusBadge } from './shared'
 
 const LIMIT = 20
-const KIND_LABELS: Record<string, string> = { manual: '手动检测', scheduled: '定时检测', startup: '启动检测', provider: 'Provider 检测', models: '模型检测', failed: '失败项重测' }
+const KIND_LABELS: Record<string, string> = { manual: '手动检测', scheduled: '定时检测', 'scheduled-provider': 'Provider 定时检测', startup: '启动检测', provider: 'Provider 检测', models: '模型检测', failed: '失败项重测' }
 
 export function TasksTab() {
   const [data, setData] = useState<{ offset: number; filter: string; tasks: CheckTask[] } | null>(null)

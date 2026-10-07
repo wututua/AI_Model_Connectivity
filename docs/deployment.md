@@ -69,7 +69,7 @@ sudo bash install-model-connectivity.sh
 sudo bash install-model-connectivity.sh install --channel preview
 
 # 固定一个已发布版本；自动化运行时显式确认
-sudo bash install-model-connectivity.sh install --version v1.0.0-beta.3 --yes
+sudo bash install-model-connectivity.sh install --version v1.0.0-beta.4 --yes
 
 # 指定监听地址和端口；不要直接暴露尚未加固的管理入口
 sudo bash install-model-connectivity.sh install \

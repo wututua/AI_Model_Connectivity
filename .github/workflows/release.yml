@@ -76,6 +76,12 @@ jobs:
           PLAYWRIGHT_CHANNEL: chromium
         run: npm run test:browser
 
+      - name: Monitoring center browser tests
+        working-directory: frontend
+        env:
+          PLAYWRIGHT_CHANNEL: chromium
+        run: npm run test:monitoring
+
       - name: Upload web artifact
         uses: actions/upload-artifact@v4
         with:

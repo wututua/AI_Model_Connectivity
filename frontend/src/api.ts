@@ -16,6 +16,7 @@ import type {
   AuthSession, User, UserInput,
   SystemUpdateStatus, SystemUpdateCheck, SystemUpdateJob,
 } from './types'
+import type { MonitoringData, MonitoringSettings } from './monitoring'
 
 try { localStorage.removeItem('cg_admin_token') } catch { /* Storage may be disabled. */ }
 let csrfToken = ''
@@ -53,6 +54,9 @@ async function sessionRequest(method: string, path: string, body?: unknown): Pro
 }
 
 export const api = {
+  monitoring: (signal?: AbortSignal) => request<MonitoringData>('GET', '/api/admin/monitoring', undefined, false, signal),
+  saveMonitoring: (value: MonitoringSettings) => request<MonitoringSettings>('PUT', '/api/admin/monitoring/settings', value),
+  monitoringAction: (action: 'backup' | 'verify' | 'approve' | 'ack' | 'test-rule', value?: unknown) => request('POST', `/api/admin/monitoring/${action}`, value),
   updateStatus: (signal?: AbortSignal) => request<SystemUpdateStatus>('GET', '/api/admin/updates', undefined, false, signal),
   resolveUpdate: (request_id: string, signal?: AbortSignal) =>
     request<SystemUpdateStatus>('POST', '/api/admin/updates/resolve', { request_id }, false, signal),

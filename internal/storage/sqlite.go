@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"cg/internal/config"
@@ -24,8 +25,10 @@ import (
 const sqliteRetentionDays = 90
 
 type SQLiteStore struct {
-	db      *sql.DB
-	dataDir string
+	db        *sql.DB
+	dataDir   string
+	backupMu  sync.Mutex
+	monitorMu sync.Mutex
 }
 
 type SQLiteNotifyStateStore struct {
@@ -135,6 +138,10 @@ func NewSQLite(ctx context.Context, databasePath, dataDir string) (*SQLiteStore,
 		return nil, err
 	}
 	if err := protectDatabaseFiles(databasePath); err != nil {
+		db.Close()
+		return nil, err
+	}
+	if err := store.initMonitoring(ctx); err != nil {
 		db.Close()
 		return nil, err
 	}
@@ -280,6 +287,24 @@ func (s *SQLiteStore) init(ctx context.Context) error {
 			}
 		}
 	}
+	for _, name := range []string{"capability", "capability_status"} {
+		exists, err := columnExists(ctx, s.db, "probe_results", name)
+		if err != nil {
+			return err
+		}
+		if !exists {
+			if _, err := s.db.ExecContext(ctx, `ALTER TABLE probe_results ADD COLUMN `+name+` TEXT NOT NULL DEFAULT ''`); err != nil {
+				return err
+			}
+		}
+	}
+	if exists, err := columnExists(ctx, s.db, "probe_results", "diagnostics_json"); err != nil {
+		return err
+	} else if !exists {
+		if _, err := s.db.ExecContext(ctx, `ALTER TABLE probe_results ADD COLUMN diagnostics_json TEXT NOT NULL DEFAULT '{}'`); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -387,6 +412,15 @@ func (s *SQLiteStore) RecordCheck(ctx context.Context, results []probe.Result, c
 		checked := resultTime(result, checkedAt).Format(time.RFC3339)
 		if _, err := stmt.ExecContext(ctx, result.ProviderID, result.ProviderType, result.ProviderName, result.Model, result.Status, result.LatencyMS, checked, errorType(result), result.Error, result.ResponsePreview, provider.ModelKey(result.ProviderID, result.Model), result.PromptTokens, result.CompletionTokens, result.TotalTokens, result.FirstTokenMS); err != nil {
 			return err
+		}
+		if result.Diagnostics != nil {
+			encoded, err := json.Marshal(result.Diagnostics)
+			if err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, `UPDATE probe_results SET diagnostics_json = ?, capability=?, capability_status=? WHERE id = last_insert_rowid()`, string(encoded), result.Capability, result.CapabilityStatus); err != nil {
+				return err
+			}
 		}
 	}
 	cutoff := checkedAt.UTC().Add(-sqliteRetentionDays * 24 * time.Hour).Format(time.RFC3339)
@@ -802,6 +836,8 @@ func errorType(result probe.Result) string {
 	}
 	text := strings.ToLower(result.Error)
 	switch {
+	case result.CapabilityStatus == "assertion_failed":
+		return "assertion"
 	case strings.Contains(text, "timeout"):
 		return "timeout"
 	case strings.Contains(text, "no such host"), strings.Contains(text, "lookup"):

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"cg/internal/config"
+	"cg/internal/httpclient"
 	"cg/internal/provider"
 )
 
@@ -23,27 +24,31 @@ type Target struct {
 }
 
 type Result struct {
-	FirstTokenMS         int    `json:"first_token_ms,omitempty"`
-	Completed            bool   `json:"-"`
-	ProviderID           string `json:"provider_id"`
-	ProviderGroupID      string `json:"provider_group_id"`
-	ProviderType         string `json:"provider_type"`
-	ProviderName         string `json:"provider_name"`
-	ProviderLogo         string `json:"provider_logo"`
-	ProviderInstanceID   string `json:"provider_instance_id"`
-	ProviderInstanceName string `json:"provider_instance_name"`
-	CurrentModel         string `json:"current_model"`
-	Model                string `json:"model"`
-	IsCurrent            bool   `json:"is_current"`
-	Status               string `json:"status"`
-	LatencyMS            int    `json:"latency_ms"`
-	ResponsePreview      string `json:"response_preview"`
-	Error                string `json:"error"`
-	HistoryKey           string `json:"history_key"`
-	PromptTokens         int    `json:"prompt_tokens"`
-	CompletionTokens     int    `json:"completion_tokens"`
-	TotalTokens          int    `json:"total_tokens"`
-	CheckedAt            string `json:"checked_at"`
+	UsageKnown           bool                    `json:"usage_known"`
+	Capability           string                  `json:"capability,omitempty"`
+	CapabilityStatus     string                  `json:"capability_status,omitempty"`
+	Diagnostics          *httpclient.Diagnostics `json:"diagnostics,omitempty"`
+	FirstTokenMS         int                     `json:"first_token_ms,omitempty"`
+	Completed            bool                    `json:"-"`
+	ProviderID           string                  `json:"provider_id"`
+	ProviderGroupID      string                  `json:"provider_group_id"`
+	ProviderType         string                  `json:"provider_type"`
+	ProviderName         string                  `json:"provider_name"`
+	ProviderLogo         string                  `json:"provider_logo"`
+	ProviderInstanceID   string                  `json:"provider_instance_id"`
+	ProviderInstanceName string                  `json:"provider_instance_name"`
+	CurrentModel         string                  `json:"current_model"`
+	Model                string                  `json:"model"`
+	IsCurrent            bool                    `json:"is_current"`
+	Status               string                  `json:"status"`
+	LatencyMS            int                     `json:"latency_ms"`
+	ResponsePreview      string                  `json:"response_preview"`
+	Error                string                  `json:"error"`
+	HistoryKey           string                  `json:"history_key"`
+	PromptTokens         int                     `json:"prompt_tokens"`
+	CompletionTokens     int                     `json:"completion_tokens"`
+	TotalTokens          int                     `json:"total_tokens"`
+	CheckedAt            string                  `json:"checked_at"`
 }
 
 type ProviderError struct {
@@ -53,13 +58,28 @@ type ProviderError struct {
 }
 
 type Runner struct {
-	cfg       config.Config
-	providers []provider.Provider
-	mu        sync.Mutex
-	progress  Progress
-	observer  func(Progress)
-	guard     func(context.Context) error
-	runErr    error
+	cfg            config.Config
+	providers      []provider.Provider
+	mu             sync.Mutex
+	progress       Progress
+	observer       func(Progress)
+	guard          func(context.Context) error
+	runErr         error
+	catalog        func(context.Context, config.ProviderConfig, []string) ([]string, error)
+	slowThresholds map[string]int
+}
+
+func (r *Runner) SetSlowThresholds(schedules []config.ProviderSchedule) {
+	r.slowThresholds = map[string]int{}
+	for _, schedule := range schedules {
+		if schedule.SlowThresholdMS > 0 {
+			r.slowThresholds[schedule.ProviderID] = schedule.SlowThresholdMS
+		}
+	}
+}
+
+func (r *Runner) SetCatalogObserver(observer func(context.Context, config.ProviderConfig, []string) ([]string, error)) {
+	r.catalog = observer
 }
 
 func NewRunner(cfg config.Config) *Runner {
@@ -132,6 +152,22 @@ func (r *Runner) collectTargets(ctx context.Context) ([]Target, []ProviderError)
 		if len(models) == 0 {
 			providerErrors = append(providerErrors, ProviderError{ProviderID: item.ID(), ProviderType: item.Type(), Error: "no models returned"})
 			continue
+		}
+		if automatic && r.catalog != nil {
+			for _, configured := range r.cfg.Providers {
+				if configured.ID != item.ID() {
+					continue
+				}
+				models, err = r.catalog(ctx, configured, models)
+				if err != nil {
+					r.runErr = err
+					return targets, providerErrors
+				}
+				if len(models) == 0 {
+					providerErrors = append(providerErrors, ProviderError{ProviderID: item.ID(), ProviderType: item.Type(), Error: "model catalog requires approval"})
+				}
+				break
+			}
 		}
 		models = SelectModels(models, r.cfg.SkipModels, item.ID(), item.Name(), r.cfg.MaxModelsPerProvider)
 		current := ""
@@ -218,15 +254,45 @@ func (r *Runner) probeOne(ctx context.Context, target Target) (result Result) {
 	}()
 	started := time.Now()
 	timeout := r.cfg.TimeoutSeconds
+	options := config.ProbeOptions{}
 	for _, item := range r.cfg.Providers {
-		if item.ID == target.ProviderID && item.Probe.TimeoutSeconds > 0 {
-			timeout = item.Probe.TimeoutSeconds
+		if item.ID == target.ProviderID {
+			options = item.Probe
+			if item.Probe.TimeoutSeconds > 0 {
+				timeout = item.Probe.TimeoutSeconds
+			}
 			break
 		}
 	}
 	probeCtx, cancel := context.WithTimeout(ctx, durationSeconds(timeout))
 	defer cancel()
+	probeCtx, trace := httpclient.TraceContext(probeCtx)
+	defer func() {
+		secret := ""
+		for _, item := range r.cfg.Providers {
+			if item.ID == target.ProviderID {
+				secret = item.APIKey
+				break
+			}
+		}
+		result.Diagnostics = trace.Snapshot(secret)
+		result.Capability = options.Capability
+		if result.Capability == "" {
+			result.Capability = "text"
+		}
+		switch {
+		case result.Status == "ok" || result.Status == "slow":
+			result.CapabilityStatus = "passed"
+		case strings.Contains(result.Error, provider.ErrAssertion.Error()):
+			result.CapabilityStatus = "assertion_failed"
+		default:
+			result.CapabilityStatus = "request_failed"
+		}
+	}()
 	text, usage, err := target.Provider.Chat(probeCtx, target.Model, r.cfg.ProbeSystemPrompt, r.cfg.ProbePrompt)
+	if err == nil && options.Capability != "embedding" && options.Capability != "tools" {
+		err = provider.AssertText(text, options)
+	}
 	latency := int(time.Since(started).Milliseconds())
 	if err != nil {
 		if errors.Is(probeCtx.Err(), context.DeadlineExceeded) {
@@ -235,7 +301,11 @@ func (r *Runner) probeOne(ctx context.Context, target Target) (result Result) {
 		return resultPayload(target, "error", latency, "", shortError(err), usage)
 	}
 	status := "ok"
-	if latency >= r.cfg.SlowThresholdMS {
+	threshold := r.cfg.SlowThresholdMS
+	if configured := r.slowThresholds[target.ProviderID]; configured > 0 {
+		threshold = configured
+	}
+	if latency >= threshold {
 		status = "slow"
 	}
 	return resultPayload(target, status, latency, truncate(text, 80), "", usage)
@@ -243,6 +313,7 @@ func (r *Runner) probeOne(ctx context.Context, target Target) (result Result) {
 
 func resultPayload(target Target, status string, latency int, preview, errText string, usage provider.Usage) Result {
 	return Result{
+		UsageKnown:           usage.Known,
 		FirstTokenMS:         usage.FirstTokenMS,
 		ProviderID:           target.ProviderID,
 		ProviderGroupID:      target.ProviderID,

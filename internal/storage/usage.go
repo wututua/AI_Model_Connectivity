@@ -66,5 +66,8 @@ func appendUsage(ctx context.Context, tx *sql.Tx, results []probe.Result, checke
 		}
 	}
 	_, err = tx.ExecContext(ctx, `DELETE FROM usage_daily WHERE day < ?`, checkedAt.UTC().AddDate(0, 0, -364).Format(time.DateOnly))
-	return err
+	if err != nil {
+		return err
+	}
+	return appendCosts(ctx, tx, results, checkedAt)
 }

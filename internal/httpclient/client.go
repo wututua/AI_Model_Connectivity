@@ -80,7 +80,9 @@ func (transport *safeTransport) RoundTrip(request *http.Request) (*http.Response
 	if _, err := transport.addresses(request.Context(), request.URL.Hostname()); err != nil {
 		return nil, err
 	}
-	return transport.base.RoundTrip(request)
+	response, err := transport.base.RoundTrip(request)
+	captureResponse(request.Context(), response)
+	return response, err
 }
 
 func (transport *safeTransport) CloseIdleConnections() {

@@ -14,23 +14,51 @@ import (
 )
 
 type responseUsage struct {
-	InputTokens      int `json:"input_tokens"`
-	OutputTokens     int `json:"output_tokens"`
-	PromptTokens     int `json:"prompt_tokens"`
-	CompletionTokens int `json:"completion_tokens"`
-	TotalTokens      int `json:"total_tokens"`
+	inputReported      bool
+	outputReported     bool
+	promptReported     bool
+	completionReported bool
+	InputTokens        int `json:"input_tokens"`
+	OutputTokens       int `json:"output_tokens"`
+	PromptTokens       int `json:"prompt_tokens"`
+	CompletionTokens   int `json:"completion_tokens"`
+	TotalTokens        int `json:"total_tokens"`
+}
+
+func (u *responseUsage) UnmarshalJSON(data []byte) error {
+	type plain responseUsage
+	var value plain
+	if err := json.Unmarshal(data, &value); err != nil {
+		return err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	reported := func(key string) bool {
+		value, ok := fields[key]
+		return ok && string(value) != "null"
+	}
+	*u = responseUsage(value)
+	u.inputReported = reported("input_tokens") && u.InputTokens >= 0
+	u.outputReported = reported("output_tokens") && u.OutputTokens >= 0
+	u.promptReported = reported("prompt_tokens") && u.PromptTokens >= 0
+	u.completionReported = reported("completion_tokens") && u.CompletionTokens >= 0
+	return nil
 }
 
 func (u responseUsage) usage(responses bool, first int) Usage {
 	input, output := u.PromptTokens, u.CompletionTokens
+	known := u.promptReported && u.completionReported
 	if responses {
 		input, output = u.InputTokens, u.OutputTokens
+		known = u.inputReported && u.outputReported
 	}
 	total := u.TotalTokens
 	if total == 0 {
 		total = input + output
 	}
-	return Usage{PromptTokens: max(0, input), CompletionTokens: max(0, output), TotalTokens: max(0, total), FirstTokenMS: first}
+	return Usage{Known: known, PromptTokens: max(0, input), CompletionTokens: max(0, output), TotalTokens: max(0, total), FirstTokenMS: first}
 }
 
 type responsesBody struct {

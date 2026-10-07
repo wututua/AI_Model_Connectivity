@@ -12,6 +12,7 @@ var ErrNotRetryable = errors.New("只能重试失败或结果未知的通知")
 var ErrResultNotSaved = errors.New("通知已尝试发送，但结果无法落库；请核对接收端后再重试")
 
 type Delivery struct {
+	RuleID       string `json:"rule_id,omitempty"`
 	ID           int64  `json:"id"`
 	Kind         string `json:"kind"`
 	RetryOf      int64  `json:"retry_of"`
@@ -38,6 +39,15 @@ type DeliveryStore interface {
 
 func (c *Client) SetHistory(store DeliveryStore) {
 	c.history = store
+}
+
+func (c *Client) SetRuleID(id string) { c.ruleID = id }
+
+func (c *Client) SendOperational(ctx context.Context, title, summary string) (Delivery, error) {
+	if !c.enabled() {
+		return Delivery{}, ErrNotConfigured
+	}
+	return c.deliver(ctx, "operations", 0, summary, payload{Status: "NOTICE", Title: title, Summary: summary, Text: summary, GeneratedAt: time.Now().UTC().Format(time.RFC3339), ProviderText: []string{}})
 }
 
 func (c *Client) SendTest(ctx context.Context) (Delivery, error) {
@@ -74,7 +84,8 @@ func (c *Client) deliver(ctx context.Context, kind string, retryOf int64, summar
 	defer c.httpClient.CloseIdleConnections()
 	started := time.Now()
 	record := Delivery{
-		Kind: kind, RetryOf: retryOf, Platform: c.platform(), Status: "sending",
+		RuleID: c.ruleID,
+		Kind:   kind, RetryOf: retryOf, Platform: c.platform(), Status: "sending",
 		CreatedAt: started.UTC().Format(time.RFC3339Nano), Summary: summary,
 	}
 	if c.history != nil {

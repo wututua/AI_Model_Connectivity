@@ -20,11 +20,13 @@ import { UsersTab } from './admin/UsersTab'
 import { NotificationsTab } from './admin/NotificationsTab'
 import { OperationsTab } from './admin/OperationsTab'
 import { UpdatesTab } from './admin/UpdatesTab'
+import { MonitoringTab } from './admin/MonitoringTab'
 
-type Tab = 'overview' | 'providers' | 'settings' | 'tasks' | 'billing' | 'config' | 'users' | 'account' | 'notifications' | 'operations' | 'updates'
+type Tab = 'overview' | 'providers' | 'settings' | 'tasks' | 'billing' | 'config' | 'users' | 'account' | 'notifications' | 'operations' | 'updates' | 'monitoring'
 const TABS: { id: Tab; label: string; icon: ComponentType<{ className?: string }>; ownerOnly?: boolean }[] = [
   { id: 'overview', label: '运行概览', icon: LayoutDashboard },
   { id: 'providers', label: 'Provider', icon: Database },
+  { id: 'monitoring', label: '监控中心', icon: Activity, ownerOnly: true },
   { id: 'settings', label: '系统设置', icon: Settings2, ownerOnly: true },
   { id: 'tasks', label: '任务历史', icon: Clock3 },
   { id: 'notifications', label: '通知记录', icon: Bell, ownerOnly: true },
@@ -91,6 +93,7 @@ export default function Admin() {
         <div key={`${activeTab}:${user.role}`} className="animate-enter">
           {activeTab === 'overview' && <OverviewTab readOnly={readOnly} />}
           {activeTab === 'providers' && <ProvidersTab readOnly={readOnly} />}
+          {activeTab === 'monitoring' && !readOnly && <MonitoringTab />}
           {activeTab === 'settings' && !readOnly && <SettingsTab />}
           {activeTab === 'tasks' && <TasksTab />}
           {activeTab === 'notifications' && !readOnly && <NotificationsTab />}

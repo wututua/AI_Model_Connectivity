@@ -36,6 +36,7 @@ func (s FileStateStore) Write(value State) error {
 }
 
 type Client struct {
+	ruleID     string
 	cfg        config.Config
 	stateStore StateStore
 	httpClient *http.Client

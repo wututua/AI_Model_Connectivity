@@ -18,7 +18,7 @@ export function ProviderCard({ provider, showError, compact, now, staleAfterSeco
   const [failedLogo, setFailedLogo] = useState('')
   const [collapsed, setCollapsed] = useState(false)
   const id = useId()
-  const updated = relativeTime(provider.checked_at ?? '', now, staleAfterSeconds)
+  const updated = relativeTime(provider.checked_at ?? '', now, provider.stale_after_seconds || staleAfterSeconds)
 
   return (
     <section className="provider-section animate-enter" style={{ animationDelay: `${animDelay}ms` }} aria-labelledby={`${id}-title`}>

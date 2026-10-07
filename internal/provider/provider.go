@@ -12,10 +12,11 @@ import (
 // runtimes or proxies omit the field) — callers should not treat 0 as
 // "no tokens charged" for billing purposes.
 type Usage struct {
-	FirstTokenMS     int `json:"first_token_ms,omitempty"`
-	PromptTokens     int `json:"prompt_tokens"`
-	CompletionTokens int `json:"completion_tokens"`
-	TotalTokens      int `json:"total_tokens"`
+	Known            bool `json:"known"`
+	FirstTokenMS     int  `json:"first_token_ms,omitempty"`
+	PromptTokens     int  `json:"prompt_tokens"`
+	CompletionTokens int  `json:"completion_tokens"`
+	TotalTokens      int  `json:"total_tokens"`
 }
 
 type Provider interface {

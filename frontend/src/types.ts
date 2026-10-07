@@ -29,6 +29,7 @@ export interface ModelResult {
 }
 
 export interface ProviderReport {
+  stale_after_seconds?: number
   connection_revision?: string
   checked_at?: string
   unknown_count?: number
@@ -259,8 +260,9 @@ export interface BillingSummary {
 }
 
 export interface NotificationDelivery {
+  rule_id?: string
   id: number
-  kind: 'alert' | 'test' | 'retry'
+  kind: 'alert' | 'test' | 'retry' | 'operations'
   retry_of: number
   platform: string
   status: 'sending' | 'success' | 'error' | 'unknown'
@@ -273,6 +275,10 @@ export interface NotificationDelivery {
 }
 
 export interface ProbeOptions {
+  capability?: string
+  assert_contains?: string
+  assert_json?: boolean
+  assert_json_keys?: string
   protocol: string
   stream: boolean
   max_tokens: number

@@ -18,6 +18,10 @@ type OperationsSettings struct {
 }
 
 type ProbeOptions struct {
+	Capability       string  `json:"capability"`
+	AssertContains   string  `json:"assert_contains"`
+	AssertJSON       bool    `json:"assert_json"`
+	AssertJSONKeys   string  `json:"assert_json_keys"`
 	Protocol         string  `json:"protocol"`
 	Stream           bool    `json:"stream"`
 	MaxTokens        int     `json:"max_tokens"`
@@ -48,6 +52,15 @@ type ProviderBatch struct {
 }
 
 func (p ProbeOptions) Validate() error {
+	if p.Capability != "" && p.Capability != "text" && p.Capability != "tools" && p.Capability != "embedding" {
+		return errors.New("unsupported capability")
+	}
+	if (p.Capability == "tools" || p.Capability == "embedding") && (p.Stream || p.Protocol == "responses") {
+		return errors.New("tools and embedding probes require non-streaming Chat configuration")
+	}
+	if len(p.AssertContains) > 4096 || len(p.AssertJSONKeys) > 1024 {
+		return errors.New("assertion too long")
+	}
 	if p.Protocol != "" && p.Protocol != "chat" && p.Protocol != "responses" {
 		return errors.New("probe.protocol must be chat or responses")
 	}
