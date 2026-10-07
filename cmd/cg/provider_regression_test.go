@@ -114,8 +114,14 @@ func TestConnectionChangesInvalidateCurrentStatusOnly(t *testing.T) {
 			unaffected.ID = "other"
 			app.cfg.Providers = []config.ProviderConfig{fixtureProvider(), unaffected}
 			original := seedProviderStatus(t, app)
-			historyBefore, _ := app.store.LoadHistory(ctx, 100, 7)
-			billingBefore, _ := app.store.LoadBillingSummary(ctx, 7)
+			historyBefore, err := app.store.LoadHistory(ctx, 100, 7)
+			if err != nil {
+				t.Fatal(err)
+			}
+			billingBefore, err := app.store.LoadBillingSummary(ctx, 7)
+			if err != nil {
+				t.Fatal(err)
+			}
 			app.broker = web.NewBroker()
 			events, unsubscribe := app.broker.Subscribe()
 			defer unsubscribe()
@@ -132,7 +138,6 @@ func TestConnectionChangesInvalidateCurrentStatusOnly(t *testing.T) {
 			case "rename":
 				draft.Name = "Cosmetic rename"
 			}
-			var err error
 			if change == "import" {
 				_, err = app.ImportConfig(ctx, config.ConfigImport{Settings: config.SettingsFromConfig(app.cfg),
 					Providers: []config.ProviderUpdate{draft, providerDraft(app.cfg.Providers[1])}})
@@ -161,10 +166,22 @@ func TestConnectionChangesInvalidateCurrentStatusOnly(t *testing.T) {
 				!reflect.DeepEqual(got.Providers[1], original.Providers[1]) {
 				t.Fatal("unaffected provider, history or check timestamp changed")
 			}
-			historyAfter, _ := app.store.LoadHistory(ctx, 100, 7)
-			billingAfter, _ := app.store.LoadBillingSummary(ctx, 7)
-			if !reflect.DeepEqual(historyBefore, historyAfter) || !reflect.DeepEqual(billingBefore, billingAfter) {
-				t.Fatal("config update changed history or billing")
+			historyAfter, err := app.store.LoadHistory(ctx, 100, 7)
+			if err != nil {
+				t.Fatal(err)
+			}
+			billingAfter, err := app.store.LoadBillingSummary(ctx, 7)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(historyBefore, historyAfter) {
+				t.Fatalf("config update changed history: before=%+v after=%+v", historyBefore, historyAfter)
+			}
+			// Window timestamps describe the query time, not persisted billing data.
+			billingBefore.RangeStart, billingBefore.RangeEnd = "", ""
+			billingAfter.RangeStart, billingAfter.RangeEnd = "", ""
+			if !reflect.DeepEqual(billingBefore, billingAfter) {
+				t.Fatalf("config update changed billing: before=%+v after=%+v", billingBefore, billingAfter)
 			}
 			select {
 			case pushed := <-events:
